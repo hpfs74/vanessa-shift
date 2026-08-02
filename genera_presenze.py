@@ -15,59 +15,13 @@ from datetime import date, timedelta
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.chart.label import DataLabelList
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-# --- Codici turno: unica fonte di verita', il foglio "Codici" li ricopia ---
-# (codice, descrizione, inizio, fine, ore)
-CODICI = [
-    ("L",  "Libero",            "",      "",      0),
-    ("M",  "Mattina",           "07:00", "13:00", 6),
-    ("M1", "Mattina lunga",     "07:00", "14:00", 7),
-    ("P",  "Pomeriggio",        "13:00", "20:00", 7),
-    ("P1", "Pomeriggio lungo",  "13:00", "21:00", 8),
-]
-# Fette della torta: solo i turni lavorati (Libero vale 0 ore, non comparirebbe)
-TURNI_LAVORATI = [c for c in CODICI if c[4] > 0]
-
-# Scambi turno. Il segno dice da che parte sta il favore:
-#   +1 = la collega mi deve un favore, -1 = lo devo io, 0 = pari e patta.
-TIPI_SCAMBIO = ["Ho coperto", "Mi ha coperto", "Scambio pari"]
-SEGNO_SCAMBIO = {"Ho coperto": 1, "Mi ha coperto": -1, "Scambio pari": 0}
-N_COLLEGHE = 10  # righe disponibili nell'elenco colleghe
-
-MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
-        "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
-GIORNI = ["Lunedi", "Martedi", "Mercoledi", "Giovedi", "Venerdi", "Sabato", "Domenica"]
-
-# --- Palette ---
-BLU_SCURO = "1F3A5F"
-GRIGIO_INT = "EDF1F5"   # righe feriali alternate / intestazioni secondarie
-AZZURRO = "DCE9F5"      # weekend
-VERDE = "E8F3EA"        # celle di input
-BORDO = Side(style="thin", color="C3CDD8")
-BOX = Border(left=BORDO, right=BORDO, top=BORDO, bottom=BORDO)
-
-
-def intesta(ws, riga, valori, larghezze=None):
-    """Scrive una riga di intestazione in stile scuro."""
-    for i, v in enumerate(valori, start=1):
-        c = ws.cell(row=riga, column=i, value=v)
-        c.font = Font(bold=True, color="FFFFFF", size=11)
-        c.fill = PatternFill("solid", fgColor=BLU_SCURO)
-        c.alignment = Alignment(horizontal="center", vertical="center")
-        c.border = BOX
-    ws.row_dimensions[riga].height = 24
-    if larghezze:
-        for i, w in enumerate(larghezze, start=1):
-            ws.column_dimensions[get_column_letter(i)].width = w
-
-
-def titolo(ws, cella, testo, size=16):
-    c = ws[cella]
-    c.value = testo
-    c.font = Font(bold=True, size=size, color=BLU_SCURO)
+from comune import (AZZURRO, BLU_SCURO, BOX, CODICI, GIORNI, GRIGIO_INT, MESI,
+                    N_COLLEGHE, TIPI_SCAMBIO, TURNI_LAVORATI, VERDE, intesta,
+                    titolo)
 
 
 def foglio_codici(wb):

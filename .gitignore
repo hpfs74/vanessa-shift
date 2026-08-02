@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 *.xlsx
 *.numbers
+node_modules/
+dist/
+cdk.out/
+.vitest/

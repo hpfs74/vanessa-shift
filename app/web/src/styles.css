@@ -1,0 +1,248 @@
+/* Mobile first. Wider screens only get more breathing room, never a
+   different structure: the phone is where this app is actually used. */
+
+:root {
+  --navy: #1f3a5f;
+  --grey: #edf1f5;
+  --border: #c3cdd8;
+  --text: #14202f;
+  --muted: #5a6b7d;
+  --bg: #f7f9fb;
+  --weekday: #ffffff;
+  --saturday: #dce9f5;
+  --sunday: #f3dce4;
+  --holiday: #fae6b8;
+  --M: #fff4cc;
+  --M1: #ffe8a3;
+  --P: #ffe0c2;
+  --P1: #ffcfa0;
+  --L: #edf1f5;
+  --tap: 44px; /* smallest comfortable target for a thumb */
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  overscroll-behavior-y: contain;
+}
+
+/* 16px on inputs stops iOS Safari zooming in when they take focus. */
+input, select, textarea, button { font: inherit; font-size: 16px; }
+
+.app {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 0.75rem 0.6rem;
+  /* Room for the fixed tab bar plus the home indicator. */
+  padding-bottom: calc(4.6rem + env(safe-area-inset-bottom));
+}
+
+header { padding-top: env(safe-area-inset-top); }
+h1 { font-size: 1.2rem; margin: 0 0 0.5rem; color: var(--navy); }
+h2 { font-size: 1.05rem; margin: 1rem 0 0.5rem; color: var(--navy); }
+h3 {
+  font-size: 0.9rem; margin: 1.1rem 0 0.4rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+button {
+  cursor: pointer; color: var(--text); background: #fff;
+  border: 1px solid var(--border); border-radius: 8px;
+}
+button:disabled { opacity: 0.35; cursor: default; }
+button.primary { background: var(--navy); color: #fff; border-color: var(--navy); font-weight: 600; }
+button.danger { color: #8d2020; border-color: #e5b4b4; background: #fdeaea; }
+button.link { border: 0; background: none; color: var(--navy); text-decoration: underline; padding: 0.5rem; }
+button.wide { width: 100%; min-height: var(--tap); margin-top: 0.75rem; }
+
+/* --- bottom tab bar --- */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px;
+  background: #fff; border-top: 1px solid var(--border);
+  padding: 0.25rem 0.25rem calc(0.25rem + env(safe-area-inset-bottom));
+}
+.tabbar button {
+  border: 0; background: none; border-radius: 8px;
+  min-height: var(--tap); padding: 0.25rem 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font-size: 0.62rem; color: var(--muted);
+}
+.tabbar button span { font-size: 1.05rem; line-height: 1; }
+.tabbar button[aria-current="true"] { color: var(--navy); background: var(--grey); font-weight: 700; }
+
+/* --- month navigation --- */
+.month-nav { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin: 0.5rem 0; }
+.month-nav h2 { margin: 0; flex: 1; text-align: center; }
+.month-nav button { min-width: var(--tap); min-height: var(--tap); border-radius: 999px; font-size: 1.3rem; line-height: 1; }
+
+/* --- calendar --- */
+.grid { display: grid; grid-template-columns: repeat(7, 1fr) 2.1rem; gap: 2px; }
+.header-row { margin-bottom: 2px; }
+.header-cell {
+  background: var(--navy); color: #fff; font-size: 0.7rem; font-weight: 600;
+  text-align: center; padding: 0.3rem 0; border-radius: 4px;
+}
+
+.day {
+  text-align: center; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--weekday); padding: 0.2rem 0.05rem; min-height: 3.5rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 1px;
+  -webkit-tap-highlight-color: transparent;
+}
+.day.empty { background: var(--bg); border-color: transparent; }
+.day.week-hours {
+  background: var(--grey); font-weight: 700; color: var(--navy);
+  font-size: 0.7rem; justify-content: center; padding: 0;
+}
+.d-saturday { background: var(--saturday); }
+.d-sunday { background: var(--sunday); }
+.d-holiday { background: var(--holiday); }
+.d-holiday .day-number { color: #b03030; }
+/* A day whose hours were set by hand: the dashed underline says "this cell
+   does not follow its shift", without stealing the colour that codes the shift. */
+.has-override .time {
+  font-style: italic; font-weight: 700; color: var(--navy);
+  text-decoration: underline dashed; text-underline-offset: 2px;
+}
+.is-today { box-shadow: inset 0 0 0 2px var(--navy); }
+.is-today .day-number {
+  background: var(--navy); color: #fff; border-radius: 999px;
+  min-width: 1.15rem; display: inline-block;
+}
+.selected { outline: 2px solid var(--navy); outline-offset: 1px; }
+.day-number { font-size: 0.75rem; font-weight: 700; }
+.code { font-size: 0.9rem; font-weight: 700; }
+.time { font-size: 0.5rem; color: var(--muted); }
+.swap-dot {
+  display: inline-block; width: 4px; height: 4px; border-radius: 50%;
+  background: var(--navy); vertical-align: super; margin-left: 1px;
+}
+.day.t-M { background: var(--M); }
+.day.t-M1 { background: var(--M1); }
+.day.t-P { background: var(--P); }
+.day.t-P1 { background: var(--P1); }
+.day.t-L { background: var(--L); }
+.month-total { margin: 0.7rem 0; color: var(--navy); }
+
+/* --- bottom sheet --- */
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  max-height: 88vh; display: flex; flex-direction: column;
+  background: #fff; border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0; box-shadow: 0 -6px 26px rgb(0 0 0 / 18%);
+}
+.sheet-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border); color: var(--navy);
+}
+.sheet-body {
+  overflow-y: auto; padding: 0.75rem 0.8rem;
+  display: flex; flex-direction: column; gap: 0.75rem;
+  -webkit-overflow-scrolling: touch;
+}
+.sheet-actions {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
+  padding: 0.6rem 0.8rem calc(0.6rem + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+}
+.sheet-actions button { min-height: var(--tap); }
+
+fieldset {
+  border: 1px solid var(--border); border-radius: 10px; padding: 0.6rem; margin: 0;
+  display: flex; flex-direction: column; gap: 0.6rem;
+}
+legend {
+  font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.05em; padding: 0 0.3rem;
+}
+
+.codes { display: grid; grid-template-columns: repeat(auto-fit, minmax(4.2rem, 1fr)); gap: 0.4rem; }
+.code-btn {
+  min-height: 3.4rem; padding: 0.4rem 0.2rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+}
+.code-btn span { font-size: 0.58rem; color: var(--muted); text-align: center; }
+.code-btn small { font-size: 0.52rem; color: var(--muted); }
+.code-btn.t-M { background: var(--M); }
+.code-btn.t-M1 { background: var(--M1); }
+.code-btn.t-P { background: var(--P); }
+.code-btn.t-P1 { background: var(--P1); }
+.code-btn.t-L { background: var(--L); }
+.code-btn.on { outline: 2px solid var(--navy); outline-offset: 1px; }
+
+.toggle { min-height: var(--tap); text-align: left; padding: 0 0.6rem; color: var(--navy); }
+
+label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.78rem; color: var(--muted); }
+input, select, textarea {
+  padding: 0.6rem 0.55rem; border: 1px solid var(--border); border-radius: 8px;
+  background: #fff; color: var(--text); min-height: var(--tap); width: 100%;
+}
+textarea { min-height: 3.5rem; resize: vertical; }
+.settings input { background: #e8f3ea; }
+.settings { display: grid; grid-template-columns: 1fr; gap: 0.6rem; }
+.hint { margin: 0; font-size: 0.75rem; color: var(--muted); }
+
+/* --- tables --- */
+.scroll-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
+caption { text-align: left; font-size: 0.75rem; color: var(--muted); padding: 0.3rem 0; }
+th, td { border: 1px solid var(--border); padding: 0.3rem 0.4rem; text-align: right; white-space: nowrap; }
+thead th { background: var(--navy); color: #fff; }
+tbody th, tfoot th { text-align: left; }
+tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
+
+/* --- swap cards --- */
+.cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.card { border: 1px solid var(--border); border-radius: 10px; background: #fff; padding: 0.6rem 0.7rem; }
+.card-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 0.4rem; color: var(--navy);
+}
+.card dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.2rem 0.6rem; margin: 0; font-size: 0.78rem; }
+.card dl > div { display: flex; justify-content: space-between; gap: 0.4rem; }
+.card dt { color: var(--muted); }
+.card dd { margin: 0; font-weight: 600; }
+.good { color: #1f7a44; }
+.bad { color: #8d2020; }
+
+/* --- bars --- */
+.bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.bars li { display: grid; grid-template-columns: 2.2rem 1fr 2.2rem; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
+.bar-label { color: var(--muted); }
+.bar-track { background: var(--grey); border-radius: 999px; height: 0.75rem; overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: var(--navy); border-radius: 999px; }
+.bar-value { text-align: right; font-weight: 600; color: var(--navy); }
+
+/* --- messages --- */
+.note { font-size: 0.76rem; color: var(--muted); }
+.summary-line { color: var(--navy); }
+.error {
+  background: #fdeaea; border: 1px solid #e5b4b4; color: #8d2020;
+  padding: 0.5rem 0.65rem; border-radius: 8px; font-size: 0.8rem;
+}
+.ok {
+  background: #e8f3ea; border: 1px solid #b6d8c0; color: #1f7a44;
+  padding: 0.5rem 0.65rem; border-radius: 8px; font-size: 0.8rem;
+}
+.waiting { color: var(--muted); }
+
+.bulk { display: flex; flex-direction: column; gap: 0.6rem; }
+
+@media (min-width: 30rem) {
+  .app { padding: 1rem; padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+  h1 { font-size: 1.35rem; }
+  .day { min-height: 4rem; }
+  .day-number { font-size: 0.8rem; }
+  .code { font-size: 1rem; }
+  .time { font-size: 0.58rem; }
+  .settings { grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
+  .tabbar button { font-size: 0.68rem; }
+}

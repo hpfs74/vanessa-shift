@@ -1,0 +1,168 @@
+/** DynamoDB access. The only place that knows the table's shape. */
+
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import {
+  BatchWriteCommand,
+  DeleteCommand,
+  DynamoDBDocumentClient,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+} from '@aws-sdk/lib-dynamodb';
+
+import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, parseIso } from '@vanessa/core';
+
+export interface ShiftRecord {
+  date: IsoDate;
+  code: ShiftCode;
+  /** Hours actually worked, when they differed from the shift's own. */
+  hoursOverride?: number | null;
+  originalCode?: ShiftCode | null;
+  colleague?: string | null;
+  swapKind?: string | null;
+  notes?: string | null;
+}
+
+export const CONFIG_PK = 'CONFIG';
+export const CONFIG_SK = 'PAY';
+
+export function shiftsPk(year: number): string {
+  return `SHIFTS#${year}`;
+}
+
+export interface Repo {
+  shiftsBetween(from: IsoDate, to: IsoDate): Promise<ShiftRecord[]>;
+  saveShift(s: ShiftRecord): Promise<void>;
+  deleteShift(date: IsoDate): Promise<void>;
+  /** Writes many days at once. Used by the bulk-entry screen. */
+  saveShifts(shifts: readonly ShiftRecord[]): Promise<void>;
+  readPaySettings(): Promise<PaySettings>;
+  savePaySettings(p: PaySettings): Promise<void>;
+}
+
+/** DynamoDB writes at most 25 items per BatchWrite call. */
+export const BATCH_LIMIT = 25;
+
+function chunk<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** A range can cross new year: one query per year. */
+function yearsCovered(from: IsoDate, to: IsoDate): number[] {
+  const first = parseIso(from).year;
+  const last = parseIso(to).year;
+  const out: number[] = [];
+  for (let y = first; y <= last; y++) out.push(y);
+  return out;
+}
+
+/** One day's item. Absent optional fields are left out rather than stored
+ *  as null: an attribute that is not there reads unambiguously as "not set". */
+function itemOf(s: ShiftRecord): Record<string, unknown> {
+  const { year } = parseIso(s.date);
+  return {
+    pk: shiftsPk(year),
+    sk: s.date,
+    code: s.code,
+    // Zero is a real override: check for null, not for falsiness.
+    ...(s.hoursOverride == null ? {} : { hoursOverride: s.hoursOverride }),
+    ...(s.originalCode ? { originalCode: s.originalCode } : {}),
+    ...(s.colleague ? { colleague: s.colleague } : {}),
+    ...(s.swapKind ? { swapKind: s.swapKind } : {}),
+    ...(s.notes ? { notes: s.notes } : {}),
+  };
+}
+
+export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo {
+  const doc = client ?? DynamoDBDocumentClient.from(new DynamoDBClient({}));
+
+  return {
+    async shiftsBetween(from, to) {
+      const shifts: ShiftRecord[] = [];
+      for (const year of yearsCovered(from, to)) {
+        let exclusiveStartKey: Record<string, unknown> | undefined;
+        do {
+          const r = await doc.send(
+            new QueryCommand({
+              TableName: table,
+              KeyConditionExpression: 'pk = :pk AND sk BETWEEN :from AND :to',
+              ExpressionAttributeValues: { ':pk': shiftsPk(year), ':from': from, ':to': to },
+              ExclusiveStartKey: exclusiveStartKey,
+            }),
+          );
+          for (const item of r.Items ?? []) {
+            shifts.push({
+              date: item.sk as IsoDate,
+              code: item.code as ShiftCode,
+              hoursOverride:
+                typeof item.hoursOverride === 'number' ? item.hoursOverride : null,
+              originalCode: (item.originalCode as ShiftCode | undefined) ?? null,
+              colleague: (item.colleague as string | undefined) ?? null,
+              swapKind: (item.swapKind as string | undefined) ?? null,
+              notes: (item.notes as string | undefined) ?? null,
+            });
+          }
+          exclusiveStartKey = r.LastEvaluatedKey;
+        } while (exclusiveStartKey);
+      }
+      shifts.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+      return shifts;
+    },
+
+    async saveShift(s) {
+      await doc.send(new PutCommand({ TableName: table, Item: itemOf(s) }));
+    },
+
+    async saveShifts(shifts) {
+      // BatchWrite can return unprocessed items under load: retrying them is
+      // the difference between "a month was saved" and "most of a month was".
+      for (const group of chunk(shifts, BATCH_LIMIT)) {
+        let pending = group.map((s) => ({ PutRequest: { Item: itemOf(s) } }));
+        for (let attempt = 0; pending.length > 0 && attempt < 5; attempt++) {
+          const r = await doc.send(
+            new BatchWriteCommand({ RequestItems: { [table]: pending } }),
+          );
+          pending = (r.UnprocessedItems?.[table] ?? []) as typeof pending;
+        }
+        if (pending.length > 0) {
+          throw new Error(`${pending.length} giorni non salvati, riprova`);
+        }
+      }
+    },
+
+    async deleteShift(date) {
+      const { year } = parseIso(date);
+      await doc.send(
+        new DeleteCommand({ TableName: table, Key: { pk: shiftsPk(year), sk: date } }),
+      );
+    },
+
+    async readPaySettings() {
+      const r = await doc.send(
+        new GetCommand({ TableName: table, Key: { pk: CONFIG_PK, sk: CONFIG_SK } }),
+      );
+      if (!r.Item) return EMPTY_PAY_SETTINGS;
+      const num = (v: unknown): number | null => (typeof v === 'number' ? v : null);
+      return {
+        hourlyRate: num(r.Item.hourlyRate),
+        saturdayPremium: num(r.Item.saturdayPremium),
+        sundayPremium: num(r.Item.sundayPremium),
+        holidayPremium: num(r.Item.holidayPremium),
+        thirteenthAccrual: num(r.Item.thirteenthAccrual),
+        netRatio: num(r.Item.netRatio),
+      };
+    },
+
+    async savePaySettings(p) {
+      await doc.send(
+        new PutCommand({
+          TableName: table,
+          Item: { pk: CONFIG_PK, sk: CONFIG_SK, ...p },
+        }),
+      );
+    },
+  };
+}

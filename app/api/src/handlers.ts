@@ -13,6 +13,8 @@ import {
   requirePaySettings,
   requireRange,
   requireShiftCode,
+  requireShiftList,
+  requireSwapKind,
 } from './http.js';
 
 function repoFromEnvironment(): Repo {
@@ -51,11 +53,20 @@ export function putShiftWith(repo: Repo) {
             ? null
             : requireShiftCode(b.originalCode),
         colleague: optionalText(b.colleague, 'colleague'),
-        swapKind: optionalText(b.swapKind, 'swapKind', 40),
+        swapKind: requireSwapKind(b.swapKind),
         notes: optionalText(b.notes, 'notes', 500),
       };
       await repo.saveShift(record);
       return ok({ shift: record });
+    });
+}
+
+export function putShiftsWith(repo: Repo) {
+  return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
+    handle(async () => {
+      const shifts = requireShiftList(parseJson(event.body));
+      await repo.saveShifts(shifts);
+      return ok({ saved: shifts.length });
     });
 }
 
@@ -77,5 +88,6 @@ export function putConfigWith(repo: Repo) {
 // Production Lambda entry points.
 export const getShifts = (e: APIGatewayProxyEventV2) => getShiftsWith(repoFromEnvironment())(e);
 export const putShift = (e: APIGatewayProxyEventV2) => putShiftWith(repoFromEnvironment())(e);
+export const putShifts = (e: APIGatewayProxyEventV2) => putShiftsWith(repoFromEnvironment())(e);
 export const getConfig = (e: APIGatewayProxyEventV2) => getConfigWith(repoFromEnvironment())(e);
 export const putConfig = (e: APIGatewayProxyEventV2) => putConfigWith(repoFromEnvironment())(e);

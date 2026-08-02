@@ -4,7 +4,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { IsoDate, ShiftCode } from '@vanessa/core';
 import { EMPTY_PAY_SETTINGS } from '@vanessa/core';
 
-import { getConfigWith, getShiftsWith, putConfigWith, putShiftWith } from '../src/handlers.js';
+import {
+  getConfigWith,
+  getShiftsWith,
+  putConfigWith,
+  putShiftWith,
+  putShiftsWith,
+} from '../src/handlers.js';
 import type { Repo, ShiftRecord } from '../src/repo.js';
 
 /** In-memory repo: the tests never touch the network. */
@@ -23,6 +29,10 @@ function fakeRepo() {
     async saveShift(s) {
       calls.push(`saveShift(${s.date})`);
       shifts.set(s.date, s);
+    },
+    async saveShifts(many) {
+      calls.push(`saveShifts(${many.length})`);
+      for (const s of many) shifts.set(s.date, s);
     },
     async deleteShift(d) {
       calls.push(`deleteShift(${d})`);
@@ -178,6 +188,30 @@ describe('PUT /shifts/{date}', () => {
     }
   });
 
+  it('rejects an unknown swap kind', async () => {
+    const r: any = await putShiftWith(f.repo)(
+      event({
+        pathParameters: { date: '2026-01-05' },
+        body: JSON.stringify({ code: 'M', swapKind: 'Boh' }),
+      }),
+    );
+    expect(r.statusCode).toBe(400);
+    expect(body(r).errore).toMatch(/scambio/);
+    expect(f.shifts.size).toBe(0);
+  });
+
+  it('accepts the three swap kinds the sheet uses', async () => {
+    for (const kind of ['Ho coperto', 'Mi ha coperto', 'Scambio pari']) {
+      const r: any = await putShiftWith(f.repo)(
+        event({
+          pathParameters: { date: '2026-01-05' },
+          body: JSON.stringify({ code: 'M', originalCode: 'P', swapKind: kind }),
+        }),
+      );
+      expect(r.statusCode, kind).toBe(200);
+    }
+  });
+
   it('rejects overlong notes without saving anything', async () => {
     const r: any = await putShiftWith(f.repo)(
       event({
@@ -187,6 +221,71 @@ describe('PUT /shifts/{date}', () => {
     );
     expect(r.statusCode).toBe(400);
     expect(f.shifts.size).toBe(0);
+  });
+});
+
+describe('PUT /shifts (bulk)', () => {
+  it('saves a whole month in one call', async () => {
+    const shifts = Array.from({ length: 31 }, (_, i) => ({
+      date: `2026-01-${String(i + 1).padStart(2, '0')}`,
+      code: 'M' as const,
+    }));
+    const r: any = await putShiftsWith(f.repo)(event({ body: JSON.stringify({ shifts }) }));
+    expect(r.statusCode).toBe(200);
+    expect(body(r).saved).toBe(31);
+    expect(f.shifts.size).toBe(31);
+    expect(f.calls).toContain('saveShifts(31)');
+  });
+
+  it('overwrites days that were already there', async () => {
+    await f.repo.saveShift({ date: '2026-01-01', code: 'L' });
+    await putShiftsWith(f.repo)(
+      event({ body: JSON.stringify({ shifts: [{ date: '2026-01-01', code: 'P1' }] }) }),
+    );
+    expect(f.shifts.get('2026-01-01')).toMatchObject({ code: 'P1' });
+  });
+
+  it('rejects a duplicated day: the result would depend on write order', async () => {
+    const r: any = await putShiftsWith(f.repo)(
+      event({
+        body: JSON.stringify({
+          shifts: [
+            { date: '2026-01-01', code: 'M' },
+            { date: '2026-01-01', code: 'P' },
+          ],
+        }),
+      }),
+    );
+    expect(r.statusCode).toBe(400);
+    expect(body(r).errore).toMatch(/due volte/);
+    expect(f.shifts.size).toBe(0);
+  });
+
+  it('rejects the whole list when one entry is bad, saving nothing', async () => {
+    const r: any = await putShiftsWith(f.repo)(
+      event({
+        body: JSON.stringify({
+          shifts: [
+            { date: '2026-01-01', code: 'M' },
+            { date: '2026-01-02', code: 'X' },
+          ],
+        }),
+      }),
+    );
+    expect(r.statusCode).toBe(400);
+    expect(f.shifts.size).toBe(0);
+  });
+
+  it('rejects a missing, empty or oversized list', async () => {
+    for (const b of [
+      {},
+      { shifts: 'M,M,P' },
+      { shifts: [] },
+      { shifts: Array.from({ length: 400 }, (_, i) => ({ date: '2026-01-01', code: 'M' })) },
+    ]) {
+      const r: any = await putShiftsWith(f.repo)(event({ body: JSON.stringify(b) }));
+      expect(r.statusCode, JSON.stringify(b).slice(0, 40)).toBe(400);
+    }
   });
 });
 

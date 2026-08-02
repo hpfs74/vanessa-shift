@@ -87,12 +87,14 @@ describe('table', () => {
 });
 
 describe('lambdas', () => {
-  it('there are four, one per route', () => {
+  it('there is one per route', () => {
     const fn = app.findResources('AWS::Lambda::Function');
     const nostre = Object.values(fn).filter((f: any) =>
-      ['getShifts', 'putShift', 'getConfig', 'putConfig'].includes(f.Properties?.Handler?.split('.').pop()),
+      ['getShifts', 'putShift', 'putShifts', 'getConfig', 'putConfig'].includes(
+        f.Properties?.Handler?.split('.').pop(),
+      ),
     );
-    expect(nostre).toHaveLength(4);
+    expect(nostre).toHaveLength(5);
   });
 
   it('run on Node 22 and ARM', () => {
@@ -128,13 +130,14 @@ describe('lambdas', () => {
 });
 
 describe('api', () => {
-  it('exposes the four expected routes', () => {
+  it('exposes the five expected routes', () => {
     const rotte = Object.values(app.findResources('AWS::ApiGatewayV2::Route')).map(
       (r: any) => r.Properties.RouteKey,
     );
     expect(rotte).toEqual(
       expect.arrayContaining([
         'GET /shifts',
+        'PUT /shifts',
         'PUT /shifts/{date}',
         'GET /config',
         'PUT /config',

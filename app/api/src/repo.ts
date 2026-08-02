@@ -2,6 +2,7 @@
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
+  BatchWriteCommand,
   DeleteCommand,
   DynamoDBDocumentClient,
   GetCommand,
@@ -32,8 +33,19 @@ export interface Repo {
   shiftsBetween(from: IsoDate, to: IsoDate): Promise<ShiftRecord[]>;
   saveShift(s: ShiftRecord): Promise<void>;
   deleteShift(date: IsoDate): Promise<void>;
+  /** Writes many days at once. Used by the bulk-entry screen. */
+  saveShifts(shifts: readonly ShiftRecord[]): Promise<void>;
   readPaySettings(): Promise<PaySettings>;
   savePaySettings(p: PaySettings): Promise<void>;
+}
+
+/** DynamoDB writes at most 25 items per BatchWrite call. */
+export const BATCH_LIMIT = 25;
+
+function chunk<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
 /** A range can cross new year: one query per year. */
@@ -43,6 +55,21 @@ function yearsCovered(from: IsoDate, to: IsoDate): number[] {
   const out: number[] = [];
   for (let y = first; y <= last; y++) out.push(y);
   return out;
+}
+
+/** One day's item. Absent optional fields are left out rather than stored
+ *  as null: an attribute that is not there reads unambiguously as "not set". */
+function itemOf(s: ShiftRecord): Record<string, unknown> {
+  const { year } = parseIso(s.date);
+  return {
+    pk: shiftsPk(year),
+    sk: s.date,
+    code: s.code,
+    ...(s.originalCode ? { originalCode: s.originalCode } : {}),
+    ...(s.colleague ? { colleague: s.colleague } : {}),
+    ...(s.swapKind ? { swapKind: s.swapKind } : {}),
+    ...(s.notes ? { notes: s.notes } : {}),
+  };
 }
 
 export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo {
@@ -80,21 +107,24 @@ export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo
     },
 
     async saveShift(s) {
-      const { year } = parseIso(s.date);
-      await doc.send(
-        new PutCommand({
-          TableName: table,
-          Item: {
-            pk: shiftsPk(year),
-            sk: s.date,
-            code: s.code,
-            ...(s.originalCode ? { originalCode: s.originalCode } : {}),
-            ...(s.colleague ? { colleague: s.colleague } : {}),
-            ...(s.swapKind ? { swapKind: s.swapKind } : {}),
-            ...(s.notes ? { notes: s.notes } : {}),
-          },
-        }),
-      );
+      await doc.send(new PutCommand({ TableName: table, Item: itemOf(s) }));
+    },
+
+    async saveShifts(shifts) {
+      // BatchWrite can return unprocessed items under load: retrying them is
+      // the difference between "a month was saved" and "most of a month was".
+      for (const group of chunk(shifts, BATCH_LIMIT)) {
+        let pending = group.map((s) => ({ PutRequest: { Item: itemOf(s) } }));
+        for (let attempt = 0; pending.length > 0 && attempt < 5; attempt++) {
+          const r = await doc.send(
+            new BatchWriteCommand({ RequestItems: { [table]: pending } }),
+          );
+          pending = (r.UnprocessedItems?.[table] ?? []) as typeof pending;
+        }
+        if (pending.length > 0) {
+          throw new Error(`${pending.length} giorni non salvati, riprova`);
+        }
+      }
     },
 
     async deleteShift(date) {

@@ -35,7 +35,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface Api {
   shifts(from: IsoDate, to: IsoDate): Promise<RemoteShift[]>;
-  saveShift(date: IsoDate, code: ShiftCode | null): Promise<void>;
+  saveShift(shift: RemoteShift): Promise<void>;
+  deleteShift(date: IsoDate): Promise<void>;
+  saveShifts(shifts: readonly { date: IsoDate; code: ShiftCode }[]): Promise<void>;
   paySettings(): Promise<PaySettings>;
   savePaySettings(p: PaySettings): Promise<void>;
 }
@@ -47,11 +49,26 @@ export const api: Api = {
     );
     return r.shifts;
   },
-  async saveShift(date, code) {
+  async saveShift(shift) {
+    await request(`/shifts/${encodeURIComponent(shift.date)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        code: shift.code,
+        originalCode: shift.originalCode ?? '',
+        colleague: shift.colleague ?? '',
+        swapKind: shift.swapKind ?? '',
+        notes: shift.notes ?? '',
+      }),
+    });
+  },
+  async deleteShift(date) {
     await request(`/shifts/${encodeURIComponent(date)}`, {
       method: 'PUT',
-      body: JSON.stringify({ code: code ?? '' }),
+      body: JSON.stringify({ code: '' }),
     });
+  },
+  async saveShifts(shifts) {
+    await request('/shifts', { method: 'PUT', body: JSON.stringify({ shifts }) });
   },
   async paySettings() {
     const r = await request<{ pay: PaySettings }>('/config');

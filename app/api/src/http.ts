@@ -9,7 +9,7 @@
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 
 import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
-import { daysBetween, isIsoDate, isShiftCode } from '@vanessa/core';
+import { daysBetween, isIsoDate, isShiftCode, isSwapKind } from '@vanessa/core';
 
 export const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? 'https://vanessa.matteo.cool';
 
@@ -97,6 +97,42 @@ export function requirePaySettings(b: Record<string, unknown>): PaySettings {
     thirteenthAccrual: percentage(b.thirteenthAccrual, 'thirteenthAccrual'),
     netRatio: percentage(b.netRatio, 'netRatio'),
   };
+}
+
+export function requireSwapKind(v: unknown): string | null {
+  if (v === null || v === undefined || v === '') return null;
+  if (!isSwapKind(v)) throw new InvalidInput('swapKind: tipo di scambio sconosciuto');
+  return v;
+}
+
+/** A whole year at most: the bulk screen writes one month at a time. */
+export const MAX_BULK = 366;
+
+export function requireShiftList(b: Record<string, unknown>): {
+  date: IsoDate;
+  code: ShiftCode;
+}[] {
+  const raw = b.shifts;
+  if (!Array.isArray(raw)) throw new InvalidInput('shifts: atteso un elenco');
+  if (raw.length === 0) throw new InvalidInput('shifts: elenco vuoto');
+  if (raw.length > MAX_BULK) {
+    throw new InvalidInput(`shifts: troppi giorni, massimo ${MAX_BULK}`);
+  }
+  const seen = new Set<string>();
+  return raw.map((entry, i) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new InvalidInput(`shifts[${i}]: atteso un oggetto`);
+    }
+    const e = entry as Record<string, unknown>;
+    const date = requireDate(e.date, `shifts[${i}].date`);
+    // The same day twice would make the result depend on write order.
+    if (seen.has(date)) throw new InvalidInput(`shifts: ${date} compare due volte`);
+    seen.add(date);
+    if (!isShiftCode(e.code)) {
+      throw new InvalidInput(`shifts[${i}].code: codice turno sconosciuto`);
+    }
+    return { date, code: e.code };
+  });
 }
 
 export function optionalText(v: unknown, field: string, max = 200): string | null {

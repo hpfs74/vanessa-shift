@@ -1,72 +1,130 @@
-/** Visible text stays in Italian: Vanessa reads it. */
+/** Mobile first: bottom navigation, thumb-sized targets, bottom sheets.
+ *  Visible text stays in Italian: Vanessa reads it. */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS, MONTH_NAMES, SHIFTS } from '@vanessa/core';
+import type { DayRecord, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, MONTH_NAMES, knownColleagues } from '@vanessa/core';
 
+import { BulkEntry } from './BulkEntry.js';
 import { Calendar } from './Calendar.js';
+import { DayEditor } from './DayEditor.js';
 import { Pay } from './Pay.js';
-import { api as realApi, type Api } from './api.js';
+import { Summary } from './Summary.js';
+import { Swaps } from './Swaps.js';
+import { api as realApi, type Api, type RemoteShift } from './api.js';
 
 const YEAR = 2026;
+
+type View = 'calendar' | 'bulk' | 'swaps' | 'summary' | 'pay';
+
+const VIEWS: { id: View; label: string; icon: string }[] = [
+  { id: 'calendar', label: 'Calendario', icon: '▦' },
+  { id: 'bulk', label: 'Carica', icon: '⇥' },
+  { id: 'swaps', label: 'Scambi', icon: '⇄' },
+  { id: 'summary', label: 'Riepilogo', icon: '≡' },
+  { id: 'pay', label: 'Stipendio', icon: '€' },
+];
 
 export interface AppProps {
   api?: Api;
   initialMonth?: number;
+  initialView?: View;
 }
 
-export function App({ api = realApi, initialMonth = 1 }: AppProps) {
+export function App({ api = realApi, initialMonth = 1, initialView = 'calendar' }: AppProps) {
   const [month, setMonth] = useState(initialMonth);
-  const [view, setView] = useState<'calendar' | 'pay'>('calendar');
-  const [shifts, setShifts] = useState<Map<IsoDate, ShiftCode>>(new Map());
+  const [view, setView] = useState<View>(initialView);
+  const [days, setDays] = useState<Map<IsoDate, RemoteShift>>(new Map());
   const [settings, setSettings] = useState<PaySettings>(EMPTY_PAY_SETTINGS);
-  const [selected, setSelected] = useState<IsoDate | null>(null);
+  const [editing, setEditing] = useState<IsoDate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    const [s, p] = await Promise.all([
+      api.shifts(`${YEAR}-01-01`, `${YEAR}-12-31`),
+      api.paySettings(),
+    ]);
+    setDays(new Map(s.map((x) => [x.date, x])));
+    setSettings(p);
+  }, [api]);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([api.shifts(`${YEAR}-01-01`, `${YEAR}-12-31`), api.paySettings()])
-      .then(([s, p]) => {
-        if (!alive) return;
-        setShifts(new Map(s.map((x) => [x.date, x.code])));
-        setSettings(p);
-        setError(null);
-      })
+    reload()
+      .then(() => alive && setError(null))
       .catch((e: Error) => alive && setError(e.message))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
-  }, [api]);
+  }, [reload]);
+
+  const codes = useMemo(() => {
+    const m = new Map<IsoDate, ShiftCode>();
+    for (const [date, s] of days) m.set(date, s.code);
+    return m;
+  }, [days]);
+
+  const records = useMemo<DayRecord[]>(() => [...days.values()], [days]);
+  const colleagues = useMemo(() => knownColleagues(records), [records]);
 
   /** Optimistic: the cell changes at once, and rolls back if the network says no. */
-  const pickCode = useCallback(
-    async (d: IsoDate, code: ShiftCode | null) => {
-      const previous = shifts.get(d) ?? null;
-      setShifts((m) => {
-        const next = new Map(m);
-        if (code) next.set(d, code);
-        else next.delete(d);
-        return next;
-      });
-      setSelected(null);
+  const saveDay = useCallback(
+    async (shift: RemoteShift) => {
+      const previous = days.get(shift.date) ?? null;
+      setDays((m) => new Map(m).set(shift.date, shift));
+      setEditing(null);
       try {
-        await api.saveShift(d, code);
+        await api.saveShift(shift);
         setError(null);
       } catch (e) {
-        setShifts((m) => {
+        setDays((m) => {
           const next = new Map(m);
-          if (previous) next.set(d, previous);
-          else next.delete(d);
+          if (previous) next.set(shift.date, previous);
+          else next.delete(shift.date);
           return next;
         });
         setError((e as Error).message);
       }
     },
-    [api, shifts],
+    [api, days],
+  );
+
+  const deleteDay = useCallback(
+    async (date: IsoDate) => {
+      const previous = days.get(date) ?? null;
+      setDays((m) => {
+        const next = new Map(m);
+        next.delete(date);
+        return next;
+      });
+      setEditing(null);
+      try {
+        await api.deleteShift(date);
+        setError(null);
+      } catch (e) {
+        setDays((m) => (previous ? new Map(m).set(date, previous) : m));
+        setError((e as Error).message);
+      }
+    },
+    [api, days],
+  );
+
+  const saveBulk = useCallback(
+    async (entries: readonly { date: IsoDate; code: ShiftCode }[]) => {
+      try {
+        await api.saveShifts(entries);
+        await reload();
+        setError(null);
+      } catch (e) {
+        setError((e as Error).message);
+        throw e;
+      }
+    },
+    [api, reload],
   );
 
   const changeSettings = useCallback(
@@ -81,18 +139,6 @@ export function App({ api = realApi, initialMonth = 1 }: AppProps) {
     <div className="app">
       <header>
         <h1>Turni di Vanessa</h1>
-        <nav aria-label="Viste">
-          <button
-            type="button"
-            aria-current={view === 'calendar'}
-            onClick={() => setView('calendar')}
-          >
-            Calendario
-          </button>
-          <button type="button" aria-current={view === 'pay'} onClick={() => setView('pay')}>
-            Stipendio
-          </button>
-        </nav>
       </header>
 
       {error && (
@@ -101,73 +147,90 @@ export function App({ api = realApi, initialMonth = 1 }: AppProps) {
         </p>
       )}
 
-      {view === 'calendar' && (
-        <>
-          <div className="month-nav">
-            <button
-              type="button"
-              aria-label="Mese precedente"
-              disabled={month === 1}
-              onClick={() => setMonth((m) => Math.max(1, m - 1))}
-            >
-              ‹
-            </button>
-            <h2>
-              {MONTH_NAMES[month - 1]} {YEAR}
-            </h2>
-            <button
-              type="button"
-              aria-label="Mese successivo"
-              disabled={month === 12}
-              onClick={() => setMonth((m) => Math.min(12, m + 1))}
-            >
-              ›
-            </button>
-          </div>
-
-          {loading ? (
-            <p className="waiting">Carico i turni…</p>
-          ) : (
-            <Calendar
-              year={YEAR}
-              month={month}
-              shifts={shifts}
-              selected={selected}
-              onPick={setSelected}
-            />
-          )}
-        </>
-      )}
-
-      {view === 'pay' && (
-        <Pay year={YEAR} shifts={shifts} settings={settings} onChange={changeSettings} />
-      )}
-
-      {selected && (
-        <div className="picker" role="dialog" aria-label={`Turno del ${selected}`}>
-          <p>{selected}</p>
-          <div className="codes">
-            {SHIFTS.map((s) => (
+      <main>
+        {view === 'calendar' && (
+          <>
+            <div className="month-nav">
               <button
-                key={s.code}
                 type="button"
-                className={`t-${s.code}`}
-                onClick={() => void pickCode(selected, s.code)}
+                aria-label="Mese precedente"
+                disabled={month === 1}
+                onClick={() => setMonth((m) => Math.max(1, m - 1))}
               >
-                <strong>{s.code}</strong>
-                <span>{s.description}</span>
+                ‹
               </button>
-            ))}
-            <button type="button" onClick={() => void pickCode(selected, null)}>
-              <strong>×</strong>
-              <span>Cancella</span>
-            </button>
-          </div>
-          <button type="button" className="close" onClick={() => setSelected(null)}>
-            Chiudi
-          </button>
-        </div>
+              <h2>
+                {MONTH_NAMES[month - 1]} {YEAR}
+              </h2>
+              <button
+                type="button"
+                aria-label="Mese successivo"
+                disabled={month === 12}
+                onClick={() => setMonth((m) => Math.min(12, m + 1))}
+              >
+                ›
+              </button>
+            </div>
+
+            {loading ? (
+              <p className="waiting">Carico i turni…</p>
+            ) : (
+              <Calendar
+                year={YEAR}
+                month={month}
+                shifts={codes}
+                swapped={new Set(records.filter((r) => r.originalCode).map((r) => r.date))}
+                selected={editing}
+                onPick={setEditing}
+              />
+            )}
+          </>
+        )}
+
+        {view === 'bulk' && (
+          <BulkEntry
+            year={YEAR}
+            month={month}
+            onMonthChange={setMonth}
+            existing={codes}
+            onSave={saveBulk}
+          />
+        )}
+
+        {view === 'swaps' && <Swaps days={records} />}
+        {view === 'summary' && <Summary year={YEAR} shifts={codes} />}
+        {view === 'pay' && (
+          <Pay year={YEAR} shifts={codes} settings={settings} onChange={changeSettings} />
+        )}
+      </main>
+
+      {editing && (
+        <DayEditor
+          date={editing}
+          shift={days.get(editing) ?? null}
+          colleagues={colleagues}
+          onSave={(s) => void saveDay(s)}
+          onDelete={() => void deleteDay(editing)}
+          onClose={() => setEditing(null)}
+        />
       )}
+
+      <nav className="tabbar" aria-label="Sezioni">
+        {VIEWS.map((v) => (
+          <button
+            key={v.id}
+            type="button"
+            aria-current={view === v.id}
+            onClick={() => {
+              setView(v.id);
+              setEditing(null);
+            }}
+          >
+            <span aria-hidden="true">{v.icon}</span>
+            {v.label}
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }

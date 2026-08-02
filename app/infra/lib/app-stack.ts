@@ -87,6 +87,7 @@ export class AppStack extends Stack {
 
     const getShiftsFn = lambda('GetShifts', 'getShifts');
     const putShiftFn = lambda('PutShift', 'putShift');
+    const putShiftsFn = lambda('PutShifts', 'putShifts');
     const getConfigFn = lambda('GetConfig', 'getConfig');
     const putConfigFn = lambda('PutConfig', 'putConfig');
 
@@ -94,6 +95,7 @@ export class AppStack extends Stack {
     table.grantReadData(getShiftsFn);
     table.grantReadData(getConfigFn);
     table.grantReadWriteData(putShiftFn);
+    table.grantReadWriteData(putShiftsFn);
     table.grantReadWriteData(putConfigFn);
 
     // --- API ---
@@ -114,6 +116,7 @@ export class AppStack extends Stack {
       });
 
     route('/shifts', HttpMethod.GET, getShiftsFn, 'IntGetShifts');
+    route('/shifts', HttpMethod.PUT, putShiftsFn, 'IntPutShifts');
     route('/shifts/{date}', HttpMethod.PUT, putShiftFn, 'IntPutShift');
     route('/config', HttpMethod.GET, getConfigFn, 'IntGetConfig');
     route('/config', HttpMethod.PUT, putConfigFn, 'IntPutConfig');

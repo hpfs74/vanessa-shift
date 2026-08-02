@@ -30,6 +30,26 @@ Deploy della sola infrastruttura:
 cd infra && npx cdk deploy --all --require-approval never
 ```
 
+## Viste
+
+| Vista | Cosa fa |
+|-------|---------|
+| **Calendario** | griglia mensile, CRUD completo del giorno: turno, turno originale, collega, tipo di scambio, note. Il puntino accanto al codice segnala uno scambio. |
+| **Carica** | scegli il mese, scrivi la sequenza dei codici e riempi tutto in un colpo. Mostra quali giorni sovrascriverebbe **prima** di salvare. |
+| **Scambi** | saldo favori e saldo ore per collega, come il foglio Scambi. |
+| **Riepilogo** | turni per codice, giorni lavorati e ore per mese, con le barre. |
+| **Stipendio** | parametri e simulazione mensile. |
+
+Le ore **non si scrivono**: si derivano dal codice turno, come nel foglio. Una sola fonte
+di verità, nessun dato che può andare fuori sincrono con sé stesso.
+
+## Mobile first
+
+L'app si usa dal telefono. Navigazione in basso dove arriva il pollice, target di tocco da
+44px, i pannelli di modifica salgono dal basso, gli input a 16px perché Safari iOS non
+faccia lo zoom quando prendono il fuoco, e le tabelle scorrono da sole invece di far
+scorrere la pagina in orizzontale.
+
 ## Risorse AWS
 
 Account `495133941005`, regione `eu-south-1`. Il certificato sta in `us-east-1` perché

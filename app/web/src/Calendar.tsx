@@ -17,6 +17,8 @@ export interface CalendarProps {
   year: number;
   month: number;
   shifts: ReadonlyMap<IsoDate, ShiftCode>;
+  /** Days that were swapped with a colleague: marked with a dot. */
+  swapped?: ReadonlySet<IsoDate>;
   selected: IsoDate | null;
   onPick: (d: IsoDate) => void;
 }
@@ -40,7 +42,14 @@ export function weekHours(
   return week.reduce<number>((acc, d) => acc + (d ? hours(shifts.get(d)) : 0), 0);
 }
 
-export function Calendar({ year, month, shifts, selected, onPick }: CalendarProps) {
+export function Calendar({
+  year,
+  month,
+  shifts,
+  swapped,
+  selected,
+  onPick,
+}: CalendarProps) {
   const holidays = italianHolidays(year);
   const weeks = weeksOfMonth(year, month);
   const totals = monthHours(year, month, shifts);
@@ -83,12 +92,16 @@ export function Calendar({ year, month, shifts, selected, onPick }: CalendarProp
                 aria-label={
                   `${dayNumber} ${MONTH_NAMES[month - 1]}` +
                   (holidayName ? `, ${holidayName}` : '') +
-                  (code ? `, turno ${code}` : ', nessun turno')
+                  (code ? `, turno ${code}` : ', nessun turno') +
+                  (swapped?.has(d) ? ', scambiato' : '')
                 }
                 onClick={() => onPick(d)}
               >
                 <span className="day-number">{dayNumber}</span>
-                <span className="code">{code ?? ''}</span>
+                <span className="code">
+                  {code ?? ''}
+                  {swapped?.has(d) ? <i className="swap-dot" aria-hidden="true" /> : null}
+                </span>
                 <span className="time">{code ? timeRange(code) : ''}</span>
               </button>
             );

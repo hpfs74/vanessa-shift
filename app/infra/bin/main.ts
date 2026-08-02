@@ -28,9 +28,7 @@ const cert = new CertificateStack(app, 'VanessaCertificato', {
   zoneId: CONFIG.zoneId,
 });
 
-// Nothing reads its outputs yet — that starts in Task 2, which wires them
-// into the API and the browser.
-new AuthStack(app, 'VanessaAccesso', {
+const auth = new AuthStack(app, 'VanessaAccesso', {
   env: { account: CONFIG.account, region: CONFIG.region },
   domain: CONFIG.domain,
 });
@@ -43,6 +41,8 @@ new AppStack(app, 'VanessaApp', {
   zoneDomain: CONFIG.zoneDomain,
   zoneId: CONFIG.zoneId,
   certificateArn: cert.certificateArn,
+  userPoolId: auth.userPoolId,
+  userPoolClientId: auth.userPoolClientId,
   // On the first deploy the frontend is not built yet: it ships afterwards.
   webDist: existsSync(join(webDist, 'index.html')) ? webDist : undefined,
 });

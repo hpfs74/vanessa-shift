@@ -30,6 +30,8 @@ beforeAll(() => {
     zoneDomain: CONFIG.zoneDomain,
     zoneId: CONFIG.zoneId,
     certificateArn: 'arn:aws:acm:us-east-1:495133941005:certificate/finto',
+    userPoolId: 'eu-south-1_finto',
+    userPoolClientId: 'clientefinto',
   });
   cert = Template.fromStack(sCert);
   app = Template.fromStack(sApp);
@@ -162,9 +164,6 @@ describe('api', () => {
     });
   });
 
-  it('has no authorizer: a deliberate choice, not an oversight', () => {
-    expect(Object.keys(app.findResources('AWS::ApiGatewayV2::Authorizer'))).toHaveLength(0);
-  });
 });
 
 describe('hosting', () => {
@@ -342,5 +341,36 @@ describe('one door only', () => {
     expect(apiOrigin.OriginCustomHeaders).toHaveLength(1);
     expect(apiOrigin.OriginCustomHeaders[0].HeaderName).toBe('x-cloudfront-origin');
     expect(apiOrigin.OriginCustomHeaders[0].HeaderValue).toBeTruthy();
+  });
+});
+
+describe('chi entra', () => {
+  it('puts an authorizer on all five API routes', () => {
+    const routes = app.findResources('AWS::ApiGatewayV2::Route');
+    expect(Object.keys(routes)).toHaveLength(5);
+    for (const r of Object.values(routes)) {
+      expect(r.Properties.AuthorizationType).toBe('JWT');
+      expect(r.Properties.AuthorizerId).toBeDefined();
+    }
+  });
+
+  it('points the authorizer at the pool, and at our client alone', () => {
+    app.hasResourceProperties('AWS::ApiGatewayV2::Authorizer', {
+      AuthorizerType: 'JWT',
+      JwtConfiguration: Match.objectLike({ Audience: ['clientefinto'] }),
+    });
+  });
+
+  it('tells the photo function which pool to check against', () => {
+    // It cannot have an authorizer, so it needs to verify the token itself.
+    app.hasResourceProperties('AWS::Lambda::Function', {
+      Handler: 'index.readPhoto',
+      Environment: Match.objectLike({
+        Variables: Match.objectLike({
+          USER_POOL_ID: 'eu-south-1_finto',
+          USER_POOL_CLIENT_ID: 'clientefinto',
+        }),
+      }),
+    });
   });
 });

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import { HttpApi, HttpMethod, CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpJwtAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import {
@@ -40,6 +41,8 @@ export interface AppStackProps extends StackProps {
   readonly zoneDomain: string;
   readonly zoneId: string;
   readonly certificateArn: string;
+  readonly userPoolId: string;
+  readonly userPoolClientId: string;
   /** Folder holding the built frontend. Absent on the very first deploy. */
   readonly webDist?: string;
 }
@@ -129,6 +132,8 @@ export class AppStack extends Stack {
       environment: {
         TABLE_NAME: table.tableName,
         ALLOWED_ORIGIN: `https://${props.domain}`,
+        USER_POOL_ID: props.userPoolId,
+        USER_POOL_CLIENT_ID: props.userPoolClientId,
       },
       bundling: { format: undefined, minify: true, sourceMap: true },
     });
@@ -184,11 +189,21 @@ export class AppStack extends Stack {
       },
     });
 
+    // The five API routes are checked by the gateway, before our code runs.
+    // The photo function cannot have this — a Function URL takes no
+    // authorizer — so it verifies the same token itself; see api/src/token.ts.
+    const authorizer = new HttpJwtAuthorizer(
+      'Autorizzatore',
+      `https://cognito-idp.${this.region}.amazonaws.com/${props.userPoolId}`,
+      { jwtAudience: [props.userPoolClientId] },
+    );
+
     const route = (path: string, method: HttpMethod, fn: NodejsFunction, constructId: string) =>
       api.addRoutes({
         path,
         methods: [method],
         integration: new HttpLambdaIntegration(constructId, fn),
+        authorizer,
       });
 
     route('/api/shifts', HttpMethod.GET, getShiftsFn, 'IntGetShifts');

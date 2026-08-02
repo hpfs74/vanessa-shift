@@ -18,6 +18,8 @@ import {
   isValidHours,
 } from '@vanessa/core';
 
+import { NotSignedIn } from './token.js';
+
 export const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? 'https://vanessa.matteo.cool';
 
 /** The header CloudFront injects on requests it forwards to the API.
@@ -240,6 +242,7 @@ export function handle(
   fn: () => Promise<APIGatewayProxyResultV2>,
 ): Promise<APIGatewayProxyResultV2> {
   return fn().catch((e: unknown) => {
+    if (e instanceof NotSignedIn) return failure(NO_CREDENTIAL, 'accesso non effettuato');
     if (e instanceof NotFromCloudFront) {
       return failure(NO_CREDENTIAL, 'credenziale di origine mancante o non valida');
     }

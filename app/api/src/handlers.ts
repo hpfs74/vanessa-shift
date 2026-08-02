@@ -13,6 +13,7 @@ import type { IsoDate } from '@vanessa/core';
 
 import type { Repo } from './repo.js';
 import { createRepo } from './repo.js';
+import { requireSignedIn } from './token.js';
 import {
   failure,
   handle,
@@ -127,9 +128,12 @@ export function readPhotoWith(
   vision: Vision,
   today: () => IsoDate = romeToday,
   year: () => number = () => new Date().getFullYear(),
+  signedIn: (h: Record<string, string | undefined> | undefined) => Promise<void> = requireSignedIn,
 ) {
   return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
     handle(async () => {
+      await signedIn(event.headers);
+
       const image = requireImage(parseJson(event.body).image);
 
       if (!(await repo.consumePhotoQuota(today(), MAX_READINGS_PER_DAY))) {

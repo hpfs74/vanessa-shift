@@ -4,6 +4,7 @@ Le ore arrivano dal foglio Presenze. La tariffa e le maggiorazioni le scrive
 l'utente nelle celle verdi: finche' sono vuote la tabella resta vuota.
 """
 
+from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -79,14 +80,23 @@ def foglio_stipendio(wb, anno, p_r1, p_r2):
         if col > 1:
             c.alignment = Alignment(horizontal="center")
 
-    # Rete di sicurezza: le quattro categorie devono coprire tutte le ore, niente di piu'.
+    # Rete di sicurezza: B e' costruito per differenza (SUMIFS(mese)-C-D-E),
+    # quindi B+C+D+E e' identicamente uguale a SUM(ore): un doppio conteggio
+    # fra sabato/domenica/festivo non lo farebbe mai muovere da zero, non e'
+    # un controllo vero. Un giorno contato due volte drena pero' le ore
+    # ordinarie di quel mese, che possono scendere sotto zero: e' li' che si
+    # vede davvero un difetto di ripartizione.
     ws.cell(row=RIGA_CONTROLLO, column=1,
-            value="Controllo ripartizione ore (deve essere 0)").font = Font(
+            value="Controllo ore ordinarie (minimo mensile, deve essere >= 0)").font = Font(
         bold=True, color="B03030")
-    c = ws.cell(row=RIGA_CONTROLLO, column=2, value=(
-        f"=B{RIGA_TOTALE}+C{RIGA_TOTALE}+D{RIGA_TOTALE}+E{RIGA_TOTALE}"
-        f"-SUM({ore})"))
+    c = ws.cell(row=RIGA_CONTROLLO, column=2,
+                value=f"=MIN(B{RIGA_PRIMO_MESE}:B{RIGA_TOTALE - 1})")
     c.font = Font(bold=True, color="B03030")
     c.border = BOX
     c.alignment = Alignment(horizontal="center")
+    ws.conditional_formatting.add(
+        f"B{RIGA_CONTROLLO}",
+        CellIsRule(operator="lessThan", formula=["0"],
+                   font=Font(bold=True, color="FFFFFF"),
+                   fill=PatternFill("solid", fgColor="B03030")))
     return ws

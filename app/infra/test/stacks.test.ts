@@ -238,7 +238,12 @@ describe('reading photos', () => {
   });
 
   it('sits behind a Function URL, not behind API Gateway, closed to anything but CloudFront', () => {
-    app.hasResourceProperties('AWS::Lambda::Url', { AuthType: 'AWS_IAM' });
+    // `Cors` has to be gone, not merely unused: a Function URL that still
+    // declares its own CORS is one that was meant to be called from a browser
+    // directly, which is exactly what AWS_IAM takes away. `hasResourceProperties`
+    // matches partially, so without `Match.absent()` this passes with the
+    // block still attached.
+    app.hasResourceProperties('AWS::Lambda::Url', { AuthType: 'AWS_IAM', Cors: Match.absent() });
   });
 
   it('can invoke the model, and nothing else of Bedrock', () => {
@@ -307,9 +312,16 @@ describe('one door only', () => {
     // (aws-cdk-lib 2.263.0) never sets FunctionUrlAuthType — AuthType is
     // already asserted on the Function URL itself above, so it isn't repeated
     // here. Principal and Action are what tie the permission to CloudFront.
+    const [distribution] = Object.keys(app.findResources('AWS::CloudFront::Distribution'));
     app.hasResourceProperties('AWS::Lambda::Permission', {
       Action: 'lambda:InvokeFunctionUrl',
       Principal: 'cloudfront.amazonaws.com',
+      // The strongest half of the guarantee, and the one worth pinning:
+      // without SourceArn the principal is every CloudFront distribution
+      // there is, anybody's included. With it, this one.
+      SourceArn: {
+        'Fn::Join': ['', Match.arrayWith([':distribution/', { Ref: distribution }])],
+      },
     });
   });
 

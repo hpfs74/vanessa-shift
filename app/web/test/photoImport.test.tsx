@@ -43,13 +43,15 @@ async function renderWith(
 ) {
   const onSave = vi.fn().mockResolvedValue(undefined);
   const onRead = vi.fn().mockResolvedValue(reading);
-  render(<PhotoImport year={2026} existing={existing} onRead={onRead} onSave={onSave} />);
+  const { container } = render(
+    <PhotoImport year={2026} existing={existing} onRead={onRead} onSave={onSave} />,
+  );
 
   await userEvent.upload(
     screen.getByLabelText(/Leggi da una foto/i),
     new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
   );
-  return { onSave, onRead };
+  return { onSave, onRead, container };
 }
 
 describe('PhotoImport', () => {
@@ -100,7 +102,10 @@ describe('PhotoImport', () => {
     const { onSave } = await renderWith(julyReading());
 
     await userEvent.click(await screen.findByRole('button', { name: /^17 / }));
-    await userEvent.click(screen.getByRole('button', { name: /Nessun turno/i }));
+    // Exact name: a loose /Nessun turno/i would also match every blank grid
+    // cell underneath the sheet ("1 nessun turno", "2 nessun turno", ...),
+    // since the sheet overlays the grid rather than replacing it.
+    await userEvent.click(screen.getByRole('button', { name: 'Nessun turno' }));
     await userEvent.click(screen.getByRole('button', { name: /Salva 14 giorni/ }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
@@ -111,8 +116,13 @@ describe('PhotoImport', () => {
 
   it('warns when days would be overwritten', async () => {
     const existing = new Map<IsoDate, ShiftCode>([['2026-07-17', 'L']]);
-    await renderWith(julyReading(), existing);
-    expect(await screen.findByText(/1 da sovrascrivere/)).toBeInTheDocument();
+    const { container } = await renderWith(julyReading(), existing);
+    // The count sits in its own <strong>, so a plain findByText (matching
+    // only text a node owns directly) would miss it; toHaveTextContent
+    // checks the full text of the summary line, nested elements included.
+    await waitFor(() => {
+      expect(container.querySelector('.summary-line')).toHaveTextContent(/1 da sovrascrivere/);
+    });
   });
 
   it('rejects a photo from another year instead of saving wrong dates', async () => {
@@ -145,5 +155,30 @@ describe('PhotoImport', () => {
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(onSave.mock.calls[0][0]).toHaveLength(12);
+  });
+
+  // Regression: the confirmation names the month it saved. Changing the
+  // month is the equivalent, on this screen, of editing BulkEntry's
+  // textarea — it must go stale too, or it sits over a plan that now names
+  // a different month than the one it actually saved.
+  it('clears the save confirmation once a different month is picked', async () => {
+    await renderWith(julyReading());
+
+    await userEvent.click(await screen.findByRole('button', { name: /Salva 15 giorni/ }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/Salvati 15 giorni di Luglio/);
+
+    await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '6');
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  // Regression: a wrong offset direction, or dropping the `+ 1`, would put
+  // every day in the wrong weekday column while the grid still looked
+  // plausible. 1 July 2026 is a Wednesday: column 3 of 7 (Monday first).
+  it('aligns the first day of the month to its weekday column', async () => {
+    await renderWith(julyReading());
+
+    const day1 = await screen.findByRole('button', { name: /^1 / });
+    expect(day1).toHaveStyle({ gridColumnStart: '3' });
   });
 });

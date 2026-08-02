@@ -84,6 +84,7 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
       const unsure = new Set([...l.unsure].filter((g) => g <= howMany));
       return { ...l, month, codes, unsure };
     });
+    setSavedCount(null);
     setOpen(null);
   };
 
@@ -181,7 +182,7 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
                       ]
                         .filter(Boolean)
                         .join(' ')}
-                      aria-label={`${day} ${code ?? 'vuoto'}`}
+                      aria-label={`${day} ${code ?? 'nessun turno'}`}
                       onClick={() => setOpen(day)}
                     >
                       <span className="day-number">{day}</span>

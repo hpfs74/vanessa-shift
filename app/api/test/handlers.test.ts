@@ -1,80 +1,81 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { PAGA_VUOTA } from '@vanessa/core';
+import type { IsoDate, ShiftCode } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS } from '@vanessa/core';
 
-import { getConfigCon, getShiftsCon, putConfigCon, putShiftCon } from '../src/handlers.js';
-import type { Repo, Turno } from '../src/repo.js';
+import { getConfigWith, getShiftsWith, putConfigWith, putShiftWith } from '../src/handlers.js';
+import type { Repo, ShiftRecord } from '../src/repo.js';
 
-/** Repo in memoria: i test non toccano la rete. */
-function repoFinto() {
-  const turni = new Map<string, Turno>();
-  let paga = PAGA_VUOTA;
-  const chiamate: string[] = [];
+/** In-memory repo: the tests never touch the network. */
+function fakeRepo() {
+  const shifts = new Map<string, ShiftRecord>();
+  let pay = EMPTY_PAY_SETTINGS;
+  const calls: string[] = [];
 
   const repo: Repo = {
-    async turniTra(da, a) {
-      chiamate.push(`turniTra(${da},${a})`);
-      return [...turni.values()]
-        .filter((t) => t.data >= da && t.data <= a)
-        .sort((x, y) => (x.data < y.data ? -1 : 1));
+    async shiftsBetween(from, to) {
+      calls.push(`shiftsBetween(${from},${to})`);
+      return [...shifts.values()]
+        .filter((s) => s.date >= from && s.date <= to)
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
     },
-    async salvaTurno(t) {
-      chiamate.push(`salvaTurno(${t.data})`);
-      turni.set(t.data, t);
+    async saveShift(s) {
+      calls.push(`saveShift(${s.date})`);
+      shifts.set(s.date, s);
     },
-    async cancellaTurno(d) {
-      chiamate.push(`cancellaTurno(${d})`);
-      turni.delete(d);
+    async deleteShift(d) {
+      calls.push(`deleteShift(${d})`);
+      shifts.delete(d);
     },
-    async leggiPaga() {
-      chiamate.push('leggiPaga');
-      return paga;
+    async readPaySettings() {
+      calls.push('readPaySettings');
+      return pay;
     },
-    async salvaPaga(p) {
-      chiamate.push('salvaPaga');
-      paga = p;
+    async savePaySettings(p) {
+      calls.push('savePaySettings');
+      pay = p;
     },
   };
-  return { repo, turni, chiamate, paga: () => paga };
+  return { repo, shifts, calls, pay: () => pay };
 }
 
-function evento(p: Partial<APIGatewayProxyEventV2>): APIGatewayProxyEventV2 {
+function event(p: Partial<APIGatewayProxyEventV2>): APIGatewayProxyEventV2 {
   return p as APIGatewayProxyEventV2;
 }
 
-function corpo(r: { body?: unknown }): any {
+function body(r: { body?: unknown }): any {
   return JSON.parse(String(r.body));
 }
 
-let f: ReturnType<typeof repoFinto>;
+let f: ReturnType<typeof fakeRepo>;
 beforeEach(() => {
-  f = repoFinto();
+  f = fakeRepo();
 });
 
 describe('GET /shifts', () => {
-  it('restituisce i turni nellintervallo', async () => {
-    await f.repo.salvaTurno({ data: '2026-01-05', cod: 'M' });
-    await f.repo.salvaTurno({ data: '2026-02-10', cod: 'P' });
+  it('returns the shifts inside the range', async () => {
+    await f.repo.saveShift({ date: '2026-01-05', code: 'M' });
+    await f.repo.saveShift({ date: '2026-02-10', code: 'P' });
 
-    const r: any = await getShiftsCon(f.repo)(
-      evento({ queryStringParameters: { from: '2026-01-01', to: '2026-01-31' } }),
+    const r: any = await getShiftsWith(f.repo)(
+      event({ queryStringParameters: { from: '2026-01-01', to: '2026-01-31' } }),
     );
 
     expect(r.statusCode).toBe(200);
-    expect(corpo(r).turni).toHaveLength(1);
-    expect(corpo(r).turni[0]).toMatchObject({ data: '2026-01-05', cod: 'M' });
+    expect(body(r).shifts).toHaveLength(1);
+    expect(body(r).shifts[0]).toMatchObject({ date: '2026-01-05', code: 'M' });
   });
 
-  it('un intervallo vuoto non e un errore', async () => {
-    const r: any = await getShiftsCon(f.repo)(
-      evento({ queryStringParameters: { from: '2026-01-01', to: '2026-01-31' } }),
+  it('an empty range is not an error', async () => {
+    const r: any = await getShiftsWith(f.repo)(
+      event({ queryStringParameters: { from: '2026-01-01', to: '2026-01-31' } }),
     );
     expect(r.statusCode).toBe(200);
-    expect(corpo(r).turni).toEqual([]);
+    expect(body(r).shifts).toEqual([]);
   });
 
-  it('rifiuta parametri mancanti o malformati con 400', async () => {
+  it('rejects missing or malformed parameters with a 400', async () => {
     for (const q of [
       undefined,
       {},
@@ -83,186 +84,186 @@ describe('GET /shifts', () => {
       { from: '2026-02-30', to: '2026-03-01' },
       { from: '2026-13-01', to: '2026-13-02' },
     ]) {
-      const r: any = await getShiftsCon(f.repo)(evento({ queryStringParameters: q as any }));
+      const r: any = await getShiftsWith(f.repo)(event({ queryStringParameters: q as any }));
       expect(r.statusCode, JSON.stringify(q)).toBe(400);
-      expect(corpo(r).errore).toBeTruthy();
+      expect(body(r).errore).toBeTruthy();
     }
   });
 
-  it('rifiuta un intervallo rovesciato', async () => {
-    const r: any = await getShiftsCon(f.repo)(
-      evento({ queryStringParameters: { from: '2026-03-01', to: '2026-01-01' } }),
+  it('rejects a reversed range', async () => {
+    const r: any = await getShiftsWith(f.repo)(
+      event({ queryStringParameters: { from: '2026-03-01', to: '2026-01-01' } }),
     );
     expect(r.statusCode).toBe(400);
-    expect(corpo(r).errore).toMatch(/precedere/);
+    expect(body(r).errore).toMatch(/precedere/);
   });
 
-  it('rifiuta un intervallo piu lungo di un anno', async () => {
-    const r: any = await getShiftsCon(f.repo)(
-      evento({ queryStringParameters: { from: '2026-01-01', to: '2027-06-01' } }),
+  it('rejects a range longer than a year', async () => {
+    const r: any = await getShiftsWith(f.repo)(
+      event({ queryStringParameters: { from: '2026-01-01', to: '2027-06-01' } }),
     );
     expect(r.statusCode).toBe(400);
-    expect(corpo(r).errore).toMatch(/troppo ampio/);
+    expect(body(r).errore).toMatch(/troppo ampio/);
   });
 });
 
 describe('PUT /shifts/{date}', () => {
-  it('salva un turno', async () => {
-    const r: any = await putShiftCon(f.repo)(
-      evento({ pathParameters: { date: '2026-01-05' }, body: JSON.stringify({ cod: 'M1' }) }),
+  it('saves a shift', async () => {
+    const r: any = await putShiftWith(f.repo)(
+      event({ pathParameters: { date: '2026-01-05' }, body: JSON.stringify({ code: 'M1' }) }),
     );
     expect(r.statusCode).toBe(200);
-    expect(f.turni.get('2026-01-05')).toMatchObject({ cod: 'M1' });
+    expect(f.shifts.get('2026-01-05')).toMatchObject({ code: 'M1' });
   });
 
-  it('salva i campi dello scambio', async () => {
-    await putShiftCon(f.repo)(
-      evento({
+  it('saves the swap fields', async () => {
+    await putShiftWith(f.repo)(
+      event({
         pathParameters: { date: '2026-01-05' },
         body: JSON.stringify({
-          cod: 'P',
-          codOrig: 'M',
-          collega: 'Giulia',
-          tipoScambio: 'Ho coperto',
-          note: 'cambio chiesto il giorno prima',
+          code: 'P',
+          originalCode: 'M',
+          colleague: 'Giulia',
+          swapKind: 'Ho coperto',
+          notes: 'cambio chiesto il giorno prima',
         }),
       }),
     );
-    expect(f.turni.get('2026-01-05')).toMatchObject({
-      cod: 'P',
-      codOrig: 'M',
-      collega: 'Giulia',
-      tipoScambio: 'Ho coperto',
+    expect(f.shifts.get('2026-01-05')).toMatchObject({
+      code: 'P',
+      originalCode: 'M',
+      colleague: 'Giulia',
+      swapKind: 'Ho coperto',
     });
   });
 
-  it('un codice vuoto cancella il giorno invece di salvare un item vuoto', async () => {
-    await f.repo.salvaTurno({ data: '2026-01-05', cod: 'M' });
-    const r: any = await putShiftCon(f.repo)(
-      evento({ pathParameters: { date: '2026-01-05' }, body: JSON.stringify({ cod: '' }) }),
+  it('an empty code deletes the day instead of storing an empty item', async () => {
+    await f.repo.saveShift({ date: '2026-01-05', code: 'M' });
+    const r: any = await putShiftWith(f.repo)(
+      event({ pathParameters: { date: '2026-01-05' }, body: JSON.stringify({ code: '' }) }),
     );
     expect(r.statusCode).toBe(200);
-    expect(corpo(r).cancellato).toBe(true);
-    expect(f.turni.has('2026-01-05')).toBe(false);
+    expect(body(r).deleted).toBe(true);
+    expect(f.shifts.has('2026-01-05')).toBe(false);
   });
 
-  it('cancellare un giorno che non ce non e un errore', async () => {
-    const r: any = await putShiftCon(f.repo)(
-      evento({ pathParameters: { date: '2026-07-04' }, body: JSON.stringify({ cod: null }) }),
+  it('deleting a day that is not there is not an error', async () => {
+    const r: any = await putShiftWith(f.repo)(
+      event({ pathParameters: { date: '2026-07-04' }, body: JSON.stringify({ code: null }) }),
     );
     expect(r.statusCode).toBe(200);
   });
 
-  it('rifiuta un codice sconosciuto', async () => {
-    const r: any = await putShiftCon(f.repo)(
-      evento({ pathParameters: { date: '2026-01-05' }, body: JSON.stringify({ cod: 'X' }) }),
+  it('rejects an unknown code', async () => {
+    const r: any = await putShiftWith(f.repo)(
+      event({ pathParameters: { date: '2026-01-05' }, body: JSON.stringify({ code: 'X' }) }),
     );
     expect(r.statusCode).toBe(400);
-    expect(f.turni.size).toBe(0);
+    expect(f.shifts.size).toBe(0);
   });
 
-  it('rifiuta una data inesistente', async () => {
-    const r: any = await putShiftCon(f.repo)(
-      evento({ pathParameters: { date: '2026-02-30' }, body: JSON.stringify({ cod: 'M' }) }),
+  it('rejects a date that does not exist', async () => {
+    const r: any = await putShiftWith(f.repo)(
+      event({ pathParameters: { date: '2026-02-30' }, body: JSON.stringify({ code: 'M' }) }),
     );
     expect(r.statusCode).toBe(400);
   });
 
-  it('rifiuta un corpo mancante o non JSON', async () => {
-    for (const body of [undefined, '', 'non json', '[]', '"stringa"']) {
-      const r: any = await putShiftCon(f.repo)(
-        evento({ pathParameters: { date: '2026-01-05' }, body: body as any }),
+  it('rejects a missing or non-JSON body', async () => {
+    for (const b of [undefined, '', 'not json', '[]', '"a string"']) {
+      const r: any = await putShiftWith(f.repo)(
+        event({ pathParameters: { date: '2026-01-05' }, body: b as any }),
       );
-      expect(r.statusCode, String(body)).toBe(400);
+      expect(r.statusCode, String(b)).toBe(400);
     }
   });
 
-  it('rifiuta note troppo lunghe senza salvare niente', async () => {
-    const r: any = await putShiftCon(f.repo)(
-      evento({
+  it('rejects overlong notes without saving anything', async () => {
+    const r: any = await putShiftWith(f.repo)(
+      event({
         pathParameters: { date: '2026-01-05' },
-        body: JSON.stringify({ cod: 'M', note: 'x'.repeat(501) }),
+        body: JSON.stringify({ code: 'M', notes: 'x'.repeat(501) }),
       }),
     );
     expect(r.statusCode).toBe(400);
-    expect(f.turni.size).toBe(0);
+    expect(f.shifts.size).toBe(0);
   });
 });
 
 describe('GET /config', () => {
-  it('su tabella vuota restituisce i parametri vuoti, non un errore', async () => {
-    const r: any = await getConfigCon(f.repo)();
+  it('on an empty table returns empty settings, not an error', async () => {
+    const r: any = await getConfigWith(f.repo)();
     expect(r.statusCode).toBe(200);
-    expect(corpo(r).paga.tariffaOraria).toBeNull();
-    expect(corpo(r).paga.rateo13a).toBeCloseTo(1 / 12, 10);
+    expect(body(r).pay.hourlyRate).toBeNull();
+    expect(body(r).pay.thirteenthAccrual).toBeCloseTo(1 / 12, 10);
   });
 });
 
 describe('PUT /config', () => {
-  it('salva parametri validi', async () => {
-    const r: any = await putConfigCon(f.repo)(
-      evento({
+  it('saves valid settings', async () => {
+    const r: any = await putConfigWith(f.repo)(
+      event({
         body: JSON.stringify({
-          tariffaOraria: 9.5,
-          maggSabato: 0.2,
-          maggDomenica: 0.3,
-          maggFestivo: 0.5,
-          rateo13a: 1 / 12,
-          coeffNetto: 0.72,
+          hourlyRate: 9.5,
+          saturdayPremium: 0.2,
+          sundayPremium: 0.3,
+          holidayPremium: 0.5,
+          thirteenthAccrual: 1 / 12,
+          netRatio: 0.72,
         }),
       }),
     );
     expect(r.statusCode).toBe(200);
-    expect(f.paga().tariffaOraria).toBe(9.5);
-    expect(f.paga().coeffNetto).toBe(0.72);
+    expect(f.pay().hourlyRate).toBe(9.5);
+    expect(f.pay().netRatio).toBe(0.72);
   });
 
-  it('i campi assenti restano vuoti invece di diventare zero', async () => {
-    await putConfigCon(f.repo)(evento({ body: JSON.stringify({ tariffaOraria: 10 }) }));
-    expect(f.paga().tariffaOraria).toBe(10);
-    expect(f.paga().maggSabato).toBeNull();
-    expect(f.paga().coeffNetto).toBeNull();
+  it('absent fields stay empty instead of becoming zero', async () => {
+    await putConfigWith(f.repo)(event({ body: JSON.stringify({ hourlyRate: 10 }) }));
+    expect(f.pay().hourlyRate).toBe(10);
+    expect(f.pay().saturdayPremium).toBeNull();
+    expect(f.pay().netRatio).toBeNull();
   });
 
-  it('rifiuta una tariffa negativa', async () => {
-    const r: any = await putConfigCon(f.repo)(
-      evento({ body: JSON.stringify({ tariffaOraria: -1 }) }),
+  it('rejects a negative hourly rate', async () => {
+    const r: any = await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ hourlyRate: -1 }) }),
     );
     expect(r.statusCode).toBe(400);
   });
 
-  it('rifiuta percentuali fuori da 0..1', async () => {
+  it('rejects percentages outside 0..1', async () => {
     for (const v of [1.5, -0.1, 20]) {
-      const r: any = await putConfigCon(f.repo)(
-        evento({ body: JSON.stringify({ tariffaOraria: 10, maggSabato: v }) }),
+      const r: any = await putConfigWith(f.repo)(
+        event({ body: JSON.stringify({ hourlyRate: 10, saturdayPremium: v }) }),
       );
       expect(r.statusCode, String(v)).toBe(400);
     }
   });
 
-  it('rifiuta valori non numerici', async () => {
-    const r: any = await putConfigCon(f.repo)(
-      evento({ body: JSON.stringify({ tariffaOraria: 'dieci' }) }),
+  it('rejects non-numeric values', async () => {
+    const r: any = await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ hourlyRate: 'ten' }) }),
     );
     expect(r.statusCode).toBe(400);
   });
 });
 
-describe('risposte', () => {
-  it('espongono CORS solo verso lorigine dellapp', async () => {
-    const r: any = await getConfigCon(f.repo)();
+describe('responses', () => {
+  it('allow CORS only from the app origin', async () => {
+    const r: any = await getConfigWith(f.repo)();
     expect(r.headers['access-control-allow-origin']).toBe('https://vanessa.matteo.cool');
     expect(r.headers['cache-control']).toBe('no-store');
   });
 
-  it('un guasto del repo diventa 500 senza rivelare dettagli', async () => {
-    const rotto: Repo = {
+  it('a repo failure becomes a 500 without leaking details', async () => {
+    const broken: Repo = {
       ...f.repo,
-      leggiPaga: async () => {
-        throw new Error('DynamoDB: AccessDenied su arn:aws:dynamodb:...');
+      readPaySettings: async () => {
+        throw new Error('DynamoDB: AccessDenied on arn:aws:dynamodb:...');
       },
     };
-    const r: any = await getConfigCon(rotto)();
+    const r: any = await getConfigWith(broken)();
     expect(r.statusCode).toBe(500);
     expect(String(r.body)).not.toMatch(/arn:aws/);
   });

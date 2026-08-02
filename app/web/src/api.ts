@@ -1,62 +1,63 @@
-/** Il solo punto che parla con la rete. */
+/** The only place that talks to the network. */
 
-import type { Codice, IsoDate, Paga } from '@vanessa/core';
+import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
 
-export interface TurnoRemoto {
-  data: IsoDate;
-  cod: Codice;
-  codOrig?: Codice | null;
-  collega?: string | null;
-  tipoScambio?: string | null;
-  note?: string | null;
+export interface RemoteShift {
+  date: IsoDate;
+  code: ShiftCode;
+  originalCode?: ShiftCode | null;
+  colleague?: string | null;
+  swapKind?: string | null;
+  notes?: string | null;
 }
 
-export const URL_API: string = import.meta.env.VITE_URL_API ?? '';
+export const API_URL: string = import.meta.env.VITE_API_URL ?? '';
 
-async function chiedi<T>(percorso: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${URL_API}${percorso}`, {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
   });
   if (!r.ok) {
-    const testo = await r.text().catch(() => '');
-    let messaggio = `richiesta fallita (${r.status})`;
+    const text = await r.text().catch(() => '');
+    // The fallback stays in Italian: it reaches the screen.
+    let message = `richiesta fallita (${r.status})`;
     try {
-      const j = JSON.parse(testo) as { errore?: string };
-      if (j.errore) messaggio = j.errore;
+      const j = JSON.parse(text) as { errore?: string };
+      if (j.errore) message = j.errore;
     } catch {
-      /* il corpo non era JSON: tengo il messaggio generico */
+      /* body was not JSON: keep the generic message */
     }
-    throw new Error(messaggio);
+    throw new Error(message);
   }
   return (await r.json()) as T;
 }
 
 export interface Api {
-  turni(da: IsoDate, a: IsoDate): Promise<TurnoRemoto[]>;
-  salvaTurno(data: IsoDate, cod: Codice | null): Promise<void>;
-  paga(): Promise<Paga>;
-  salvaPaga(p: Paga): Promise<void>;
+  shifts(from: IsoDate, to: IsoDate): Promise<RemoteShift[]>;
+  saveShift(date: IsoDate, code: ShiftCode | null): Promise<void>;
+  paySettings(): Promise<PaySettings>;
+  savePaySettings(p: PaySettings): Promise<void>;
 }
 
 export const api: Api = {
-  async turni(da, a) {
-    const r = await chiedi<{ turni: TurnoRemoto[] }>(
-      `/shifts?from=${encodeURIComponent(da)}&to=${encodeURIComponent(a)}`,
+  async shifts(from, to) {
+    const r = await request<{ shifts: RemoteShift[] }>(
+      `/shifts?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     );
-    return r.turni;
+    return r.shifts;
   },
-  async salvaTurno(data, cod) {
-    await chiedi(`/shifts/${encodeURIComponent(data)}`, {
+  async saveShift(date, code) {
+    await request(`/shifts/${encodeURIComponent(date)}`, {
       method: 'PUT',
-      body: JSON.stringify({ cod: cod ?? '' }),
+      body: JSON.stringify({ code: code ?? '' }),
     });
   },
-  async paga() {
-    const r = await chiedi<{ paga: Paga }>('/config');
-    return r.paga;
+  async paySettings() {
+    const r = await request<{ pay: PaySettings }>('/config');
+    return r.pay;
   },
-  async salvaPaga(p) {
-    await chiedi('/config', { method: 'PUT', body: JSON.stringify(p) });
+  async savePaySettings(p) {
+    await request('/config', { method: 'PUT', body: JSON.stringify(p) });
   },
 };

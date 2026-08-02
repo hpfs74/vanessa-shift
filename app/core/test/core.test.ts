@@ -1,56 +1,57 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  type Codice,
   type IsoDate,
-  CODICI,
-  PAGA_VUOTA,
-  differenzaGiorni,
-  festiviItaliani,
-  giorniDellAnno,
-  giorniDelMese,
-  giornoSettimana,
-  importiDelMese,
-  isCodice,
+  type MonthHours,
+  type ShiftCode,
+  EMPTY_PAY_SETTINGS,
+  SHIFTS,
+  dayKind,
+  daysBetween,
+  easter,
+  hours,
   isIsoDate,
-  ore,
-  orario,
-  oreDelMese,
-  pasqua,
-  sommaImporti,
-  tipoGiorno,
+  isShiftCode,
+  italianHolidays,
+  monthDays,
+  monthHours,
+  monthPay,
+  sumPay,
+  timeRange,
+  weekday,
+  yearDays,
 } from '../src/index.js';
 
-describe('codici turno', () => {
-  it('il pomeriggio dura sette ore e il pomeriggio lungo otto', () => {
-    expect(ore('P')).toBe(7);
-    expect(ore('P1')).toBe(8);
-    expect(orario('P')).toBe('13:00-20:00');
-    expect(orario('P1')).toBe('13:00-21:00');
+describe('shift codes', () => {
+  it('afternoon is seven hours and long afternoon is eight', () => {
+    expect(hours('P')).toBe(7);
+    expect(hours('P1')).toBe(8);
+    expect(timeRange('P')).toBe('13:00-20:00');
+    expect(timeRange('P1')).toBe('13:00-21:00');
   });
 
-  it('mattina, mattina lunga e libero', () => {
-    expect(ore('M')).toBe(6);
-    expect(ore('M1')).toBe(7);
-    expect(ore('L')).toBe(0);
-    expect(orario('L')).toBe('–');
+  it('morning, long morning and day off', () => {
+    expect(hours('M')).toBe(6);
+    expect(hours('M1')).toBe(7);
+    expect(hours('L')).toBe(0);
+    expect(timeRange('L')).toBe('–');
   });
 
-  it("un giorno senza codice non contribuisce ore", () => {
-    expect(ore(undefined)).toBe(0);
-    expect(ore(null)).toBe(0);
+  it('a day with no code contributes no hours', () => {
+    expect(hours(undefined)).toBe(0);
+    expect(hours(null)).toBe(0);
   });
 
-  it('riconosce solo i codici previsti', () => {
-    for (const t of CODICI) expect(isCodice(t.cod)).toBe(true);
+  it('recognises only the known codes', () => {
+    for (const s of SHIFTS) expect(isShiftCode(s.code)).toBe(true);
     for (const v of ['X', 'm', '', 'P2', 7, null, undefined]) {
-      expect(isCodice(v)).toBe(false);
+      expect(isShiftCode(v)).toBe(false);
     }
   });
 });
 
-describe('date', () => {
-  it('accetta solo date ISO realmente esistenti', () => {
+describe('dates', () => {
+  it('accepts only ISO dates that really exist', () => {
     expect(isIsoDate('2026-01-15')).toBe(true);
     expect(isIsoDate('2024-02-29')).toBe(true);
     expect(isIsoDate('2026-02-29')).toBe(false);
@@ -62,220 +63,219 @@ describe('date', () => {
     expect(isIsoDate(20260115)).toBe(false);
   });
 
-  it('il primo gennaio 2026 e giovedi, la settimana parte da lunedi', () => {
-    expect(giornoSettimana('2026-01-01')).toBe(3);
-    expect(giornoSettimana('2026-01-05')).toBe(0);
-    expect(giornoSettimana('2026-04-25')).toBe(5);
-    expect(giornoSettimana('2026-11-01')).toBe(6);
+  it('1 January 2026 is a Thursday, and the week starts on Monday', () => {
+    expect(weekday('2026-01-01')).toBe(3);
+    expect(weekday('2026-01-05')).toBe(0);
+    expect(weekday('2026-04-25')).toBe(5);
+    expect(weekday('2026-11-01')).toBe(6);
   });
 
-  it('conta i giorni di ogni mese, bisestili compresi', () => {
-    expect(giorniDelMese(2026, 2)).toHaveLength(28);
-    expect(giorniDelMese(2024, 2)).toHaveLength(29);
-    expect(giorniDellAnno(2026)).toHaveLength(365);
-    expect(giorniDellAnno(2024)).toHaveLength(366);
+  it('counts the days of every month, leap years included', () => {
+    expect(monthDays(2026, 2)).toHaveLength(28);
+    expect(monthDays(2024, 2)).toHaveLength(29);
+    expect(yearDays(2026)).toHaveLength(365);
+    expect(yearDays(2024)).toHaveLength(366);
   });
 
-  it('non si sposta di un giorno attraverso il cambio dora', () => {
-    // L'ora legale in Italia scatta l'ultima domenica di marzo.
-    expect(differenzaGiorni('2026-03-28', '2026-03-30')).toBe(2);
-    expect(differenzaGiorni('2026-10-24', '2026-10-26')).toBe(2);
-  });
-});
-
-describe('festivi', () => {
-  it('calcola la Pasqua', () => {
-    expect(pasqua(2026)).toBe('2026-04-05');
-    expect(pasqua(2024)).toBe('2024-03-31');
-    expect(pasqua(2011)).toBe('2011-04-24');
-    expect(pasqua(2027)).toBe('2027-03-28');
-    expect(pasqua(2038)).toBe('2038-04-25');
-    expect(pasqua(2000)).toBe('2000-04-23');
-  });
-
-  it('il 2026 ha undici festivi nazionali', () => {
-    const f = festiviItaliani(2026);
-    expect(f.size).toBe(11);
-    expect(f.get('2026-04-06')).toBe("Lunedi dell'Angelo");
-    expect(f.get('2026-12-26')).toBe('Santo Stefano');
-  });
-
-  it('quando la Pasquetta cade il 25 aprile non si conta due volte', () => {
-    const f = festiviItaliani(2011);
-    expect(f.size).toBe(10);
-    expect(f.get('2011-04-25')).toBe('Liberazione');
-  });
-
-  it('festivo batte domenica, domenica batte sabato', () => {
-    const f = festiviItaliani(2026);
-    expect(tipoGiorno('2026-04-25', f)).toBe('festivo'); // sabato festivo
-    expect(tipoGiorno('2026-11-01', f)).toBe('festivo'); // domenica festiva
-    expect(tipoGiorno('2026-04-26', f)).toBe('domenica');
-    expect(tipoGiorno('2026-04-18', f)).toBe('sabato');
-    expect(tipoGiorno('2026-04-24', f)).toBe('feriale');
+  it('does not drift by a day across a daylight-saving change', () => {
+    // Italian summer time starts on the last Sunday of March.
+    expect(daysBetween('2026-03-28', '2026-03-30')).toBe(2);
+    expect(daysBetween('2026-10-24', '2026-10-26')).toBe(2);
   });
 });
 
-/** Assegna un codice a ogni giorno dell'anno, ciclando fra quelli lavorati. */
-function annoPieno(anno: number): Map<IsoDate, Codice> {
-  const lavorati: Codice[] = ['M', 'M1', 'P', 'P1'];
-  const turni = new Map<IsoDate, Codice>();
-  giorniDellAnno(anno).forEach((d, i) => turni.set(d, lavorati[i % lavorati.length]));
-  return turni;
+describe('holidays', () => {
+  it('computes Easter', () => {
+    expect(easter(2026)).toBe('2026-04-05');
+    expect(easter(2024)).toBe('2024-03-31');
+    expect(easter(2011)).toBe('2011-04-24');
+    expect(easter(2027)).toBe('2027-03-28');
+    expect(easter(2038)).toBe('2038-04-25');
+    expect(easter(2000)).toBe('2000-04-23');
+  });
+
+  it('2026 has eleven national holidays', () => {
+    const h = italianHolidays(2026);
+    expect(h.size).toBe(11);
+    expect(h.get('2026-04-06')).toBe("Lunedi dell'Angelo");
+    expect(h.get('2026-12-26')).toBe('Santo Stefano');
+  });
+
+  it('when Easter Monday falls on 25 April it is not counted twice', () => {
+    const h = italianHolidays(2011);
+    expect(h.size).toBe(10);
+    expect(h.get('2011-04-25')).toBe('Liberazione');
+  });
+
+  it('holiday beats Sunday, Sunday beats Saturday', () => {
+    const h = italianHolidays(2026);
+    expect(dayKind('2026-04-25', h)).toBe('holiday'); // a Saturday holiday
+    expect(dayKind('2026-11-01', h)).toBe('holiday'); // a Sunday holiday
+    expect(dayKind('2026-04-26', h)).toBe('sunday');
+    expect(dayKind('2026-04-18', h)).toBe('saturday');
+    expect(dayKind('2026-04-24', h)).toBe('weekday');
+  });
+});
+
+/** Assigns a code to every day of the year, cycling through the worked ones. */
+function fullYear(year: number): Map<IsoDate, ShiftCode> {
+  const worked: ShiftCode[] = ['M', 'M1', 'P', 'P1'];
+  const shifts = new Map<IsoDate, ShiftCode>();
+  yearDays(year).forEach((d, i) => shifts.set(d, worked[i % worked.length]));
+  return shifts;
 }
 
-describe('ripartizione delle ore', () => {
-  it('ogni ora finisce in esattamente una categoria, tutti i mesi', () => {
-    const turni = annoPieno(2026);
-    const festivi = festiviItaliani(2026);
+describe('hour bucketing', () => {
+  it('every hour lands in exactly one bucket, all twelve months', () => {
+    const shifts = fullYear(2026);
+    const holidays = italianHolidays(2026);
 
-    for (let mese = 1; mese <= 12; mese++) {
-      const o = oreDelMese(2026, mese, turni);
-      expect(o.ordinarie + o.sabato + o.domenica + o.festivo).toBe(o.totale);
+    for (let month = 1; month <= 12; month++) {
+      const h = monthHours(2026, month, shifts);
+      expect(h.ordinary + h.saturday + h.sunday + h.holiday).toBe(h.total);
 
-      // Confronto contro un oracolo indipendente, giorno per giorno.
-      const atteso = { feriale: 0, sabato: 0, domenica: 0, festivo: 0 };
-      for (const d of giorniDelMese(2026, mese)) {
-        atteso[tipoGiorno(d, festivi)] += ore(turni.get(d));
+      // Checked against an independent oracle, day by day.
+      const expected = { weekday: 0, saturday: 0, sunday: 0, holiday: 0 };
+      for (const d of monthDays(2026, month)) {
+        expected[dayKind(d, holidays)] += hours(shifts.get(d));
       }
-      expect(o.ordinarie).toBe(atteso.feriale);
-      expect(o.sabato).toBe(atteso.sabato);
-      expect(o.domenica).toBe(atteso.domenica);
-      expect(o.festivo).toBe(atteso.festivo);
+      expect(h.ordinary).toBe(expected.weekday);
+      expect(h.saturday).toBe(expected.saturday);
+      expect(h.sunday).toBe(expected.sunday);
+      expect(h.holiday).toBe(expected.holiday);
     }
   });
 
-  it('la somma dei dodici mesi copre tutte le ore dellanno', () => {
-    const turni = annoPieno(2026);
-    let somma = 0;
-    for (let mese = 1; mese <= 12; mese++) somma += oreDelMese(2026, mese, turni).totale;
-    const tutte = giorniDellAnno(2026).reduce((acc, d) => acc + ore(turni.get(d)), 0);
-    expect(somma).toBe(tutte);
+  it('the twelve months together cover every hour of the year', () => {
+    const shifts = fullYear(2026);
+    let sum = 0;
+    for (let month = 1; month <= 12; month++) sum += monthHours(2026, month, shifts).total;
+    const all = yearDays(2026).reduce((acc, d) => acc + hours(shifts.get(d)), 0);
+    expect(sum).toBe(all);
   });
 
-  it('un festivo di sabato conta come festivo e non come sabato', () => {
-    // 25 aprile 2026 e' sabato ed e' festivo.
-    const turni = new Map<IsoDate, Codice>([['2026-04-25', 'P1']]);
-    const o = oreDelMese(2026, 4, turni);
-    expect(o.festivo).toBe(8);
-    expect(o.sabato).toBe(0);
-    expect(o.totale).toBe(8);
+  it('a Saturday holiday counts as a holiday, not as a Saturday', () => {
+    // 25 April 2026 is a Saturday and a holiday.
+    const shifts = new Map<IsoDate, ShiftCode>([['2026-04-25', 'P1']]);
+    const h = monthHours(2026, 4, shifts);
+    expect(h.holiday).toBe(8);
+    expect(h.saturday).toBe(0);
+    expect(h.total).toBe(8);
   });
 
-  it('un festivo di domenica conta come festivo e non come domenica', () => {
-    // 1 novembre 2026 e' domenica ed e' festivo.
-    const turni = new Map<IsoDate, Codice>([['2026-11-01', 'M']]);
-    const o = oreDelMese(2026, 11, turni);
-    expect(o.festivo).toBe(6);
-    expect(o.domenica).toBe(0);
+  it('a Sunday holiday counts as a holiday, not as a Sunday', () => {
+    // 1 November 2026 is a Sunday and a holiday.
+    const shifts = new Map<IsoDate, ShiftCode>([['2026-11-01', 'M']]);
+    const h = monthHours(2026, 11, shifts);
+    expect(h.holiday).toBe(6);
+    expect(h.sunday).toBe(0);
   });
 
-  it('i giorni liberi e i giorni non inseriti non contano', () => {
-    const turni = new Map<IsoDate, Codice>([['2026-01-05', 'L']]);
-    expect(oreDelMese(2026, 1, turni).totale).toBe(0);
-    expect(oreDelMese(2026, 1, new Map()).totale).toBe(0);
+  it('days off and days never entered do not count', () => {
+    const shifts = new Map<IsoDate, ShiftCode>([['2026-01-05', 'L']]);
+    expect(monthHours(2026, 1, shifts).total).toBe(0);
+    expect(monthHours(2026, 1, new Map()).total).toBe(0);
   });
 
-  it('funziona anche su un anno bisestile', () => {
-    const turni = annoPieno(2024);
-    const o = oreDelMese(2024, 2, turni);
-    expect(o.ordinarie + o.sabato + o.domenica + o.festivo).toBe(o.totale);
-    expect(giorniDelMese(2024, 2)).toHaveLength(29);
+  it('works on a leap year too', () => {
+    const shifts = fullYear(2024);
+    const h = monthHours(2024, 2, shifts);
+    expect(h.ordinary + h.saturday + h.sunday + h.holiday).toBe(h.total);
+    expect(monthDays(2024, 2)).toHaveLength(29);
   });
 });
 
-describe('importi', () => {
-  const ORE: ReturnType<typeof oreDelMese> = {
-    ordinarie: 100,
-    sabato: 8,
-    domenica: 4,
-    festivo: 2,
-    totale: 114,
+describe('pay', () => {
+  const HOURS: MonthHours = {
+    ordinary: 100,
+    saturday: 8,
+    sunday: 4,
+    holiday: 2,
+    total: 114,
   };
 
-  it('senza tariffa non compare nessuna cifra', () => {
-    const i = importiDelMese(ORE, PAGA_VUOTA);
-    expect(i.lordoBase).toBeNull();
-    expect(i.lordoTotale).toBeNull();
-    expect(i.nettoStimato).toBeNull();
-    expect(i.rateo13a).toBeNull();
+  it('without an hourly rate no figure appears', () => {
+    const p = monthPay(HOURS, EMPTY_PAY_SETTINGS);
+    expect(p.basePay).toBeNull();
+    expect(p.grossTotal).toBeNull();
+    expect(p.estimatedNet).toBeNull();
+    expect(p.thirteenthAccrual).toBeNull();
   });
 
-  it('calcola base, maggiorazioni, rateo e netto', () => {
-    const i = importiDelMese(ORE, {
-      tariffaOraria: 10,
-      maggSabato: 0.2,
-      maggDomenica: 0.3,
-      maggFestivo: 0.5,
-      rateo13a: 1 / 12,
-      coeffNetto: 0.75,
+  it('computes base, premiums, accrual and net', () => {
+    const p = monthPay(HOURS, {
+      hourlyRate: 10,
+      saturdayPremium: 0.2,
+      sundayPremium: 0.3,
+      holidayPremium: 0.5,
+      thirteenthAccrual: 1 / 12,
+      netRatio: 0.75,
     });
-    expect(i.lordoBase).toBe(1140);
-    expect(i.maggSabato).toBeCloseTo(16, 10);
-    expect(i.maggDomenica).toBeCloseTo(12, 10);
-    expect(i.maggFestivo).toBeCloseTo(10, 10);
-    const imponibile = 1140 + 16 + 12 + 10;
-    expect(i.rateo13a).toBeCloseTo(imponibile / 12, 10);
-    expect(i.lordoTotale).toBeCloseTo(imponibile + imponibile / 12, 10);
-    expect(i.nettoStimato).toBeCloseTo((imponibile + imponibile / 12) * 0.75, 10);
+    expect(p.basePay).toBe(1140);
+    expect(p.saturdayPremium).toBeCloseTo(16, 10);
+    expect(p.sundayPremium).toBeCloseTo(12, 10);
+    expect(p.holidayPremium).toBeCloseTo(10, 10);
+    const taxable = 1140 + 16 + 12 + 10;
+    expect(p.thirteenthAccrual).toBeCloseTo(taxable / 12, 10);
+    expect(p.grossTotal).toBeCloseTo(taxable + taxable / 12, 10);
+    expect(p.estimatedNet).toBeCloseTo((taxable + taxable / 12) * 0.75, 10);
   });
 
-  it('con la sola tariffa mostra il lordo base ma non il totale', () => {
-    // Un totale che ignora le maggiorazioni sottostima quanto spetta:
-    // meglio niente che una cifra sbagliata per difetto.
-    const i = importiDelMese(ORE, { ...PAGA_VUOTA, tariffaOraria: 10 });
-    expect(i.lordoBase).toBe(1140);
-    expect(i.maggSabato).toBeNull();
-    expect(i.maggDomenica).toBeNull();
-    expect(i.maggFestivo).toBeNull();
-    expect(i.lordoTotale).toBeNull();
-    expect(i.rateo13a).toBeNull();
-    expect(i.nettoStimato).toBeNull();
+  it('with only the rate it shows base pay but no total', () => {
+    // A total that ignores premiums understates what is owed:
+    // better nothing than a figure that is wrong downwards.
+    const p = monthPay(HOURS, { ...EMPTY_PAY_SETTINGS, hourlyRate: 10 });
+    expect(p.basePay).toBe(1140);
+    expect(p.saturdayPremium).toBeNull();
+    expect(p.sundayPremium).toBeNull();
+    expect(p.holidayPremium).toBeNull();
+    expect(p.grossTotal).toBeNull();
+    expect(p.thirteenthAccrual).toBeNull();
+    expect(p.estimatedNet).toBeNull();
   });
 
-  it('basta una maggiorazione mancante per non mostrare il totale', () => {
-    const quasi = {
-      ...PAGA_VUOTA,
-      tariffaOraria: 10,
-      maggSabato: 0.2,
-      maggDomenica: 0.3,
-      coeffNetto: 0.7,
+  it('one missing premium is enough to withhold the total', () => {
+    const almost = {
+      ...EMPTY_PAY_SETTINGS,
+      hourlyRate: 10,
+      saturdayPremium: 0.2,
+      sundayPremium: 0.3,
+      netRatio: 0.7,
     };
-    const i = importiDelMese(ORE, quasi);
-    expect(i.maggSabato).toBeCloseTo(16, 10);
-    expect(i.maggFestivo).toBeNull();
-    expect(i.lordoTotale).toBeNull();
-    expect(i.nettoStimato).toBeNull();
+    const p = monthPay(HOURS, almost);
+    expect(p.saturdayPremium).toBeCloseTo(16, 10);
+    expect(p.holidayPremium).toBeNull();
+    expect(p.grossTotal).toBeNull();
+    expect(p.estimatedNet).toBeNull();
   });
 
-  it('il netto richiede anche il coefficiente', () => {
-    const completa = {
-      tariffaOraria: 10,
-      maggSabato: 0.2,
-      maggDomenica: 0.3,
-      maggFestivo: 0.5,
-      rateo13a: 1 / 12,
-      coeffNetto: null,
+  it('the net also needs the ratio', () => {
+    const complete = {
+      hourlyRate: 10,
+      saturdayPremium: 0.2,
+      sundayPremium: 0.3,
+      holidayPremium: 0.5,
+      thirteenthAccrual: 1 / 12,
+      netRatio: null,
     };
-    expect(importiDelMese(ORE, completa).lordoTotale).not.toBeNull();
-    expect(importiDelMese(ORE, completa).nettoStimato).toBeNull();
-    const con = importiDelMese(ORE, { ...completa, coeffNetto: 0.7 });
-    const imponibile = 1140 + 16 + 12 + 10;
-    expect(con.nettoStimato).toBeCloseTo((imponibile + imponibile / 12) * 0.7, 10);
+    expect(monthPay(HOURS, complete).grossTotal).not.toBeNull();
+    expect(monthPay(HOURS, complete).estimatedNet).toBeNull();
+    const withRatio = monthPay(HOURS, { ...complete, netRatio: 0.7 });
+    const taxable = 1140 + 16 + 12 + 10;
+    expect(withRatio.estimatedNet).toBeCloseTo((taxable + taxable / 12) * 0.7, 10);
   });
 
-  it('il totale annuo resta vuoto se ogni mese e vuoto', () => {
-    const vuoti = Array.from({ length: 12 }, () => importiDelMese(ORE, PAGA_VUOTA));
-    const t = sommaImporti(vuoti);
-    expect(t.lordoTotale).toBeNull();
-    expect(t.nettoStimato).toBeNull();
+  it('the yearly total stays empty when every month is empty', () => {
+    const empty = Array.from({ length: 12 }, () => monthPay(HOURS, EMPTY_PAY_SETTINGS));
+    const t = sumPay(empty);
+    expect(t.grossTotal).toBeNull();
+    expect(t.estimatedNet).toBeNull();
   });
 
-  it('il totale annuo somma i mesi configurati', () => {
-    const paga = { ...PAGA_VUOTA, tariffaOraria: 10, coeffNetto: 0.5 };
-    const mesi = Array.from({ length: 12 }, () => importiDelMese(ORE, paga));
-    const t = sommaImporti(mesi);
-    expect(t.lordoBase).toBeCloseTo(1140 * 12, 8);
-    expect(t.nettoStimato).toBeCloseTo(mesi[0].nettoStimato! * 12, 8);
+  it('the yearly total sums the configured months', () => {
+    const settings = { ...EMPTY_PAY_SETTINGS, hourlyRate: 10, netRatio: 0.5 };
+    const months = Array.from({ length: 12 }, () => monthPay(HOURS, settings));
+    const t = sumPay(months);
+    expect(t.basePay).toBeCloseTo(1140 * 12, 8);
   });
 });

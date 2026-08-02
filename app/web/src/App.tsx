@@ -1,81 +1,81 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+/** Visible text stays in Italian: Vanessa reads it. */
 
-import type { Codice, IsoDate, Paga } from '@vanessa/core';
-import { CODICI, MESI, PAGA_VUOTA, giorniDelMese } from '@vanessa/core';
+import { useCallback, useEffect, useState } from 'react';
 
-import { Calendario } from './Calendario.js';
-import { Stipendio } from './Stipendio.js';
-import { api as apiReale, type Api } from './api.js';
+import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, MONTH_NAMES, SHIFTS } from '@vanessa/core';
 
-const ANNO = 2026;
+import { Calendar } from './Calendar.js';
+import { Pay } from './Pay.js';
+import { api as realApi, type Api } from './api.js';
+
+const YEAR = 2026;
 
 export interface AppProps {
   api?: Api;
-  meseIniziale?: number;
+  initialMonth?: number;
 }
 
-export function App({ api = apiReale, meseIniziale = 1 }: AppProps) {
-  const [mese, setMese] = useState(meseIniziale);
-  const [vista, setVista] = useState<'calendario' | 'stipendio'>('calendario');
-  const [turni, setTurni] = useState<Map<IsoDate, Codice>>(new Map());
-  const [paga, setPaga] = useState<Paga>(PAGA_VUOTA);
-  const [selezionato, setSelezionato] = useState<IsoDate | null>(null);
-  const [errore, setErrore] = useState<string | null>(null);
-  const [caricamento, setCaricamento] = useState(true);
+export function App({ api = realApi, initialMonth = 1 }: AppProps) {
+  const [month, setMonth] = useState(initialMonth);
+  const [view, setView] = useState<'calendar' | 'pay'>('calendar');
+  const [shifts, setShifts] = useState<Map<IsoDate, ShiftCode>>(new Map());
+  const [settings, setSettings] = useState<PaySettings>(EMPTY_PAY_SETTINGS);
+  const [selected, setSelected] = useState<IsoDate | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let vivo = true;
-    setCaricamento(true);
-    Promise.all([api.turni(`${ANNO}-01-01`, `${ANNO}-12-31`), api.paga()])
-      .then(([t, p]) => {
-        if (!vivo) return;
-        setTurni(new Map(t.map((x) => [x.data, x.cod])));
-        setPaga(p);
-        setErrore(null);
+    let alive = true;
+    setLoading(true);
+    Promise.all([api.shifts(`${YEAR}-01-01`, `${YEAR}-12-31`), api.paySettings()])
+      .then(([s, p]) => {
+        if (!alive) return;
+        setShifts(new Map(s.map((x) => [x.date, x.code])));
+        setSettings(p);
+        setError(null);
       })
-      .catch((e: Error) => vivo && setErrore(e.message))
-      .finally(() => vivo && setCaricamento(false));
+      .catch((e: Error) => alive && setError(e.message))
+      .finally(() => alive && setLoading(false));
     return () => {
-      vivo = false;
+      alive = false;
     };
   }, [api]);
 
-  /** Ottimistico: la cella cambia subito, e torna indietro se la rete dice di no. */
-  const scegliCodice = useCallback(
-    async (d: IsoDate, cod: Codice | null) => {
-      const precedente = turni.get(d) ?? null;
-      setTurni((m) => {
-        const n = new Map(m);
-        if (cod) n.set(d, cod);
-        else n.delete(d);
-        return n;
+  /** Optimistic: the cell changes at once, and rolls back if the network says no. */
+  const pickCode = useCallback(
+    async (d: IsoDate, code: ShiftCode | null) => {
+      const previous = shifts.get(d) ?? null;
+      setShifts((m) => {
+        const next = new Map(m);
+        if (code) next.set(d, code);
+        else next.delete(d);
+        return next;
       });
-      setSelezionato(null);
+      setSelected(null);
       try {
-        await api.salvaTurno(d, cod);
-        setErrore(null);
+        await api.saveShift(d, code);
+        setError(null);
       } catch (e) {
-        setTurni((m) => {
-          const n = new Map(m);
-          if (precedente) n.set(d, precedente);
-          else n.delete(d);
-          return n;
+        setShifts((m) => {
+          const next = new Map(m);
+          if (previous) next.set(d, previous);
+          else next.delete(d);
+          return next;
         });
-        setErrore((e as Error).message);
+        setError((e as Error).message);
       }
     },
-    [api, turni],
+    [api, shifts],
   );
 
-  const cambiaPaga = useCallback(
-    (p: Paga) => {
-      setPaga(p);
-      api.salvaPaga(p).catch((e: Error) => setErrore(e.message));
+  const changeSettings = useCallback(
+    (p: PaySettings) => {
+      setSettings(p);
+      api.savePaySettings(p).catch((e: Error) => setError(e.message));
     },
     [api],
   );
-
-  const giorniMese = useMemo(() => giorniDelMese(ANNO, mese), [mese]);
 
   return (
     <div className="app">
@@ -84,100 +84,90 @@ export function App({ api = apiReale, meseIniziale = 1 }: AppProps) {
         <nav aria-label="Viste">
           <button
             type="button"
-            aria-current={vista === 'calendario'}
-            onClick={() => setVista('calendario')}
+            aria-current={view === 'calendar'}
+            onClick={() => setView('calendar')}
           >
             Calendario
           </button>
-          <button
-            type="button"
-            aria-current={vista === 'stipendio'}
-            onClick={() => setVista('stipendio')}
-          >
+          <button type="button" aria-current={view === 'pay'} onClick={() => setView('pay')}>
             Stipendio
           </button>
         </nav>
       </header>
 
-      {errore && (
-        <p className="errore" role="alert">
-          {errore}
+      {error && (
+        <p className="error" role="alert">
+          {error}
         </p>
       )}
 
-      {vista === 'calendario' && (
+      {view === 'calendar' && (
         <>
-          <div className="navigazione-mese">
+          <div className="month-nav">
             <button
               type="button"
               aria-label="Mese precedente"
-              disabled={mese === 1}
-              onClick={() => setMese((m) => Math.max(1, m - 1))}
+              disabled={month === 1}
+              onClick={() => setMonth((m) => Math.max(1, m - 1))}
             >
               ‹
             </button>
             <h2>
-              {MESI[mese - 1]} {ANNO}
+              {MONTH_NAMES[month - 1]} {YEAR}
             </h2>
             <button
               type="button"
               aria-label="Mese successivo"
-              disabled={mese === 12}
-              onClick={() => setMese((m) => Math.min(12, m + 1))}
+              disabled={month === 12}
+              onClick={() => setMonth((m) => Math.min(12, m + 1))}
             >
               ›
             </button>
           </div>
 
-          {caricamento ? (
-            <p className="attesa">Carico i turni…</p>
+          {loading ? (
+            <p className="waiting">Carico i turni…</p>
           ) : (
-            <Calendario
-              anno={ANNO}
-              mese={mese}
-              turni={turni}
-              selezionato={selezionato}
-              onScegli={setSelezionato}
+            <Calendar
+              year={YEAR}
+              month={month}
+              shifts={shifts}
+              selected={selected}
+              onPick={setSelected}
             />
           )}
         </>
       )}
 
-      {vista === 'stipendio' && (
-        <Stipendio anno={ANNO} turni={turni} paga={paga} onCambiaPaga={cambiaPaga} />
+      {view === 'pay' && (
+        <Pay year={YEAR} shifts={shifts} settings={settings} onChange={changeSettings} />
       )}
 
-      {selezionato && (
-        <div className="scelta" role="dialog" aria-label={`Turno del ${selezionato}`}>
-          <p>{selezionato}</p>
-          <div className="codici">
-            {CODICI.map((t) => (
+      {selected && (
+        <div className="picker" role="dialog" aria-label={`Turno del ${selected}`}>
+          <p>{selected}</p>
+          <div className="codes">
+            {SHIFTS.map((s) => (
               <button
-                key={t.cod}
+                key={s.code}
                 type="button"
-                className={`t-${t.cod}`}
-                onClick={() => void scegliCodice(selezionato, t.cod)}
+                className={`t-${s.code}`}
+                onClick={() => void pickCode(selected, s.code)}
               >
-                <strong>{t.cod}</strong>
-                <span>{t.descrizione}</span>
+                <strong>{s.code}</strong>
+                <span>{s.description}</span>
               </button>
             ))}
-            <button type="button" onClick={() => void scegliCodice(selezionato, null)}>
+            <button type="button" onClick={() => void pickCode(selected, null)}>
               <strong>×</strong>
               <span>Cancella</span>
             </button>
           </div>
-          <button type="button" className="chiudi" onClick={() => setSelezionato(null)}>
+          <button type="button" className="close" onClick={() => setSelected(null)}>
             Chiudi
           </button>
         </div>
       )}
-
-      <footer>
-        <small>
-          {giorniMese.length} giorni in {MESI[mese - 1]}
-        </small>
-      </footer>
     </div>
   );
 }

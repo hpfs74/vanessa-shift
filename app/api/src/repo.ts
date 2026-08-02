@@ -1,4 +1,4 @@
-/** Accesso a DynamoDB. L'unico posto che conosce la forma della tabella. */
+/** DynamoDB access. The only place that knows the table's shape. */
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
@@ -9,121 +9,121 @@ import {
   QueryCommand,
 } from '@aws-sdk/lib-dynamodb';
 
-import type { Codice, IsoDate, Paga } from '@vanessa/core';
-import { PAGA_VUOTA, parseIso } from '@vanessa/core';
+import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, parseIso } from '@vanessa/core';
 
-export interface Turno {
-  data: IsoDate;
-  cod: Codice;
-  codOrig?: Codice | null;
-  collega?: string | null;
-  tipoScambio?: string | null;
-  note?: string | null;
+export interface ShiftRecord {
+  date: IsoDate;
+  code: ShiftCode;
+  originalCode?: ShiftCode | null;
+  colleague?: string | null;
+  swapKind?: string | null;
+  notes?: string | null;
 }
 
 export const CONFIG_PK = 'CONFIG';
-export const CONFIG_SK = 'PAGA';
+export const CONFIG_SK = 'PAY';
 
-export function turniPk(anno: number): string {
-  return `TURNI#${anno}`;
+export function shiftsPk(year: number): string {
+  return `SHIFTS#${year}`;
 }
 
 export interface Repo {
-  turniTra(da: IsoDate, a: IsoDate): Promise<Turno[]>;
-  salvaTurno(t: Turno): Promise<void>;
-  cancellaTurno(data: IsoDate): Promise<void>;
-  leggiPaga(): Promise<Paga>;
-  salvaPaga(p: Paga): Promise<void>;
+  shiftsBetween(from: IsoDate, to: IsoDate): Promise<ShiftRecord[]>;
+  saveShift(s: ShiftRecord): Promise<void>;
+  deleteShift(date: IsoDate): Promise<void>;
+  readPaySettings(): Promise<PaySettings>;
+  savePaySettings(p: PaySettings): Promise<void>;
 }
 
-/** Un intervallo puo' attraversare il capodanno: una query per anno. */
-function anniCoperti(da: IsoDate, a: IsoDate): number[] {
-  const primo = parseIso(da).anno;
-  const ultimo = parseIso(a).anno;
+/** A range can cross new year: one query per year. */
+function yearsCovered(from: IsoDate, to: IsoDate): number[] {
+  const first = parseIso(from).year;
+  const last = parseIso(to).year;
   const out: number[] = [];
-  for (let y = primo; y <= ultimo; y++) out.push(y);
+  for (let y = first; y <= last; y++) out.push(y);
   return out;
 }
 
-export function creaRepo(tabella: string, client?: DynamoDBDocumentClient): Repo {
+export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo {
   const doc = client ?? DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
   return {
-    async turniTra(da, a) {
-      const turni: Turno[] = [];
-      for (const anno of anniCoperti(da, a)) {
-        let esclusivo: Record<string, unknown> | undefined;
+    async shiftsBetween(from, to) {
+      const shifts: ShiftRecord[] = [];
+      for (const year of yearsCovered(from, to)) {
+        let exclusiveStartKey: Record<string, unknown> | undefined;
         do {
           const r = await doc.send(
             new QueryCommand({
-              TableName: tabella,
-              KeyConditionExpression: 'pk = :pk AND sk BETWEEN :da AND :a',
-              ExpressionAttributeValues: { ':pk': turniPk(anno), ':da': da, ':a': a },
-              ExclusiveStartKey: esclusivo,
+              TableName: table,
+              KeyConditionExpression: 'pk = :pk AND sk BETWEEN :from AND :to',
+              ExpressionAttributeValues: { ':pk': shiftsPk(year), ':from': from, ':to': to },
+              ExclusiveStartKey: exclusiveStartKey,
             }),
           );
           for (const item of r.Items ?? []) {
-            turni.push({
-              data: item.sk as IsoDate,
-              cod: item.cod as Codice,
-              codOrig: (item.codOrig as Codice | undefined) ?? null,
-              collega: (item.collega as string | undefined) ?? null,
-              tipoScambio: (item.tipoScambio as string | undefined) ?? null,
-              note: (item.note as string | undefined) ?? null,
+            shifts.push({
+              date: item.sk as IsoDate,
+              code: item.code as ShiftCode,
+              originalCode: (item.originalCode as ShiftCode | undefined) ?? null,
+              colleague: (item.colleague as string | undefined) ?? null,
+              swapKind: (item.swapKind as string | undefined) ?? null,
+              notes: (item.notes as string | undefined) ?? null,
             });
           }
-          esclusivo = r.LastEvaluatedKey;
-        } while (esclusivo);
+          exclusiveStartKey = r.LastEvaluatedKey;
+        } while (exclusiveStartKey);
       }
-      turni.sort((x, y) => (x.data < y.data ? -1 : x.data > y.data ? 1 : 0));
-      return turni;
+      shifts.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+      return shifts;
     },
 
-    async salvaTurno(t) {
-      const { anno } = parseIso(t.data);
+    async saveShift(s) {
+      const { year } = parseIso(s.date);
       await doc.send(
         new PutCommand({
-          TableName: tabella,
+          TableName: table,
           Item: {
-            pk: turniPk(anno),
-            sk: t.data,
-            cod: t.cod,
-            ...(t.codOrig ? { codOrig: t.codOrig } : {}),
-            ...(t.collega ? { collega: t.collega } : {}),
-            ...(t.tipoScambio ? { tipoScambio: t.tipoScambio } : {}),
-            ...(t.note ? { note: t.note } : {}),
+            pk: shiftsPk(year),
+            sk: s.date,
+            code: s.code,
+            ...(s.originalCode ? { originalCode: s.originalCode } : {}),
+            ...(s.colleague ? { colleague: s.colleague } : {}),
+            ...(s.swapKind ? { swapKind: s.swapKind } : {}),
+            ...(s.notes ? { notes: s.notes } : {}),
           },
         }),
       );
     },
 
-    async cancellaTurno(data) {
-      const { anno } = parseIso(data);
+    async deleteShift(date) {
+      const { year } = parseIso(date);
       await doc.send(
-        new DeleteCommand({ TableName: tabella, Key: { pk: turniPk(anno), sk: data } }),
+        new DeleteCommand({ TableName: table, Key: { pk: shiftsPk(year), sk: date } }),
       );
     },
 
-    async leggiPaga() {
+    async readPaySettings() {
       const r = await doc.send(
-        new GetCommand({ TableName: tabella, Key: { pk: CONFIG_PK, sk: CONFIG_SK } }),
+        new GetCommand({ TableName: table, Key: { pk: CONFIG_PK, sk: CONFIG_SK } }),
       );
-      if (!r.Item) return PAGA_VUOTA;
+      if (!r.Item) return EMPTY_PAY_SETTINGS;
       const num = (v: unknown): number | null => (typeof v === 'number' ? v : null);
       return {
-        tariffaOraria: num(r.Item.tariffaOraria),
-        maggSabato: num(r.Item.maggSabato),
-        maggDomenica: num(r.Item.maggDomenica),
-        maggFestivo: num(r.Item.maggFestivo),
-        rateo13a: num(r.Item.rateo13a),
-        coeffNetto: num(r.Item.coeffNetto),
+        hourlyRate: num(r.Item.hourlyRate),
+        saturdayPremium: num(r.Item.saturdayPremium),
+        sundayPremium: num(r.Item.sundayPremium),
+        holidayPremium: num(r.Item.holidayPremium),
+        thirteenthAccrual: num(r.Item.thirteenthAccrual),
+        netRatio: num(r.Item.netRatio),
       };
     },
 
-    async salvaPaga(p) {
+    async savePaySettings(p) {
       await doc.send(
         new PutCommand({
-          TableName: tabella,
+          TableName: table,
           Item: { pk: CONFIG_PK, sk: CONFIG_SK, ...p },
         }),
       );

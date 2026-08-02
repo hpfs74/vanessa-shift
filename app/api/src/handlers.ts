@@ -1,80 +1,81 @@
-/** I quattro handler Lambda. Il repo si inietta per poterli testare senza rete. */
+/** The four Lambda handlers. The repo is injected so they test without a network. */
 
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 
 import type { Repo } from './repo.js';
-import { creaRepo } from './repo.js';
+import { createRepo } from './repo.js';
 import {
-  esigiCodice,
-  esigiData,
-  esigiIntervallo,
-  esigiPaga,
-  gestisci,
+  handle,
   ok,
+  optionalText,
   parseJson,
-  testoOpzionale,
+  requireDate,
+  requirePaySettings,
+  requireRange,
+  requireShiftCode,
 } from './http.js';
 
-function repoDaAmbiente(): Repo {
-  const tabella = process.env.TABELLA;
-  if (!tabella) throw new Error('variabile di ambiente TABELLA non impostata');
-  return creaRepo(tabella);
+function repoFromEnvironment(): Repo {
+  const table = process.env.TABLE_NAME;
+  if (!table) throw new Error('environment variable TABLE_NAME is not set');
+  return createRepo(table);
 }
 
-export function getShiftsCon(repo: Repo) {
-  return (evento: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
-    gestisci(async () => {
-      const q = evento.queryStringParameters ?? {};
-      const { da, a } = esigiIntervallo(q.from, q.to);
-      return ok({ turni: await repo.turniTra(da, a) });
+export function getShiftsWith(repo: Repo) {
+  return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
+    handle(async () => {
+      const q = event.queryStringParameters ?? {};
+      const { from, to } = requireRange(q.from, q.to);
+      return ok({ shifts: await repo.shiftsBetween(from, to) });
     });
 }
 
-export function putShiftCon(repo: Repo) {
-  return (evento: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
-    gestisci(async () => {
-      const data = esigiData(evento.pathParameters?.date, 'date');
-      const b = parseJson(evento.body);
+export function putShiftWith(repo: Repo) {
+  return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
+    handle(async () => {
+      const date = requireDate(event.pathParameters?.date, 'date');
+      const b = parseJson(event.body);
 
-      // Un codice vuoto cancella il giorno: l'assenza e' l'assenza,
-      // non un item con dentro il nulla.
-      if (b.cod === null || b.cod === undefined || b.cod === '') {
-        await repo.cancellaTurno(data);
-        return ok({ data, cancellato: true });
+      // An empty code deletes the day: absence is absence, not an item
+      // holding nothing.
+      if (b.code === null || b.code === undefined || b.code === '') {
+        await repo.deleteShift(date);
+        return ok({ date, deleted: true });
       }
 
-      const turno = {
-        data,
-        cod: esigiCodice(b.cod),
-        codOrig: b.codOrig === null || b.codOrig === undefined || b.codOrig === ''
-          ? null
-          : esigiCodice(b.codOrig),
-        collega: testoOpzionale(b.collega, 'collega'),
-        tipoScambio: testoOpzionale(b.tipoScambio, 'tipoScambio', 40),
-        note: testoOpzionale(b.note, 'note', 500),
+      const record = {
+        date,
+        code: requireShiftCode(b.code),
+        originalCode:
+          b.originalCode === null || b.originalCode === undefined || b.originalCode === ''
+            ? null
+            : requireShiftCode(b.originalCode),
+        colleague: optionalText(b.colleague, 'colleague'),
+        swapKind: optionalText(b.swapKind, 'swapKind', 40),
+        notes: optionalText(b.notes, 'notes', 500),
       };
-      await repo.salvaTurno(turno);
-      return ok({ turno });
+      await repo.saveShift(record);
+      return ok({ shift: record });
     });
 }
 
-export function getConfigCon(repo: Repo) {
-  // L'evento non serve, ma la firma resta uniforme alle altre rotte.
-  return (_evento?: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
-    gestisci(async () => ok({ paga: await repo.leggiPaga() }));
+export function getConfigWith(repo: Repo) {
+  // The event is unused, but the signature stays uniform with the other routes.
+  return (_event?: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
+    handle(async () => ok({ pay: await repo.readPaySettings() }));
 }
 
-export function putConfigCon(repo: Repo) {
-  return (evento: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
-    gestisci(async () => {
-      const paga = esigiPaga(parseJson(evento.body));
-      await repo.salvaPaga(paga);
-      return ok({ paga });
+export function putConfigWith(repo: Repo) {
+  return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
+    handle(async () => {
+      const pay = requirePaySettings(parseJson(event.body));
+      await repo.savePaySettings(pay);
+      return ok({ pay });
     });
 }
 
-// Entry point delle Lambda in produzione.
-export const getShifts = (e: APIGatewayProxyEventV2) => getShiftsCon(repoDaAmbiente())(e);
-export const putShift = (e: APIGatewayProxyEventV2) => putShiftCon(repoDaAmbiente())(e);
-export const getConfig = (e: APIGatewayProxyEventV2) => getConfigCon(repoDaAmbiente())(e);
-export const putConfig = (e: APIGatewayProxyEventV2) => putConfigCon(repoDaAmbiente())(e);
+// Production Lambda entry points.
+export const getShifts = (e: APIGatewayProxyEventV2) => getShiftsWith(repoFromEnvironment())(e);
+export const putShift = (e: APIGatewayProxyEventV2) => putShiftWith(repoFromEnvironment())(e);
+export const getConfig = (e: APIGatewayProxyEventV2) => getConfigWith(repoFromEnvironment())(e);
+export const putConfig = (e: APIGatewayProxyEventV2) => putConfigWith(repoFromEnvironment())(e);

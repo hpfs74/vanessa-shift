@@ -2,15 +2,15 @@ import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { StackApp } from '../lib/stack-app.js';
-import { StackCertificato } from '../lib/stack-web.js';
+import { AppStack } from '../lib/app-stack.js';
+import { CertificateStack } from '../lib/certificate-stack.js';
 
 const CONFIG = {
   account: '495133941005',
-  regione: 'eu-south-1',
-  dominio: 'vanessa.matteo.cool',
-  zonaDominio: 'matteo.cool',
-  zonaId: 'Z2T8X72UH7FONU',
+  region: 'eu-south-1',
+  domain: 'vanessa.matteo.cool',
+  zoneDomain: 'matteo.cool',
+  zoneId: 'Z2T8X72UH7FONU',
 };
 
 let app: Template;
@@ -18,45 +18,45 @@ let cert: Template;
 
 beforeAll(() => {
   const a = new App();
-  const sCert = new StackCertificato(a, 'Cert', {
+  const sCert = new CertificateStack(a, 'Cert', {
     env: { account: CONFIG.account, region: 'us-east-1' },
-    dominio: CONFIG.dominio,
-    zonaDominio: CONFIG.zonaDominio,
-    zonaId: CONFIG.zonaId,
+    domain: CONFIG.domain,
+    zoneDomain: CONFIG.zoneDomain,
+    zoneId: CONFIG.zoneId,
   });
-  const sApp = new StackApp(a, 'App', {
-    env: { account: CONFIG.account, region: CONFIG.regione },
-    dominio: CONFIG.dominio,
-    zonaDominio: CONFIG.zonaDominio,
-    zonaId: CONFIG.zonaId,
-    certificatoArn: 'arn:aws:acm:us-east-1:495133941005:certificate/finto',
+  const sApp = new AppStack(a, 'App', {
+    env: { account: CONFIG.account, region: CONFIG.region },
+    domain: CONFIG.domain,
+    zoneDomain: CONFIG.zoneDomain,
+    zoneId: CONFIG.zoneId,
+    certificateArn: 'arn:aws:acm:us-east-1:495133941005:certificate/finto',
   });
   cert = Template.fromStack(sCert);
   app = Template.fromStack(sApp);
 });
 
-describe('certificato', () => {
-  it('sta in us-east-1, come CloudFront pretende', () => {
+describe('certificate', () => {
+  it('lives in us-east-1, as CloudFront demands', () => {
     const a = new App();
-    const s = new StackCertificato(a, 'C', {
+    const s = new CertificateStack(a, 'C', {
       env: { account: CONFIG.account, region: 'us-east-1' },
-      dominio: CONFIG.dominio,
-      zonaDominio: CONFIG.zonaDominio,
-      zonaId: CONFIG.zonaId,
+      domain: CONFIG.domain,
+      zoneDomain: CONFIG.zoneDomain,
+      zoneId: CONFIG.zoneId,
     });
     expect(s.region).toBe('us-east-1');
   });
 
-  it('copre il dominio dellapp e si valida via DNS', () => {
+  it('covers the app domain and validates over DNS', () => {
     cert.hasResourceProperties('AWS::CertificateManager::Certificate', {
-      DomainName: CONFIG.dominio,
+      DomainName: CONFIG.domain,
       ValidationMethod: 'DNS',
     });
   });
 });
 
-describe('tabella', () => {
-  it('ha il point-in-time recovery attivo', () => {
+describe('table', () => {
+  it('has point-in-time recovery enabled', () => {
     app.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
       Replicas: Match.arrayWith([
         Match.objectLike({
@@ -66,17 +66,17 @@ describe('tabella', () => {
     });
   });
 
-  it('e a consumo, senza capacita prenotata', () => {
+  it('bills on demand, with no provisioned capacity', () => {
     app.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
       BillingMode: 'PAY_PER_REQUEST',
     });
   });
 
-  it('sopravvive alla cancellazione dello stack', () => {
+  it('survives deletion of the stack', () => {
     app.hasResource('AWS::DynamoDB::GlobalTable', { DeletionPolicy: 'Retain' });
   });
 
-  it('ha chiave composta pk/sk', () => {
+  it('has a composite pk/sk key', () => {
     app.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
       KeySchema: [
         { AttributeName: 'pk', KeyType: 'HASH' },
@@ -86,8 +86,8 @@ describe('tabella', () => {
   });
 });
 
-describe('lambda', () => {
-  it('ce ne sono quattro, una per rotta', () => {
+describe('lambdas', () => {
+  it('there are four, one per route', () => {
     const fn = app.findResources('AWS::Lambda::Function');
     const nostre = Object.values(fn).filter((f: any) =>
       ['getShifts', 'putShift', 'getConfig', 'putConfig'].includes(f.Properties?.Handler?.split('.').pop()),
@@ -95,27 +95,27 @@ describe('lambda', () => {
     expect(nostre).toHaveLength(4);
   });
 
-  it('girano su Node 22 e ARM', () => {
+  it('run on Node 22 and ARM', () => {
     for (const f of Object.values(app.findResources('AWS::Lambda::Function')) as any[]) {
       if (!f.Properties?.Runtime?.startsWith('nodejs')) continue;
-      if (f.Properties.Handler?.includes('index.handler')) continue; // helper CDK
+      if (f.Properties.Handler?.includes('index.handler')) continue; // CDK helper
       expect(f.Properties.Runtime).toBe('nodejs22.x');
       expect(f.Properties.Architectures).toEqual(['arm64']);
     }
   });
 
-  it('conoscono la tabella e lorigine consentita', () => {
+  it('know the table and the allowed origin', () => {
     app.hasResourceProperties('AWS::Lambda::Function', {
       Environment: {
         Variables: Match.objectLike({
-          ORIGINE_CONSENTITA: `https://${CONFIG.dominio}`,
-          TABELLA: Match.anyValue(),
+          ALLOWED_ORIGIN: `https://${CONFIG.domain}`,
+          TABLE_NAME: Match.anyValue(),
         }),
       },
     });
   });
 
-  it('le lambda di sola lettura non hanno permessi di scrittura', () => {
+  it('read-only lambdas hold no write permissions', () => {
     const policies = Object.values(app.findResources('AWS::IAM::Policy')) as any[];
     const lettura = policies.filter((p) => {
       const azioni = p.Properties.PolicyDocument.Statement.flatMap((s: any) =>
@@ -128,7 +128,7 @@ describe('lambda', () => {
 });
 
 describe('api', () => {
-  it('espone le quattro rotte previste', () => {
+  it('exposes the four expected routes', () => {
     const rotte = Object.values(app.findResources('AWS::ApiGatewayV2::Route')).map(
       (r: any) => r.Properties.RouteKey,
     );
@@ -142,15 +142,15 @@ describe('api', () => {
     );
   });
 
-  it('limita il CORS alla sola origine dellapp', () => {
+  it('limits CORS to the app origin alone', () => {
     app.hasResourceProperties('AWS::ApiGatewayV2::Api', {
       CorsConfiguration: Match.objectLike({
-        AllowOrigins: [`https://${CONFIG.dominio}`],
+        AllowOrigins: [`https://${CONFIG.domain}`],
       }),
     });
   });
 
-  it('ha il throttling impostato, unico freno visto che non ce autenticazione', () => {
+  it('sets throttling, the only brake given there is no authentication', () => {
     app.hasResourceProperties('AWS::ApiGatewayV2::Stage', {
       DefaultRouteSettings: Match.objectLike({
         ThrottlingRateLimit: 100,
@@ -159,13 +159,13 @@ describe('api', () => {
     });
   });
 
-  it('non ha authorizer: e una scelta deliberata, non una dimenticanza', () => {
+  it('has no authorizer: a deliberate choice, not an oversight', () => {
     expect(Object.keys(app.findResources('AWS::ApiGatewayV2::Authorizer'))).toHaveLength(0);
   });
 });
 
 describe('hosting', () => {
-  it('il bucket del sito non e pubblico', () => {
+  it('the site bucket is not public', () => {
     app.hasResourceProperties('AWS::S3::Bucket', {
       PublicAccessBlockConfiguration: {
         BlockPublicAcls: true,
@@ -176,7 +176,7 @@ describe('hosting', () => {
     });
   });
 
-  it('il bucket e cifrato e pretende TLS', () => {
+  it('the bucket is encrypted and demands TLS', () => {
     app.hasResourceProperties('AWS::S3::Bucket', {
       BucketEncryption: Match.objectLike({
         ServerSideEncryptionConfiguration: Match.anyValue(),
@@ -189,16 +189,16 @@ describe('hosting', () => {
     expect(tls).toBe(true);
   });
 
-  it('CloudFront legge il bucket con Origin Access Control', () => {
+  it('CloudFront reads the bucket through Origin Access Control', () => {
     expect(
       Object.keys(app.findResources('AWS::CloudFront::OriginAccessControl')),
     ).toHaveLength(1);
   });
 
-  it('serve il dominio, forza HTTPS e rimanda i 404 allapp', () => {
+  it('serves the domain, forces HTTPS and sends 404s back to the app', () => {
     app.hasResourceProperties('AWS::CloudFront::Distribution', {
       DistributionConfig: Match.objectLike({
-        Aliases: [CONFIG.dominio],
+        Aliases: [CONFIG.domain],
         DefaultRootObject: 'index.html',
         DefaultCacheBehavior: Match.objectLike({
           ViewerProtocolPolicy: 'redirect-to-https',
@@ -214,11 +214,11 @@ describe('hosting', () => {
     });
   });
 
-  it('punta il DNS alla distribuzione', () => {
+  it('points DNS at the distribution', () => {
     app.hasResourceProperties('AWS::Route53::RecordSet', {
-      Name: `${CONFIG.dominio}.`,
+      Name: `${CONFIG.domain}.`,
       Type: 'A',
-      HostedZoneId: CONFIG.zonaId,
+      HostedZoneId: CONFIG.zoneId,
     });
   });
 });

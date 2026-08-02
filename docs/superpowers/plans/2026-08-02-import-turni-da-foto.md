@@ -934,7 +934,7 @@ describe('readPhoto', () => {
     const h = readPhotoWith(
       repo,
       async () => {
-        throw new VisionFailed('boom');
+        throw new VisionFailed('boom', 'not-json');
       },
       today,
       year,
@@ -948,7 +948,7 @@ describe('readPhoto', () => {
 
   it('a reading that fails validation is 422, not 500', async () => {
     const { repo } = fakeRepo();
-    const h = readPhotoWith(repo, async () => ({ month: 99 }), today, year);
+    const h = readPhotoWith(repo, async () => ({ found: true, month: 99 }), today, year);
 
     const r: any = await h(photoEvent('AAAA'));
     expect(r.statusCode).toBe(422);

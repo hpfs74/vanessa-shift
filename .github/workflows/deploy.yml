@@ -1,0 +1,156 @@
+name: Deploy
+
+# Nessun filtro sui path: `cdk deploy` non fa nulla quando non c'e' niente da
+# cambiare, mentre filtrare significherebbe lasciare senza test i commit che
+# toccano solo il generatore Python.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Un deploy alla volta. Due `cdk deploy` in parallelo sullo stesso stack si
+# ostacolano e lasciano CloudFormation in UPDATE_IN_PROGRESS. I deploy in
+# corso non si annullano: interrompere a meta' e' peggio che aspettare.
+concurrency:
+  group: deploy-produzione
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  verifica:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Installa le dipendenze
+        working-directory: app
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: app
+        run: npm run typecheck
+
+      - name: Test della app
+        working-directory: app
+        run: npm test
+
+      # Il generatore Python non viene distribuito, ma vive nello stesso
+      # repository: se lo si rompe, si deve sapere qui e non fra sei mesi.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Test del generatore del foglio
+        run: |
+          python -m pip install --quiet -r requirements.txt
+          python -m pytest -q
+
+  deploy:
+    name: Deploy su AWS
+    needs: verifica
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: produzione
+
+    # Il minimo necessario: leggere il codice e farsi rilasciare il token
+    # OIDC. Nessuna credenziale AWS e' conservata da nessuna parte.
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Installa le dipendenze
+        working-directory: app
+        run: npm ci
+
+      - name: Compila il frontend
+        working-directory: app
+        run: npm run build
+
+      - name: Ottieni credenziali temporanee da AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::495133941005:role/vanessa-shift-deploy
+          aws-region: eu-south-1
+          role-session-name: gha-${{ github.run_id }}
+
+      - name: Chi sono
+        run: aws sts get-caller-identity
+
+      # Le differenze vengono stampate prima di applicarle: se un deploy
+      # rompe qualcosa, il log dice cosa e' cambiato senza doverlo dedurre.
+      - name: Differenze rispetto a quanto e' in produzione
+        working-directory: app/infra
+        run: npx cdk diff --all || true
+
+      - name: Deploy
+        working-directory: app/infra
+        run: npx cdk deploy --all --require-approval never --progress events
+
+      # Gli indirizzi si leggono dallo stack, non si scrivono a mano: se lo
+      # stack viene ricreato l'endpoint cambia, e un controllo cablato
+      # continuerebbe a interrogare quello vecchio dicendo che va tutto bene.
+      - name: Leggi gli indirizzi dallo stack
+        id: uscite
+        run: |
+          uscita() {
+            aws cloudformation describe-stacks --stack-name VanessaApp \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+          }
+          echo "sito=$(uscita UrlSito)" >> "$GITHUB_OUTPUT"
+          echo "api=$(uscita UrlApi)" >> "$GITHUB_OUTPUT"
+
+      # Un deploy che risponde 200 e' l'unica prova che vale. CloudFront
+      # impiega un momento a propagare l'invalidazione, da qui i tentativi.
+      - name: Verifica che il sito risponda
+        run: |
+          for tentativo in 1 2 3 4 5; do
+            codice=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.uscite.outputs.sito }}")
+            if [ "$codice" = "200" ]; then
+              echo "Sito in linea (HTTP $codice)"
+              exit 0
+            fi
+            echo "Tentativo $tentativo: HTTP $codice, riprovo fra 10s"
+            sleep 10
+          done
+          echo "Il sito non risponde 200 dopo il deploy"
+          exit 1
+
+      - name: Verifica che l'API risponda
+        run: |
+          codice=$(curl -s -o /dev/null -w '%{http_code}' \
+            "${{ steps.uscite.outputs.api }}/config")
+          if [ "$codice" != "200" ]; then
+            echo "L'API risponde $codice"
+            exit 1
+          fi
+          echo "API in linea (HTTP $codice)"
+
+      - name: Riepilogo
+        run: |
+          {
+            echo "### Deploy completato"
+            echo ""
+            echo "- Sito: ${{ steps.uscite.outputs.sito }}"
+            echo "- API: ${{ steps.uscite.outputs.api }}"
+            echo "- Commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

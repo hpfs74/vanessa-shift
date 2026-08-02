@@ -74,6 +74,27 @@ CloudFront non ne accetta altrove: da qui i due stack.
 L'endpoint dell'API sta in `web/.env.production`. Se lo stack viene ricreato l'endpoint cambia
 e va aggiornato lì prima di ricompilare il frontend.
 
+## Deploy automatico
+
+Ogni push su `main` lancia `.github/workflows/deploy.yml`: test, typecheck, build e
+`cdk deploy`, poi verifica che sito e API rispondano davvero 200. Sulle pull request
+girano solo i test. Il deploy si puo' anche lanciare a mano da GitHub (*Run workflow*).
+
+**Non ci sono credenziali AWS su GitHub.** La pipeline si autentica via OIDC: chiede ad AWS
+un token temporaneo a ogni esecuzione. Niente da ruotare, niente da revocare.
+
+| Risorsa | Cosa fa |
+|---------|---------|
+| OIDC provider `token.actions.githubusercontent.com` | permette a GitHub di farsi riconoscere da AWS |
+| Ruolo `vanessa-shift-deploy` | assumibile **solo** da `repo:hpfs74/vanessa-shift:ref:refs/heads/main` |
+
+Il ruolo non e' amministratore: puo' solo assumere i ruoli che il bootstrap CDK ha creato
+nelle due regioni usate, e leggere gli output dei due stack di questo progetto. Un altro
+repository, o un altro branch di questo, non riesce ad assumerlo.
+
+Se il repository viene rinominato o spostato, la condizione di trust del ruolo va aggiornata,
+altrimenti il deploy smette di funzionare — di proposito.
+
 ## Nessuna autenticazione
 
 Scelta deliberata del proprietario, documentata in

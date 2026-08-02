@@ -1893,7 +1893,9 @@ describe('PhotoImport', () => {
     // If the model had read the wrong title, taking the photo again would
     // not help: it would read the same title again. The month must be correctable.
     await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '6');
-    await userEvent.click(screen.getByRole('button', { name: /Salva 15 giorni/ }));
+    // Giugno ha 30 giorni e luglio 31: il turno del 31 cade fuori, come per
+    // febbraio nel test successivo. Quindici meno uno.
+    await userEvent.click(screen.getByRole('button', { name: /Salva 14 giorni/ }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(onSave.mock.calls[0][0][0]).toEqual({ date: '2026-06-17', code: 'M' });

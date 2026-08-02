@@ -1,4 +1,4 @@
-/** Import da una foto del foglio dei turni.
+/** Import from a photo of the shift sheet.
  *
  * Here no image is read: here it is decided whether what the model said it
  * read is usable. A half-plausible grid is worse than an error, because it
@@ -75,57 +75,57 @@ export class RowNotFound extends Error {}
 
 function integer(v: unknown, field: string): number {
   if (typeof v !== 'number' || !Number.isInteger(v)) {
-    throw new InvalidReading(`${field}: atteso un intero`);
+    throw new InvalidReading(`${field}: expected an integer`);
   }
   return v;
 }
 
 export function validateReading(v: unknown, expectedYear: number): PhotoReading {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) {
-    throw new InvalidReading('estrazione: atteso un oggetto');
+    throw new InvalidReading('reading: expected an object');
   }
   const e = v as Record<string, unknown>;
 
   if (e.found !== true) throw new RowNotFound(`riga di ${ROW_NAME} non trovata`);
 
-  const month = integer(e.month, 'mese');
-  if (month < 1 || month > 12) throw new InvalidReading('mese: fuori da 1-12');
+  const month = integer(e.month, 'month');
+  if (month < 1 || month > 12) throw new InvalidReading('month: out of 1-12');
 
-  const year = integer(e.year, 'anno');
-  if (Math.abs(year - expectedYear) > 1) throw new InvalidReading('anno: troppo lontano');
+  const year = integer(e.year, 'year');
+  if (Math.abs(year - expectedYear) > 1) throw new InvalidReading('year: too far off');
 
   if (typeof e.foundName !== 'string' || e.foundName.length === 0) {
-    throw new InvalidReading('nomeTrovato: atteso un nome');
+    throw new InvalidReading('foundName: expected a name');
   }
-  const foundRow = integer(e.foundRow, 'rigaTrovata');
+  const foundRow = integer(e.foundRow, 'foundRow');
 
-  if (!Array.isArray(e.days)) throw new InvalidReading('giorni: atteso un elenco');
+  if (!Array.isArray(e.days)) throw new InvalidReading('days: expected an array');
   const expected = daysInMonth(year, month);
   if (e.days.length !== expected) {
-    throw new InvalidReading(`giorni: attesi ${expected}, ricevuti ${e.days.length}`);
+    throw new InvalidReading(`days: expected ${expected}, got ${e.days.length}`);
   }
 
   const seen = new Set<number>();
   const days: ReadDay[] = e.days.map((raw, i) => {
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-      throw new InvalidReading(`giorni[${i}]: atteso un oggetto`);
+      throw new InvalidReading(`days[${i}]: expected an object`);
     }
     const g = raw as Record<string, unknown>;
-    const day = integer(g.day, `giorni[${i}].giorno`);
+    const day = integer(g.day, `days[${i}].day`);
     if (day < 1 || day > expected) {
-      throw new InvalidReading(`giorni[${i}].giorno: ${day} non e nel mese`);
+      throw new InvalidReading(`days[${i}].day: ${day} not in the month`);
     }
     // The same day twice would mean that one column was read twice and
     // another never: the grid is not aligned.
-    if (seen.has(day)) throw new InvalidReading(`giorno ${day} compare due volte`);
+    if (seen.has(day)) throw new InvalidReading(`day ${day} appears twice`);
     seen.add(day);
 
     const code = g.code;
     if (code !== null && !isShiftCode(code)) {
-      throw new InvalidReading(`giorni[${i}].codice: codice turno sconosciuto`);
+      throw new InvalidReading(`days[${i}].code: unknown shift code`);
     }
     if (typeof g.confident !== 'boolean') {
-      throw new InvalidReading(`giorni[${i}].sicuro: atteso un booleano`);
+      throw new InvalidReading(`days[${i}].confident: expected a boolean`);
     }
     return { day, code: code as ShiftCode | null, confident: g.confident };
   });

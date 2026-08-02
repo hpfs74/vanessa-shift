@@ -12,7 +12,7 @@ python3 -m venv .venv
 ## Uso
 
 ```bash
-.venv/bin/python genera_presenze.py 2026 Presenze_Vanessa_2026.xlsx
+.venv/bin/python generate_rota.py 2026 Presenze_Vanessa_2026.xlsx
 ```
 
 ## Test

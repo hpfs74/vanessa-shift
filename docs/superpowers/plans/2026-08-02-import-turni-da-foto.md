@@ -1658,7 +1658,13 @@ export function BulkEntry({ year, month, onMonthChange, existing, onSave }: Bulk
 
       <label>
         <span>Mese</span>
-        <select value={month} onChange={(e) => onMonthChange(Number(e.target.value))}>
+        <select
+          value={month}
+          onChange={(e) => {
+            onMonthChange(Number(e.target.value));
+            setSavedCount(null);
+          }}
+        >
           {MONTH_NAMES.map((name, i) => (
             <option key={name} value={i + 1}>
               {name} {year}
@@ -2001,6 +2007,7 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
       const unsure = new Set([...l.unsure].filter((g) => g <= howMany));
       return { ...l, month, codes, unsure };
     });
+    setSavedCount(null);
     setOpen(null);
   };
 

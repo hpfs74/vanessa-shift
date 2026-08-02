@@ -1485,9 +1485,13 @@ export interface SavePlanProps {
   withoutShift?: number;
   /** Blocca il salvataggio quando l'input a monte non e' valido. */
   blocked?: boolean;
+  /** La conferma "Salvati N giorni", controllata dal chiamante: solo lui sa
+   *  quando e' diventata vecchia. Null quando non c'e' niente da confermare. */
+  savedCount?: number | null;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
-  /** Chiamato dopo un salvataggio riuscito, per ripulire la sorgente. */
-  onSaved?: () => void;
+  /** Chiamato dopo un salvataggio riuscito, con quanti giorni sono stati
+   *  salvati: il chiamante ripulisce la sua sorgente e alza la conferma. */
+  onSaved?: (count: number) => void;
 }
 ```
 
@@ -1517,8 +1521,9 @@ export interface SavePlanProps {
   month: number;
   withoutShift?: number;
   blocked?: boolean;
+  savedCount?: number | null;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
-  onSaved?: () => void;
+  onSaved?: (count: number) => void;
 }
 
 export function SavePlan({
@@ -1527,11 +1532,11 @@ export function SavePlan({
   month,
   withoutShift = 0,
   blocked = false,
+  savedCount = null,
   onSave,
   onSaved,
 }: SavePlanProps) {
   const [saving, setSaving] = useState(false);
-  const [done, setDone] = useState<number | null>(null);
 
   const plan = useMemo(() => planChanges(entries, existing), [entries, existing]);
   const changed = plan.filter((c) => c.kind === 'changed');
@@ -1539,11 +1544,11 @@ export function SavePlan({
 
   const save = async () => {
     setSaving(true);
-    setDone(null);
     try {
       await onSave(entries.map(({ date, code }) => ({ date, code })));
-      setDone(entries.length);
-      onSaved?.();
+      // Solo dopo che e' andata bene: una conferma alzata su un salvataggio
+      // fallito direbbe che i turni sono al sicuro quando non lo sono.
+      onSaved?.(entries.length);
     } finally {
       setSaving(false);
     }
@@ -1551,9 +1556,9 @@ export function SavePlan({
 
   return (
     <>
-      {done !== null && (
+      {savedCount !== null && (
         <p className="ok" role="status">
-          Salvati {done} giorni di {MONTH_NAMES[month - 1]}.
+          Salvati {savedCount} giorni di {MONTH_NAMES[month - 1]}.
         </p>
       )}
 
@@ -1634,6 +1639,11 @@ export interface BulkEntryProps {
 
 export function BulkEntry({ year, month, onMonthChange, existing, onSave }: BulkEntryProps) {
   const [text, setText] = useState('');
+  // La conferma vive qui perche' e' qui che si sa quando invecchia: quando lei
+  // ricomincia a scrivere. Azzerarla invece a ogni cambio di `entries`
+  // sembrerebbe equivalente e non lo e' — dopo un salvataggio la textarea si
+  // svuota da sola, e la conferma sparirebbe prima che qualcuno la legga.
+  const [savedCount, setSavedCount] = useState<number | null>(null);
 
   const parsed = useMemo(() => parseSequence(year, month, text), [year, month, text]);
   const blocked = parsed.unknown.length > 0 || parsed.tooMany;
@@ -1666,7 +1676,10 @@ export function BulkEntry({ year, month, onMonthChange, existing, onSave }: Bulk
           autoCapitalize="characters"
           autoCorrect="off"
           spellCheck={false}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setSavedCount(null);
+          }}
         />
       </label>
 
@@ -1690,8 +1703,12 @@ export function BulkEntry({ year, month, onMonthChange, existing, onSave }: Bulk
         existing={existing}
         month={month}
         blocked={blocked}
+        savedCount={savedCount}
         onSave={onSave}
-        onSaved={() => setText('')}
+        onSaved={(count) => {
+          setText('');
+          setSavedCount(count);
+        }}
       />
     </section>
   );
@@ -1945,6 +1962,10 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<number | null>(null);
+  // Come in BulkEntry: la conferma la possiede chi sa quando invecchia. Qui
+  // invecchia quando lei corregge una cella, che e' il gesto equivalente allo
+  // scrivere nella textarea.
+  const [savedCount, setSavedCount] = useState<number | null>(null);
 
   const pick = async (file: File | undefined) => {
     if (!file) return;
@@ -1993,6 +2014,7 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
       unsure.delete(day);
       return { ...l, codes, unsure };
     });
+    setSavedCount(null);
     setOpen(null);
   };
 
@@ -2091,7 +2113,9 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
                 existing={existing}
                 month={reading.month}
                 withoutShift={reading.codes.filter((c) => c === null).length}
+                savedCount={savedCount}
                 onSave={onSave}
+                onSaved={setSavedCount}
               />
             </>
           )}

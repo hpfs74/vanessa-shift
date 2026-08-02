@@ -23,7 +23,13 @@ import {
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { AttributeType, Billing, TableV2 } from 'aws-cdk-lib/aws-dynamodb';
-import { Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
+import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import {
+  Architecture,
+  FunctionUrlAuthType,
+  HttpMethod as LambdaHttpMethod,
+  Runtime,
+} from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { ARecord, HostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
@@ -48,6 +54,7 @@ const API_LOCKFILE = join(APP_ROOT, 'package-lock.json');
 
 export class AppStack extends Stack {
   readonly apiUrl: string;
+  readonly photoUrl: string;
 
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, { ...props, crossRegionReferences: true });
@@ -60,6 +67,9 @@ export class AppStack extends Stack {
       sortKey: { name: 'sk', type: AttributeType.STRING },
       billing: Billing.onDemand(),
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      // Only the photo counter rows carry `expires`: shifts don't,
+      // and they stay where they are.
+      timeToLiveAttribute: 'expires',
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
@@ -90,6 +100,54 @@ export class AppStack extends Stack {
     const putShiftsFn = lambda('PutShifts', 'putShifts');
     const getConfigFn = lambda('GetConfig', 'getConfig');
     const putConfigFn = lambda('PutConfig', 'putConfig');
+
+    // A reading combines reasoning and vision: it can take more than the 30
+    // seconds to which API Gateway truncates the integration. Hence the
+    // Function URL, which doesn't have that limit. The other five routes are
+    // untouched.
+    const readPhotoFn = new NodejsFunction(this, 'ReadPhoto', {
+      entry: HANDLERS,
+      handler: 'readPhoto',
+      projectRoot: APP_ROOT,
+      depsLockFilePath: API_LOCKFILE,
+      runtime: Runtime.NODEJS_22_X,
+      architecture: Architecture.ARM_64,
+      memorySize: 512,
+      timeout: Duration.seconds(120),
+      // Without API Gateway's throttling, this is the brake on parallelism.
+      reservedConcurrentExecutions: 2,
+      logGroup: new LogGroup(this, 'ReadPhotoLog', {
+        retention: RetentionDays.ONE_MONTH,
+        removalPolicy: RemovalPolicy.DESTROY,
+      }),
+      environment: {
+        TABLE_NAME: table.tableName,
+        ALLOWED_ORIGIN: `https://${props.domain}`,
+      },
+      bundling: { format: undefined, minify: true, sourceMap: true },
+    });
+
+    // Writes only the quota counter, but there's only one table.
+    table.grantReadWriteData(readPhotoFn);
+
+    readPhotoFn.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['bedrock:InvokeModel'],
+        resources: [`arn:aws:bedrock:${this.region}::foundation-model/anthropic.claude-opus-5`],
+      }),
+    );
+
+    const photoFunctionUrl = readPhotoFn.addFunctionUrl({
+      authType: FunctionUrlAuthType.NONE,
+      cors: {
+        allowedOrigins: [`https://${props.domain}`],
+        allowedMethods: [LambdaHttpMethod.POST],
+        allowedHeaders: ['content-type'],
+        maxAge: Duration.hours(1),
+      },
+    });
+    this.photoUrl = photoFunctionUrl.url;
 
     // Least privilege: readers do not write.
     table.grantReadData(getShiftsFn);
@@ -179,6 +237,7 @@ export class AppStack extends Stack {
     });
 
     new CfnOutput(this, 'UrlApi', { value: api.apiEndpoint });
+    new CfnOutput(this, 'PhotoUrl', { value: photoFunctionUrl.url });
     new CfnOutput(this, 'UrlSito', { value: `https://${props.domain}` });
     new CfnOutput(this, 'NomeTabella', { value: table.tableName });
     new CfnOutput(this, 'BucketSito', { value: bucket.bucketName });

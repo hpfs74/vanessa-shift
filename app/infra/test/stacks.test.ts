@@ -225,3 +225,41 @@ describe('hosting', () => {
     });
   });
 });
+
+describe('reading photos', () => {
+  it('has a Lambda with enough time for a reading', () => {
+    app.hasResourceProperties('AWS::Lambda::Function', {
+      Handler: 'index.readPhoto',
+      Timeout: 120,
+      ReservedConcurrentExecutions: 2,
+    });
+  });
+
+  it('sits behind a Function URL, not behind API Gateway', () => {
+    app.hasResourceProperties('AWS::Lambda::Url', {
+      AuthType: 'NONE',
+      Cors: Match.objectLike({ AllowOrigins: ['https://vanessa.matteo.cool'] }),
+    });
+  });
+
+  it('can invoke the model, and nothing else of Bedrock', () => {
+    app.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            // CDK collapses a single-item Action array down to a bare
+            // string, so a scalar match is what "nothing else" looks like.
+            Action: 'bedrock:InvokeModel',
+            Effect: 'Allow',
+          }),
+        ]),
+      }),
+    });
+  });
+
+  it('the table expires the counter rows', () => {
+    app.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+      TimeToLiveSpecification: { AttributeName: 'expires', Enabled: true },
+    });
+  });
+});

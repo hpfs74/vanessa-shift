@@ -21,6 +21,7 @@ function Harness() {
       onMonthChange={setMonth}
       existing={existing}
       onSave={async () => {}}
+      onReadPhoto={() => Promise.reject(new Error('not used in this test'))}
     />
   );
 }
@@ -40,7 +41,14 @@ describe('BulkEntry save confirmation', () => {
     const onSave = async () => {};
 
     render(
-      <BulkEntry year={2026} month={1} onMonthChange={noop} existing={existing} onSave={onSave} />,
+      <BulkEntry
+        year={2026}
+        month={1}
+        onMonthChange={noop}
+        existing={existing}
+        onSave={onSave}
+        onReadPhoto={() => Promise.reject(new Error('not used in this test'))}
+      />,
     );
 
     await user.type(screen.getByLabelText(/Sequenza/), 'M M P1 L');

@@ -1,0 +1,149 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import type { PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
+
+import { PhotoImport } from '../src/PhotoImport.js';
+
+/** July as it stands on the photo: nothing until the 16th, then fifteen shifts. */
+const JULY: readonly (ShiftCode | null)[] = [
+  ...Array<null>(16).fill(null),
+  'M','M','P','L','P','M','M','M','L','P','M','M','M','L','P',
+];
+
+function julyReading(unsure: readonly number[] = []): PhotoReading {
+  return {
+    month: 7,
+    year: 2026,
+    found: true,
+    foundName: 'Vanessa',
+    foundRow: 14,
+    days: JULY.map((code, i) => ({
+      day: i + 1,
+      code,
+      confident: !unsure.includes(i + 1),
+    })),
+  };
+}
+
+/** jsdom has neither canvas nor createImageBitmap: the real resizing is
+ *  tested on a browser. By replacing the module, the test enters through the
+ *  file input the same way Vanessa does, instead of bypassing the component
+ *  from the inside. */
+vi.mock('../src/image.js', () => ({
+  MAX_EDGE: 2576,
+  scaleFor: () => 1,
+  resize: () => Promise.resolve('AAAA'),
+}));
+
+async function renderWith(
+  reading: PhotoReading,
+  existing = new Map<IsoDate, ShiftCode>(),
+) {
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  const onRead = vi.fn().mockResolvedValue(reading);
+  render(<PhotoImport year={2026} existing={existing} onRead={onRead} onSave={onSave} />);
+
+  await userEvent.upload(
+    screen.getByLabelText(/Leggi da una foto/i),
+    new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
+  );
+  return { onSave, onRead };
+}
+
+describe('PhotoImport', () => {
+  it('shows the month and the row it found', async () => {
+    await renderWith(julyReading());
+    expect(await screen.findByText(/Luglio 2026/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vanessa/)).toBeInTheDocument();
+  });
+
+  it('counts the days without a shift instead of saving them', async () => {
+    await renderWith(julyReading());
+    expect(await screen.findByText(/16 senza turno/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Salva 15 giorni/ })).toBeInTheDocument();
+  });
+
+  it('saves only the days with a shift, starting on the 17th', async () => {
+    const { onSave } = await renderWith(julyReading());
+    await userEvent.click(await screen.findByRole('button', { name: /Salva 15 giorni/ }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const sent = onSave.mock.calls[0][0];
+    expect(sent).toHaveLength(15);
+    expect(sent[0]).toEqual({ date: '2026-07-17', code: 'M' });
+  });
+
+  it('marks the cells the model did not read with confidence', async () => {
+    await renderWith(julyReading([23]));
+    const cell = await screen.findByRole('button', { name: /^23 / });
+    expect(cell).toHaveClass('unsure');
+  });
+
+  it('correcting a cell changes what would be saved', async () => {
+    const { onSave } = await renderWith(julyReading([23]));
+
+    await userEvent.click(await screen.findByRole('button', { name: /^23 / }));
+    await userEvent.click(screen.getByRole('button', { name: /^P1/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Salva 15 giorni/ }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const sent = onSave.mock.calls[0][0];
+    expect(sent.find((s: any) => s.date === '2026-07-23')).toEqual({
+      date: '2026-07-23',
+      code: 'P1',
+    });
+  });
+
+  it('the shift can be removed from a day, and then it is not saved', async () => {
+    const { onSave } = await renderWith(julyReading());
+
+    await userEvent.click(await screen.findByRole('button', { name: /^17 / }));
+    await userEvent.click(screen.getByRole('button', { name: /Nessun turno/i }));
+    await userEvent.click(screen.getByRole('button', { name: /Salva 14 giorni/ }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const sent = onSave.mock.calls[0][0];
+    expect(sent).toHaveLength(14);
+    expect(sent.find((s: any) => s.date === '2026-07-17')).toBeUndefined();
+  });
+
+  it('warns when days would be overwritten', async () => {
+    const existing = new Map<IsoDate, ShiftCode>([['2026-07-17', 'L']]);
+    await renderWith(julyReading(), existing);
+    expect(await screen.findByText(/1 da sovrascrivere/)).toBeInTheDocument();
+  });
+
+  it('rejects a photo from another year instead of saving wrong dates', async () => {
+    await renderWith({ ...julyReading(), year: 2025 });
+    expect(await screen.findByRole('alert')).toHaveTextContent(/2025/);
+    expect(screen.queryByRole('button', { name: /^Salva/ })).not.toBeInTheDocument();
+  });
+
+  it('the month can be corrected, and the days follow', async () => {
+    const { onSave } = await renderWith(julyReading());
+
+    // If the model had read the wrong title, taking the photo again would
+    // not help: it would read the same title again. The month must be correctable.
+    // June has 30 days against July's 31, so the shift on the 31st (the last
+    // of July's fifteen) no longer has a day to land on: fourteen remain.
+    await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '6');
+    await userEvent.click(screen.getByRole('button', { name: /Salva 14 giorni/ }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0][0]).toEqual({ date: '2026-06-17', code: 'M' });
+  });
+
+  it('switching to a shorter month makes the extra days disappear', async () => {
+    const { onSave } = await renderWith(julyReading());
+
+    // July has 31 days, February 28: the 29th, 30th and 31st no longer exist.
+    // Of July's fifteen shifts, the last three fall there.
+    await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '2');
+    await userEvent.click(screen.getByRole('button', { name: /Salva 12 giorni/ }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toHaveLength(12);
+  });
+});

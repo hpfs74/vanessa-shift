@@ -258,6 +258,30 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
 
 .bulk { display: flex; flex-direction: column; gap: 0.6rem; }
 
+/* --- Import da foto --- */
+.photo-pick {
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  min-height: var(--tap); border: 1px dashed var(--navy); border-radius: 10px;
+  color: var(--navy); font-weight: 700; cursor: pointer; margin: 0.6rem 0;
+}
+.photo-pick input { display: none; }
+.photo-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.photo-head h3 { margin: 0.4rem 0; }
+.photo-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin: 0.5rem 0; }
+.photo-cell {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: var(--tap); border: 1px solid var(--border); border-radius: 6px;
+  background: #fff; padding: 0;
+}
+.photo-cell.empty { background: var(--bg); color: var(--muted); }
+.photo-cell.t-M { background: var(--M); }
+.photo-cell.t-M1 { background: var(--M1); }
+.photo-cell.t-P { background: var(--P); }
+.photo-cell.t-P1 { background: var(--P1); }
+.photo-cell.t-L { background: var(--L); }
+/* The model wasn't sure: it's shown, not blocked. */
+.photo-cell.unsure .code { text-decoration: underline dashed; text-underline-offset: 2px; }
+
 @media (min-width: 30rem) {
   .app { padding: 1rem; padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
   h1 { font-size: 1.35rem; }

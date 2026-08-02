@@ -1,0 +1,246 @@
+/** Import da una foto del foglio.
+ *
+ * The grid is editable in full, not only where the model declared itself
+ * unsure: the typical mistake in a reading is a single cell, and whoever
+ * spots it wrong must be able to correct it even when the model was
+ * convinced of the opposite.
+ */
+
+import { useMemo, useState } from 'react';
+
+import type { PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
+import { MONTH_NAMES, SHIFTS, daysInMonth, toIso, weekday } from '@vanessa/core';
+
+import { SavePlan } from './SavePlan.js';
+import { resize } from './image.js';
+
+export interface PhotoImportProps {
+  year: number;
+  existing: ReadonlyMap<IsoDate, ShiftCode>;
+  onRead: (image: string) => Promise<PhotoReading>;
+  onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
+}
+
+interface Reading {
+  month: number;
+  year: number;
+  name: string;
+  row: number | null;
+  codes: (ShiftCode | null)[];
+  unsure: Set<number>;
+}
+
+function fromReading(e: PhotoReading): Reading {
+  const codes: (ShiftCode | null)[] = Array(daysInMonth(e.year, e.month)).fill(null);
+  const unsure = new Set<number>();
+  for (const g of e.days) {
+    codes[g.day - 1] = g.code;
+    if (!g.confident) unsure.add(g.day);
+  }
+  return { month: e.month, year: e.year, name: e.foundName ?? '', row: e.foundRow, codes, unsure };
+}
+
+export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps) {
+  const [reading, setReading] = useState<Reading | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
+  // Come in BulkEntry: la conferma la possiede chi sa quando invecchia. Qui
+  // invecchia quando lei corregge una cella, che e' il gesto equivalente allo
+  // scrivere nella textarea.
+  const [savedCount, setSavedCount] = useState<number | null>(null);
+
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
+    setLoading(true);
+    setError(null);
+    try {
+      setReading(fromReading(await onRead(await resize(file))));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const entries = useMemo(() => {
+    if (!reading) return [];
+    const out: { date: IsoDate; day: number; code: ShiftCode }[] = [];
+    reading.codes.forEach((code, i) => {
+      if (code) out.push({ date: toIso(reading.year, reading.month, i + 1), day: i + 1, code });
+    });
+    return out;
+  }, [reading]);
+
+  /** The month read from the title can be wrong, and taking the photo again
+   *  wouldn't help: the model would read the same title again. Changing it,
+   *  the grid shrinks or grows — a shorter month loses the days that no
+   *  longer exist, a longer one adds them empty. */
+  const setMonth = (month: number) => {
+    setReading((l) => {
+      if (!l) return l;
+      const howMany = daysInMonth(l.year, month);
+      const codes = Array.from({ length: howMany }, (_, i) => l.codes[i] ?? null);
+      const unsure = new Set([...l.unsure].filter((g) => g <= howMany));
+      return { ...l, month, codes, unsure };
+    });
+    setOpen(null);
+  };
+
+  const setDay = (day: number, code: ShiftCode | null) => {
+    setReading((l) => {
+      if (!l) return l;
+      const codes = [...l.codes];
+      codes[day - 1] = code;
+      // Corrected by hand: it's no longer unsure, regardless.
+      const unsure = new Set(l.unsure);
+      unsure.delete(day);
+      return { ...l, codes, unsure };
+    });
+    setSavedCount(null);
+    setOpen(null);
+  };
+
+  // The app covers a single year: dates of a different year would find
+  // nothing to compare against, and would be saved outside the visible calendar.
+  const wrongYear = reading !== null && reading.year !== year;
+
+  return (
+    <div className="photo">
+      {!reading && (
+        <>
+          <label className="photo-pick">
+            <span aria-hidden="true">📷</span> Leggi da una foto
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              disabled={loading}
+              onChange={(e) => void pick(e.target.files?.[0])}
+            />
+          </label>
+          {loading && <p className="waiting">Leggo la foto… ci vuole qualche secondo.</p>}
+        </>
+      )}
+
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {reading && (
+        <>
+          <div className="photo-head">
+            <label>
+              <span>Mese</span>
+              <select value={reading.month} onChange={(e) => setMonth(Number(e.target.value))}>
+                {MONTH_NAMES.map((name, i) => (
+                  <option key={name} value={i + 1}>
+                    {name} {reading.year}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="hint">
+              riga trovata: {reading.name}
+              {reading.row !== null && ` (${reading.row})`}
+            </p>
+            <button
+              type="button"
+              className="toggle"
+              onClick={() => {
+                setReading(null);
+                setError(null);
+              }}
+            >
+              ripeti con un altra foto
+            </button>
+          </div>
+
+          {wrongYear ? (
+            <p className="error" role="alert">
+              Questa foto è del {reading.year}, ma l&apos;app tiene i turni del {year}. Non la
+              posso caricare qui.
+            </p>
+          ) : (
+            <>
+              <div className="photo-grid" role="group" aria-label="Giorni letti dalla foto">
+                {reading.codes.map((code, i) => {
+                  const day = i + 1;
+                  const wd = weekday(toIso(reading.year, reading.month, day));
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      style={day === 1 ? { gridColumnStart: wd + 1 } : undefined}
+                      className={[
+                        'photo-cell',
+                        code ? `t-${code}` : 'empty',
+                        reading.unsure.has(day) ? 'unsure' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                      aria-label={`${day} ${code ?? 'vuoto'}`}
+                      onClick={() => setOpen(day)}
+                    >
+                      <span className="day-number">{day}</span>
+                      <span className="code">{code ?? '–'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <SavePlan
+                entries={entries}
+                existing={existing}
+                month={reading.month}
+                withoutShift={reading.codes.filter((c) => c === null).length}
+                savedCount={savedCount}
+                onSave={onSave}
+                onSaved={setSavedCount}
+              />
+            </>
+          )}
+        </>
+      )}
+
+      {open !== null && reading && (
+        <div className="sheet" role="dialog" aria-label={`Giorno ${open}`}>
+          <div className="sheet-head">
+            <strong>
+              {open} {MONTH_NAMES[reading.month - 1]}
+            </strong>
+            <button type="button" onClick={() => setOpen(null)}>
+              Chiudi
+            </button>
+          </div>
+          <div className="sheet-body">
+            <div className="codes">
+              {SHIFTS.map((s) => (
+                <button
+                  key={s.code}
+                  type="button"
+                  className={[
+                    'code-btn',
+                    `t-${s.code}`,
+                    reading.codes[open - 1] === s.code ? 'on' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={() => setDay(open, s.code)}
+                >
+                  {s.code}
+                  <span>{s.description}</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" className="toggle" onClick={() => setDay(open, null)}>
+              Nessun turno
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

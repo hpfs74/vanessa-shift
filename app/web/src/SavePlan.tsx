@@ -63,8 +63,8 @@ export function SavePlan({
       {plan.length > 0 && !blocked && (
         <>
           <p className="summary-line">
-            <strong>{created.length}</strong> giorni nuovi ·{' '}
-            <strong>{changed.length}</strong> da sovrascrivere ·{' '}
+            <strong>{created.length} giorni nuovi</strong> ·{' '}
+            <strong>{changed.length} da sovrascrivere</strong> ·{' '}
             {plan.length - created.length - changed.length} già così
             {withoutShift > 0 && <> · {withoutShift} senza turno</>}
           </p>

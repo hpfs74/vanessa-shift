@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react';
 import type { IsoDate, ShiftCode } from '@vanessa/core';
 import { MONTH_NAMES, parseSequence } from '@vanessa/core';
 
+import { PhotoImport } from './PhotoImport.js';
 import { SavePlan } from './SavePlan.js';
 
 export interface BulkEntryProps {
@@ -18,9 +19,17 @@ export interface BulkEntryProps {
   onMonthChange: (m: number) => void;
   existing: ReadonlyMap<IsoDate, ShiftCode>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
+  onReadPhoto: (image: string) => Promise<import('@vanessa/core').PhotoReading>;
 }
 
-export function BulkEntry({ year, month, onMonthChange, existing, onSave }: BulkEntryProps) {
+export function BulkEntry({
+  year,
+  month,
+  onMonthChange,
+  existing,
+  onSave,
+  onReadPhoto,
+}: BulkEntryProps) {
   const [text, setText] = useState('');
   const [savedCount, setSavedCount] = useState<number | null>(null);
 
@@ -30,6 +39,10 @@ export function BulkEntry({ year, month, onMonthChange, existing, onSave }: Bulk
   return (
     <section className="bulk">
       <h2>Caricamento rapido</h2>
+
+      <PhotoImport year={year} existing={existing} onRead={onReadPhoto} onSave={onSave} />
+
+      <p className="note">oppure scrivi i codici a mano:</p>
       <p className="note">
         Scegli il mese e scrivi i codici in fila, uno per giorno a partire dal primo.
         Vanno bene virgole, spazi o a capo. Maiuscole e minuscole sono uguali.

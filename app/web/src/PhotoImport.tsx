@@ -9,7 +9,14 @@
 import { useMemo, useState } from 'react';
 
 import type { PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
-import { MONTH_NAMES, SHIFTS, daysInMonth, toIso, weekday } from '@vanessa/core';
+import {
+  MONTH_NAMES,
+  SHIFTS,
+  daysInMonth,
+  entriesFromReading,
+  toIso,
+  weekday,
+} from '@vanessa/core';
 
 import { SavePlan } from './SavePlan.js';
 import { resize } from './image.js';
@@ -40,6 +47,18 @@ function fromReading(e: PhotoReading): Reading {
   return { month: e.month, year: e.year, name: e.foundName, row: e.foundRow, codes, unsure };
 }
 
+/** The other way round: the grid as it stands after the corrections. */
+function toReading(l: Reading): PhotoReading {
+  return {
+    month: l.month,
+    year: l.year,
+    found: true,
+    foundName: l.name,
+    foundRow: l.row,
+    days: l.codes.map((code, i) => ({ day: i + 1, code, confident: !l.unsure.has(i + 1) })),
+  };
+}
+
 export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps) {
   const [reading, setReading] = useState<Reading | null>(null);
   const [loading, setLoading] = useState(false);
@@ -63,14 +82,13 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
     }
   };
 
-  const entries = useMemo(() => {
-    if (!reading) return [];
-    const out: { date: IsoDate; day: number; code: ShiftCode }[] = [];
-    reading.codes.forEach((code, i) => {
-      if (code) out.push({ date: toIso(reading.year, reading.month, i + 1), day: i + 1, code });
-    });
-    return out;
-  }, [reading]);
+  /** The edited grid, projected back into a reading so that which days get
+   *  saved — blank means not scheduled, never a deletion — stays decided in
+   *  one place, `core`, and not written a second time here. */
+  const entries = useMemo(
+    () => (reading === null ? [] : entriesFromReading(toReading(reading))),
+    [reading],
+  );
 
   /** The month read from the title can be wrong, and taking the photo again
    *  wouldn't help: the model would read the same title again. Changing it,

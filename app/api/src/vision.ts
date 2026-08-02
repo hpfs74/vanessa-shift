@@ -105,7 +105,11 @@ export function createVision(client?: MessagesClient): Vision {
     const response = await c.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      output_config: { format: { type: 'json_schema', schema: READING_SCHEMA } },
+      // Counting thirty-one columns on a photographed, skewed sheet is not a
+      // glance, and without this the model read July's row correctly but one
+      // column early — every shift a day out, and reported as certain.
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'high', format: { type: 'json_schema', schema: READING_SCHEMA } },
       messages: [
         {
           role: 'user',

@@ -23,6 +23,7 @@ from calendario import foglio_calendario
 from comune import (AZZURRO, BLU_SCURO, BOX, CODICI, GIORNI, GRIGIO_INT, MESI,
                     N_COLLEGHE, TIPI_SCAMBIO, TURNI_LAVORATI, VERDE, intesta,
                     titolo)
+from stipendio import foglio_stipendio
 
 
 def foglio_codici(wb):
@@ -288,6 +289,7 @@ def main():
     foglio_calendario(wb, anno, cod_r1, cod_r2)
     foglio_riepilogo(wb, anno, p_r1, p_r2)
     foglio_scambi(wb, anno, p_r1, p_r2)
+    foglio_stipendio(wb, anno, p_r1, p_r2)
     wb.move_sheet("Presenze", offset=-wb.sheetnames.index("Presenze"))
     wb.save(out)
     giorni = 366 if calendar.isleap(anno) else 365

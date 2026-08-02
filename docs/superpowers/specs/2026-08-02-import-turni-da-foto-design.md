@@ -13,7 +13,15 @@ Il lavoro manuale non sparisce: si sposta dal digitare trentuno codici al correg
 
 ## Le due foto di riferimento
 
-Vanno messe in `api/test/fixtures/`. Rappresentano i due casi reali e sono la base dei test.
+**Non entrano nel repository.** `hpfs74/vanessa-shift` è pubblico, e le due foto riportano il
+nome e cognome di quattordici colleghe accanto ai loro turni, più il nome e l'indirizzo della
+struttura. Non sono dati di Vanessa e nessuna delle persone riprese ha acconsentito a
+pubblicarli; la cronologia di git non si ripulisce.
+
+Restano quindi su disco, fuori dal repository. Il test di integrazione le trova tramite
+`FOTO_LUGLIO` e `FOTO_AGOSTO`, e si salta da solo se le variabili non ci sono — è già dietro
+`PROVA_BEDROCK=1`, quindi lo esegue solo chi ha le foto in mano. Le tabelle qui sotto sono la
+trascrizione delle righe che servono, e bastano a scrivere tutti gli altri test.
 
 | File | Cos'è | Riga di Vanessa | Contenuto della riga |
 |------|-------|-----------------|----------------------|
@@ -234,9 +242,10 @@ l'unico modo per entrare.
   incerte sono segnate, modificare il giorno 23 cambia il piano, i giorni `null` non compaiono
   fra quelli salvati.
 - **`api/test/visione.integrazione.test.ts`** — le due foto vere contro Bedrock vero, dietro
-  `PROVA_BEDROCK=1`. Asserisce i trentuno codici di agosto e i quindici di luglio dal giorno 17.
-  Fuori dalla CI: non ci sono credenziali e costa. Serve a verificare una modifica al prompt con
-  un comando invece che a occhio.
+  `PROVA_BEDROCK=1` più `FOTO_LUGLIO` e `FOTO_AGOSTO` che puntano ai file su disco; se mancano,
+  si salta. Asserisce i trentuno codici di agosto e i quindici di luglio dal giorno 17. Fuori
+  dalla CI: non ci sono credenziali, costa, e le foto non stanno nel repository. Serve a
+  verificare una modifica al prompt con un comando invece che a occhio.
 
 ## Fuori perimetro
 

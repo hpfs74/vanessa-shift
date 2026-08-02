@@ -1,12 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
-/** `PHOTO_URL` is read once, when the module loads: every case stubs the
- *  variable first and then imports a fresh copy of the module. */
-async function apiWith(photoUrl: string) {
-  vi.stubEnv('VITE_PHOTO_URL', photoUrl);
-  vi.resetModules();
-  return (await import('../src/api.js')).api;
-}
+import { api } from '../src/api.js';
 
 /** The message, whatever the failure was. */
 async function messageOf(promise: Promise<unknown>): Promise<string> {
@@ -19,26 +12,23 @@ async function messageOf(promise: Promise<unknown>): Promise<string> {
 }
 
 afterEach(() => {
-  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
 describe('readPhoto', () => {
-  it('says so, in Italian, when the address was never filled in', async () => {
-    const api = await apiWith('');
-    const fetching = vi.fn();
-    vi.stubGlobal('fetch', fetching);
-
-    expect(await messageOf(api.readPhoto('AAAA'))).toMatch(/non è configurata/);
-    // An empty address makes fetch call the page itself: better not to call.
-    expect(fetching).not.toHaveBeenCalled();
+  it('calls the reading endpoint on its own origin', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ reading: {} }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await api.readPhoto('AAAA');
+    expect(fetchMock.mock.calls[0][0]).toBe('/foto');
   });
 
   // The reading can take two minutes, from a phone: the timeout and the lost
   // connection are the likely failures, not the rare ones. Uncaught, they
   // reach the screen as the browser's own «Failed to fetch».
   it('a connection that drops becomes an Italian sentence with a way out', async () => {
-    const api = await apiWith('https://foto.example/');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
 
     const message = await messageOf(api.readPhoto('AAAA'));
@@ -48,7 +38,6 @@ describe('readPhoto', () => {
   });
 
   it('a body that is not the expected JSON does not surface as a parse error', async () => {
-    const api = await apiWith('https://foto.example/');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -63,7 +52,6 @@ describe('readPhoto', () => {
   });
 
   it('keeps the message the service sent, when there is one', async () => {
-    const api = await apiWith('https://foto.example/');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -77,7 +65,6 @@ describe('readPhoto', () => {
   });
 
   it('returns the reading when the call goes through', async () => {
-    const api = await apiWith('https://foto.example/');
     const reading = {
       month: 7,
       year: 2026,

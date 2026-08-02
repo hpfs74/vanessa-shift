@@ -93,11 +93,18 @@ mano, revisione compresa. I giorni senza codice — le `x` di un mese iniziato a
 metà — non si salvano e non cancellano niente.
 
 Sta dietro una **Lambda Function URL** e non dietro API Gateway, che tronca
-l'integrazione a 30 secondi: una lettura ne può prendere di più. L'indirizzo è
-l'output `PhotoUrl` dello stack e va in `web/.env.production` come
-`VITE_PHOTO_URL` prima di ricompilare il frontend. Finché è vuoto il pulsante lo
-dice — «la lettura da foto non è configurata su questa installazione» — invece di
-chiamare un indirizzo che non esiste e mostrare l'errore del browser.
+l'integrazione a 30 secondi: una lettura ne può prendere di più.
+
+Il frontend chiama sempre la propria origine: `/api` e `/foto`, inoltrati da
+CloudFront verso API Gateway e verso la Function URL. Un solo dominio, niente
+da incollare in un file dopo il deploy. Le due origini non si raggiungono più
+direttamente — la Function URL rifiuta per davvero, tramite OAC, e l'API
+richiede un segreto al portatore che solo CloudFront conosce.
+
+Per questo il percorso foto non si prova più da `npm run dev`: il server di
+sviluppo inoltra `/foto` alla Function URL così com'è, ma quella pretende una
+firma SigV4 che solo CloudFront sa produrre, e rifiuta la richiesta non
+firmata. Una lettura vera va provata in linea.
 
 Ogni lettura costa circa 0,09 €, su un'API che resta aperta. Le difese sono un
 **tetto di 10 letture al giorno** (contatore su DynamoDB, condizione e
@@ -126,8 +133,8 @@ CloudFront non ne accetta altrove: da qui i due stack.
 | `VanessaCertificato` | certificato ACM (us-east-1) |
 | `VanessaApp` | tabella, Lambda, API, bucket, distribuzione, record DNS |
 
-L'endpoint dell'API sta in `web/.env.production`. Se lo stack viene ricreato l'endpoint cambia
-e va aggiornato lì prima di ricompilare il frontend.
+Il frontend non conosce l'endpoint dell'API: CloudFront lo inoltra da `/api`, e la distribuzione
+lo legge dallo stack a ogni deploy. Se lo stack viene ricreato non c'è niente da aggiornare a mano.
 
 ## Deploy automatico
 

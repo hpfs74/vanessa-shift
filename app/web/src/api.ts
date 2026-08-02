@@ -12,11 +12,12 @@ export interface RemoteShift {
   notes?: string | null;
 }
 
-export const API_URL: string = import.meta.env.VITE_API_URL ?? '';
-
-/** Photo reading lives on its own Function URL: API Gateway truncates the
- *  integration at 30 seconds, and a reading can take longer than that. */
-export const PHOTO_URL: string = import.meta.env.VITE_PHOTO_URL ?? '';
+/** Same origin as the page: CloudFront forwards these two prefixes to the API
+ *  and to the photo-reading function. Nothing to configure per environment,
+ *  and nothing to paste in after a deploy — which is the step that used to be
+ *  forgotten, leaving the feature mute. */
+export const API_URL = '/api';
+export const PHOTO_URL = '/foto';
 
 /** The reading never left, or never came back whole. Every message on this
  *  path ends with a way out: the textarea is always one tap away. */
@@ -91,14 +92,6 @@ export const api: Api = {
     await request('/config', { method: 'PUT', body: JSON.stringify(p) });
   },
   async readPhoto(image) {
-    // The address is filled in after the stack is deployed. Left empty, `fetch`
-    // would call the page itself and fail with something meaningless.
-    if (!PHOTO_URL) {
-      throw new Error(
-        'La lettura da foto non è configurata su questa installazione. Scrivi i codici a mano.',
-      );
-    }
-
     let r: Response;
     try {
       r = await fetch(PHOTO_URL, {

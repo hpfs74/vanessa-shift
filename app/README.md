@@ -82,10 +82,17 @@ scorrere la pagina in orizzontale.
 
 ## Import da foto
 
-Vanessa fotografa il foglio affisso in reparto e l'app ne legge la sua riga.
+La foto del foglio affisso in reparto le arriva su WhatsApp — non la scatta lei — e l'app
+ne legge la sua riga.
 La foto viene ridimensionata sul telefono a 2576px di lato lungo — il massimo
-che il modello usa comunque — e spedita a una Lambda che chiede a Claude Opus 5
-su Bedrock quali sigle ci sono nella riga intestata a Vanessa.
+che il modello usa comunque — e spedita a una Lambda che chiede a Claude Sonnet
+4.6 su Bedrock quali sigle ci sono nella riga intestata a Vanessa. Una lettura
+prende fra i 18 e i 25 secondi.
+
+Il ragionamento adattivo e' acceso e non e' un lusso: senza, il modello leggeva
+la riga di luglio con tutti i codici giusti ma spostata di una colonna, e la
+dava per certa. Trentuno colonne su un foglio fotografato storto non si contano
+a colpo d'occhio.
 
 L'endpoint di lettura **non scrive nessun turno**: restituisce una griglia, che
 si corregge a schermo e si salva con la stessa rotta della sequenza scritta a

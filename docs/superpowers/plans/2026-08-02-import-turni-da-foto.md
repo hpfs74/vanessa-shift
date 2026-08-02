@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Vanessa fotografa il foglio dei turni, l'app legge la sua riga e le presenta un mese già compilato da correggere e salvare.
+**Goal:** Vanessa apre la foto del foglio che le e' arrivata su WhatsApp, l'app legge la sua riga e le presenta un mese già compilato da correggere e salvare.
 
 **Architecture:** Una Lambda nuova dietro una Function URL riceve l'immagine, consuma una quota giornaliera su DynamoDB, chiede a Claude Opus 5 su Bedrock di leggere la riga e restituisce l'estrazione — senza mai scrivere un turno. `core` giudica la forma di quello che il modello ha detto; il frontend mostra una griglia modificabile e salva con la rotta `PUT /shifts` che esiste già, revisione compresa.
 
@@ -2040,7 +2040,6 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
             <input
               type="file"
               accept="image/*"
-              capture="environment"
               disabled={loading}
               onChange={(e) => void pick(e.target.files?.[0])}
             />
@@ -2370,7 +2369,8 @@ E aggiungi una sezione prima di *Risorse AWS*:
 ```markdown
 ## Import da foto
 
-Vanessa fotografa il foglio affisso in reparto e l'app ne legge la sua riga.
+La foto del foglio affisso in reparto le arriva su WhatsApp — non la scatta lei — e l'app
+ne legge la sua riga.
 La foto viene ridimensionata sul telefono a 2576px di lato lungo — il massimo
 che il modello usa comunque — e spedita a una Lambda che chiede a Claude Opus 5
 su Bedrock quali sigle ci sono nella riga intestata a Vanessa.

@@ -5,7 +5,8 @@ Stato: approvato
 
 ## Obiettivo
 
-Vanessa riceve i turni come foto del foglio affisso in reparto. Oggi li ricopia a mano nella
+Vanessa riceve su WhatsApp la foto del foglio affisso in reparto: gliela manda una collega, non
+la scatta lei. Quando apre l'app la foto ce l'ha gia' in galleria. Oggi ricopia i codici a mano nella
 vista **Carica**, un mese alla volta. L'import legge la foto, ne estrae la sua riga e presenta
 i giorni già compilati, da correggere e salvare.
 
@@ -64,13 +65,18 @@ senza fermare chi la vuole abusare.
 
 ## Decisione: Lambda Function URL, non API Gateway
 
-API Gateway HTTP API tronca l'integrazione a **30 secondi**. Una foto letta da Claude Opus 5 con
-il ragionamento attivo sta plausibilmente fra i 15 e i 40: troppo vicino al taglio.
+> Superata in parte da `2026-08-02-api-dietro-cloudfront-design.md`: la Function URL c'è ancora,
+> ma il browser non la chiama più per nome — passa da `/foto/leggi` sulla distribuzione, e
+> `.env.production` non esiste più. Il tetto di CloudFront è 60 secondi, e una lettura ne prende
+> fra i 18 e i 25.
+
+API Gateway HTTP API tronca l'integrazione a **30 secondi**. Una lettura con il ragionamento
+attivo ne prende fra i 18 e i 25: troppo vicino al taglio.
 
 Questa rotta — e solo questa — sta dietro una **Lambda Function URL**, che non ha quel limite.
 Conseguenze accettate:
 
-- un secondo indirizzo pubblico, da scrivere in `web/.env.production` accanto a quello dell'API;
+- un secondo indirizzo pubblico (poi nascosto dietro CloudFront, vedi il riquadro sopra);
 - CORS configurato sulla Function URL invece che su API Gateway;
 - niente throttling di API Gateway su questa rotta: il freno sono la concorrenza riservata e il
   tetto giornaliero, che per un endpoint costoso sono difese più pertinenti di 100 req/s.
@@ -79,34 +85,69 @@ Le cinque rotte esistenti non si toccano.
 
 ## Il modello
 
-**Claude Opus 5 su Amazon Bedrock**, `anthropic.claude-opus-5`, in `eu-south-1` — la stessa
-regione dello stack, verificata disponibile. Client: `@anthropic-ai/bedrock-sdk`,
-`AnthropicBedrockMantle({ awsRegion: 'eu-south-1' })`.
+**Claude Sonnet 4.6 su Amazon Bedrock**, attraverso il profilo di inferenza cross-region
+`eu.anthropic.claude-sonnet-4-6`, in `eu-south-1`. Client: `@anthropic-ai/bedrock-sdk`,
+`AnthropicBedrock({ awsRegion: 'eu-south-1' })`.
 
 Bedrock e non l'API diretta di Anthropic perché **non c'è nessuna chiave da conservare né da
 ruotare**: la Lambda ottiene il permesso via IAM, coerentemente con il resto dello stack, che
 non ha un solo segreto in giro.
 
-Parametri:
+### Come ci si è arrivati, perché non si ripeta
 
-- **ragionamento adattivo**, che su Opus 5 è il comportamento di default: leggere una griglia
-  storta, scritta a mano e con trentuno colonne da contare è esattamente il caso in cui serve;
+La prima stesura diceva «Claude Opus 5, `anthropic.claude-opus-5`, in `eu-south-1`, verificata
+disponibile». Era sbagliata in tre modi, e sono costati tre deploy falliti prima che il primo
+foglio venisse letto.
+
+- **La verifica era sull'API sbagliata.** `aws bedrock list-foundation-models` elenca
+  `anthropic.claude-opus-5` in `eu-south-1` senza fare una piega, ed è quello che avevo
+  guardato. Ma elenca i modelli della vecchia API `InvokeModel`, non quelli dell'endpoint
+  Messages (`AnthropicBedrockMantle`) su cui era scritto il codice — e quell'endpoint, in
+  `eu-south-1`, non serve **nessun** modello: ogni identificatore risponde «the model does not
+  exist». Il modo per saperlo è chiamare l'endpoint e leggere quale dei due errori torna:
+  `not_found_error` vuol dire che l'identificatore non lo conosce, `permission_error` che lo
+  conosce e non te lo fa eseguire.
+- **Opus non è abilitato su questo account.** `eu.anthropic.claude-opus-4-8` risponde «not
+  available for this account»: è un accesso da concedere in console, non una cosa che il codice
+  possa aggiustare. Sonnet lo è.
+- **E il permesso IAM non era quello ovvio.** L'endpoint Messages non passa da
+  `bedrock:InvokeModel` ma da `bedrock-mantle:CreateInference` su una risorsa progetto. Sulla
+  vecchia API, che è quella in uso adesso, serve `bedrock:InvokeModel` su due risorse: il
+  profilo `eu.` e il modello nella regione in cui il profilo instrada.
+
+Prima di usare il modello, l'account deve avere fatto due passi distinti in console: il modulo
+dei casi d'uso Anthropic **e** l'accettazione dell'accordo sul modello. Il primo senza il
+secondo lascia `agreementAvailability: NOT_AVAILABLE`, e ogni chiamata torna 404 «Model use
+case details have not been submitted», che è un messaggio fuorviante: il modulo è stato inviato,
+manca l'accordo. `aws bedrock get-foundation-model-availability` dice quale dei due manca.
+
+### Parametri
+
+- **ragionamento adattivo** ed `effort: high`. Non è un lusso: senza, sulla foto di luglio il
+  modello leggeva tutti e quindici i codici correttamente e li posava una colonna troppo a
+  sinistra — primo turno il 16 invece del 17, tutti i giorni successivi spostati, il 31 caduto
+  fuori — e marcava ogni cella come sicura, quindi la griglia sarebbe arrivata a schermo senza
+  una sottolineatura. Contare trentuno colonne su un foglio fotografato storto non è un colpo
+  d'occhio. Con il ragionamento attivo entrambe le foto passano.
 - `max_tokens` 8000. Il tetto vale per ragionamento **più** risposta insieme: stretto, tronca a
-  metà;
+  metà.
 - `output_config.format` con lo schema qui sotto, così il modello non può restituire una forma
   che il codice non sa leggere.
+
+Costo misurato: una lettura sta fra i 18 e i 25 secondi.
 
 ## Il contratto di estrazione
 
 ```ts
 {
-  mese: 7,
-  anno: 2026,
-  nomeTrovato: "Vanessa",
-  rigaTrovata: 14,
-  giorni: [
-    { giorno: 1,  codice: null, sicuro: true },
-    { giorno: 17, codice: "M",  sicuro: true },
+  month: 7,
+  year: 2026,
+  found: true,
+  foundName: "Vanessa",
+  foundRow: 14,
+  days: [
+    { day: 1,  code: null, confident: true },
+    { day: 17, code: "M",  confident: true },
     …
   ]
 }
@@ -114,19 +155,19 @@ Parametri:
 
 Regole, verificate in `core` e non nella Lambda:
 
-- `giorni` copre **esattamente** 1…giorni del mese, senza buchi e senza duplicati;
-- `codice` è uno fra `L M M1 P P1`, oppure `null`;
-- `mese` fra 1 e 12, `anno` entro un anno dall'attuale;
+- `days` copre **esattamente** 1…giorni del mese, senza buchi e senza duplicati;
+- `code` è uno fra `L M M1 P P1`, oppure `null`;
+- `month` fra 1 e 12, `year` entro un anno dall'attuale;
 - se una qualsiasi di queste salta, l'estrazione è respinta **per intero**. Mezza griglia
   plausibile è peggio di un errore: si salva senza accorgersene.
 
-**`codice: null` significa «sul foglio non c'è un turno»** — le `x` di luglio, una cella vuota,
+**`code: null` significa «sul foglio non c'è un turno»** — le `x` di luglio, una cella vuota,
 una cella illeggibile. Sono la stessa cosa ai fini del salvataggio.
 
-**`sicuro: false` è un suggerimento, non un verdetto.** Serve a sottolineare la cella nella
+**`confident: false` è un suggerimento, non un verdetto.** Serve a sottolineare la cella nella
 griglia. Tutte le celle restano modificabili, comprese quelle che il modello dà per certe.
 
-Il nome della riga è la costante `NOME_RIGA = 'Vanessa'` in `core`, passata al prompt. Se la
+Il nome della riga è la costante `ROW_NAME = 'Vanessa'` in `core`, passata al prompt. Se la
 riga non si trova, è un errore esplicito, non un'estrazione vuota.
 
 Mese e anno si leggono dal titolo del foglio — entrambe le foto ce l'hanno, `LUGLIO 2026` e
@@ -136,16 +177,16 @@ Mese e anno si leggono dal titolo del foglio — entrambe le foto ce l'hanno, `L
 
 ```
 telefono  →  ridimensiona (canvas, lato lungo 2576px, JPEG q 0.85)
-          →  POST <function-url>  { immagine: base64 }
+          →  POST /foto/leggi  { image: base64 }
                  │
                  ├─ corpo oltre 2 MB → 413, senza toccare quota né Bedrock
                  │
                  ├─ quota:  pk=QUOTA#FOTO  sk=2026-08-02
-                 │          ADD conteggio 1  IF conteggio < 10   → altrimenti 429
+                 │          ADD count 1  IF count < 10   → altrimenti 429
                  │
                  ├─ Bedrock: immagine + prompt + schema
                  │
-                 └─ core: valida  →  { mese, anno, giorni[] }
+                 └─ core: valida  →  { month, year, days[] }
           →  griglia modificabile  →  planChanges  →  PUT /shifts  (rotta esistente)
 ```
 
@@ -185,7 +226,7 @@ Dentro **Carica**, che è già il posto dove si riempie un mese intero.
 ```
 Caricamento rapido
 ┌──────────────────────────────┐
-│  📷  Leggi da una foto        │   input file, capture=environment
+│  📷  Leggi da una foto        │   input file, accept=image/* e nient'altro
 └──────────────────────────────┘
    oppure scrivi i codici a mano ↓
    [ textarea esistente ]

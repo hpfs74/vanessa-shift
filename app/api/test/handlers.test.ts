@@ -516,9 +516,68 @@ describe('readPhoto', () => {
     );
 
     const r: any = await h(photoEvent('AAAA'));
-    expect(r.statusCode).toBe(502);
+    expect(r.statusCode).toBe(422);
     // Otherwise anyone abusing it gets free attempts by making the reading fail.
     expect(quota.get('2026-08-02')).toBe(1);
+  });
+
+  // The model answered, and the answer is unusable. "Try again in a minute"
+  // would be a lie that costs another reading: all four causes reproduce.
+  it.each(['refusal', 'truncated', 'no-text', 'not-json'] as const)(
+    'an unusable answer (%s) is 422 with the way out, not 502',
+    async (reason) => {
+      const { repo } = fakeRepo();
+      const h = readPhotoWith(
+        repo,
+        async () => {
+          throw new VisionFailed('boom', reason);
+        },
+        today,
+        year,
+      );
+
+      const r: any = await h(photoEvent('AAAA'));
+      expect(r.statusCode).toBe(422);
+      expect(body(r).errore).toContain('leggere questo foglio');
+      expect(body(r).errore).toContain('a mano');
+    },
+  );
+
+  // A Bedrock outage or throttle raises an SDK error, not a VisionFailed. That
+  // is the one failure "Il servizio non risponde" was written for; it used to
+  // fall through to a bare 500.
+  it('a failure of the service itself is 502, not an internal error', async () => {
+    const { repo, quota } = fakeRepo();
+    const h = readPhotoWith(
+      repo,
+      async () => {
+        const e = new Error('ThrottlingException: Too many requests');
+        e.name = 'ThrottlingException';
+        throw e;
+      },
+      today,
+      year,
+    );
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(502);
+    expect(body(r).errore).toContain('Riprova fra un minuto');
+    expect(quota.get('2026-08-02')).toBe(1);
+  });
+
+  it('does not leak the service failure to the screen', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(
+      repo,
+      async () => {
+        throw new Error('AccessDeniedException on arn:aws:bedrock:eu-south-1::foundation-model');
+      },
+      today,
+      year,
+    );
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(String(r.body)).not.toMatch(/arn:aws/);
   });
 
   it('a reading that fails validation is 422, not 500', async () => {

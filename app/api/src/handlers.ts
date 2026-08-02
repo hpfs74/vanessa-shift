@@ -100,6 +100,11 @@ export function putConfigWith(repo: Repo) {
     });
 }
 
+/** Two causes, one way out: the photo could not be read, or what came back
+ *  did not respect the schema. Neither is fixed by waiting a minute. */
+const UNREADABLE =
+  'Non sono riuscito a leggere questo foglio. Prova con piu luce, o scrivi i codici a mano.';
+
 /** Reads a photo of the sheet and returns what's written on it.
  *
  * The order of the three steps is the defense: the huge is rejected before
@@ -131,11 +136,18 @@ export function readPhotoWith(
       try {
         raw = await vision(image);
       } catch (e) {
+        // A VisionFailed means the model answered, and the answer is unusable:
+        // a refusal, a truncation, no text, or text that is not JSON. Retrying
+        // reproduces it exactly, at the cost of another reading — so the way
+        // out is the one that doesn't need the service.
         if (e instanceof VisionFailed) {
-          console.error('lettura fallita', e.message);
-          return failure(502, 'Il servizio non risponde. Riprova fra un minuto.');
+          console.error('photo reading failed', e.reason, e.message);
+          return failure(422, UNREADABLE);
         }
-        throw e;
+        // Anything else came from Bedrock itself: an outage, a throttle, a
+        // timeout. That is the failure "try again in a minute" was written for.
+        console.error('the model call failed', e);
+        return failure(502, 'Il servizio non risponde. Riprova fra un minuto.');
       }
 
       try {
@@ -148,11 +160,8 @@ export function readPhotoWith(
           );
         }
         if (e instanceof InvalidReading) {
-          console.error('estrazione non valida', e.message);
-          return failure(
-            422,
-            'Non sono riuscito a leggere questo foglio. Prova con piu luce, o scrivi i codici a mano.',
-          );
+          console.error('invalid reading', e.message);
+          return failure(422, UNREADABLE);
         }
         throw e;
       }

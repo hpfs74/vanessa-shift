@@ -86,14 +86,22 @@ un token temporaneo a ogni esecuzione. Niente da ruotare, niente da revocare.
 | Risorsa | Cosa fa |
 |---------|---------|
 | OIDC provider `token.actions.githubusercontent.com` | permette a GitHub di farsi riconoscere da AWS |
-| Ruolo `vanessa-shift-deploy` | assumibile **solo** da `repo:hpfs74/vanessa-shift:ref:refs/heads/main` |
+| Ruolo `vanessa-shift-deploy` | assumibile **solo** da `repo:hpfs74@5243150/vanessa-shift@1319134106:environment:produzione` |
+
+Il `sub` porta gli **ID numerici** di utente e repository, non i loro nomi: e' la forma che
+GitHub emette oggi ed e' piu' solida, perche' rinominare il repository non permette a
+nessun altro di ereditarne l'accesso. Un jolly scritto sui nomi non combacerebbe mai.
+
+Il job dichiara `environment: produzione`, e in quel caso il `sub` finisce con
+`:environment:produzione` invece che con `:ref:refs/heads/main`. L'ambiente su GitHub e'
+a sua volta limitato al solo branch `main`, quindi le due protezioni concordano.
 
 Il ruolo non e' amministratore: puo' solo assumere i ruoli che il bootstrap CDK ha creato
 nelle due regioni usate, e leggere gli output dei due stack di questo progetto. Un altro
 repository, o un altro branch di questo, non riesce ad assumerlo.
 
-Se il repository viene rinominato o spostato, la condizione di trust del ruolo va aggiornata,
-altrimenti il deploy smette di funzionare — di proposito.
+Se il repository viene ricreato da zero (non rinominato: gli ID restano), la condizione di
+trust va aggiornata con i nuovi ID, altrimenti il deploy smette di funzionare — di proposito.
 
 ## Nessuna autenticazione
 

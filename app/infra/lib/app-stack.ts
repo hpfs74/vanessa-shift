@@ -136,6 +136,18 @@ export class AppStack extends Stack {
     // Writes only the quota counter, but there's only one table.
     table.grantReadWriteData(readPhotoFn);
 
+    // Two namespaces, because the Messages-API client does not go through
+    // `bedrock:InvokeModel` at all: it calls `bedrock-mantle:CreateInference`
+    // against a project resource. Granting only the obvious one produced an
+    // AccessDenied that named the missing action — this is that name, kept
+    // narrow rather than widened to `bedrock*:*`.
+    readPhotoFn.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['bedrock-mantle:CreateInference'],
+        resources: [`arn:aws:bedrock-mantle:${this.region}:${this.account}:project/default`],
+      }),
+    );
     readPhotoFn.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,

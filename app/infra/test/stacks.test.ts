@@ -247,18 +247,32 @@ describe('reading photos', () => {
   });
 
   it('can invoke the model, and nothing else of Bedrock', () => {
-    app.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: Match.objectLike({
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            // CDK collapses a single-item Action array down to a bare
-            // string, so a scalar match is what "nothing else" looks like.
-            Action: 'bedrock:InvokeModel',
-            Effect: 'Allow',
-          }),
-        ]),
-      }),
-    });
+    // Two statements, asserted separately rather than through one
+    // `Match.arrayWith`: that matcher wants its elements in the template's own
+    // order, which is CDK's business and not a fact worth pinning.
+    // CDK collapses a single-item Action array to a bare string, so a scalar
+    // match is what "nothing else" looks like.
+    const bedrock = (action: string, resource: string) =>
+      app.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({ Action: action, Effect: 'Allow', Resource: resource }),
+          ]),
+        }),
+      });
+
+    bedrock(
+      'bedrock:InvokeModel',
+      `arn:aws:bedrock:${CONFIG.region}::foundation-model/anthropic.claude-opus-5`,
+    );
+    // The one the Messages-API client actually calls. Granting only the obvious
+    // `bedrock:InvokeModel` produced an AccessDenied naming this action
+    // instead: a future edit that drops it breaks every reading, and nothing
+    // else would notice.
+    bedrock(
+      'bedrock-mantle:CreateInference',
+      `arn:aws:bedrock-mantle:${CONFIG.region}:${CONFIG.account}:project/default`,
+    );
   });
 
   it('the table expires the counter rows', () => {

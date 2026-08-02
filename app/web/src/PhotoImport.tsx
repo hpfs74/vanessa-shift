@@ -1,4 +1,4 @@
-/** Import da una foto del foglio.
+/** Import from a photo of the sheet.
  *
  * The grid is editable in full, not only where the model declared itself
  * unsure: the typical mistake in a reading is a single cell, and whoever
@@ -65,9 +65,9 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<number | null>(null);
-  // Come in BulkEntry: la conferma la possiede chi sa quando invecchia. Qui
-  // invecchia quando lei corregge una cella, che e' il gesto equivalente allo
-  // scrivere nella textarea.
+  // As in BulkEntry: the confirmation belongs to whoever knows when it goes
+  // stale. Here it goes stale when she corrects a cell, which is the gesture
+  // equivalent to typing in the textarea.
   const [savedCount, setSavedCount] = useState<number | null>(null);
 
   const pick = async (file: File | undefined) => {

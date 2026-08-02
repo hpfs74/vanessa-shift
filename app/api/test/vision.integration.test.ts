@@ -1,8 +1,10 @@
-/** Le due foto vere contro Bedrock vero.
+/** The two real photos against the real Bedrock.
  *
- * Fuori dalla CI di proposito: costa, servono credenziali AWS, e le foto non
- * stanno nel repository — riportano nome e cognome di quattordici colleghe.
- * Serve a verificare una modifica al prompt con un comando invece che a occhio.
+ * Out of CI on purpose: it costs money, it needs AWS credentials, and the
+ * photos are not in the repository — they carry the full names of fourteen
+ * colleagues. It is here so a change to the prompt can be checked with a
+ * command instead of by eye. The variable names are the ones the spec and the
+ * README give.
  *
  *   PROVA_BEDROCK=1 \
  *   FOTO_LUGLIO=~/vanessa-foto/luglio.jpeg \
@@ -27,8 +29,8 @@ const AUGUST = [
   'L','M','P','L','M','P','M','P','L','M','P','M','P','L','M',
 ];
 
-function base64(percorso: string): string {
-  return readFileSync(percorso).toString('base64');
+function base64(path: string): string {
+  return readFileSync(path).toString('base64');
 }
 
 describe.runIf(enabled)('reading the real photos', () => {

@@ -11,8 +11,8 @@
 
 export const MAX_EDGE = 2576;
 
-export function scaleFor(larghezza: number, altezza: number): number {
-  return Math.min(1, MAX_EDGE / Math.max(larghezza, altezza));
+export function scaleFor(width: number, height: number): number {
+  return Math.min(1, MAX_EDGE / Math.max(width, height));
 }
 
 /** The photo as base64, without the data: prefix. */

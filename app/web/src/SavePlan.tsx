@@ -14,15 +14,15 @@ export interface SavePlanProps {
   entries: readonly ParsedEntry[];
   existing: ReadonlyMap<IsoDate, ShiftCode>;
   month: number;
-  /** Giorni del mese senza turno: mostrati nel riepilogo, non salvati. */
+  /** Days of the month without a shift: shown in the summary, not saved. */
   withoutShift?: number;
-  /** Blocca il salvataggio quando l'input a monte non e' valido. */
+  /** Blocks saving when the input upstream is not valid. */
   blocked?: boolean;
-  /** Numero di giorni salvati da mostrare in conferma, o null per non mostrarla.
-   *  Il chiamante decide quando invalidarla: solo lui sa quando la sorgente e' cambiata. */
+  /** How many days to name in the confirmation, or null for no confirmation.
+   *  The caller decides when it goes stale: only it knows when the source changed. */
   savedCount: number | null;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
-  /** Chiamato dopo un salvataggio riuscito, con il numero di giorni salvati. */
+  /** Called after a successful save, with the number of days saved. */
   onSaved: (count: number) => void;
 }
 

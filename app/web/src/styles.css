@@ -258,7 +258,7 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
 
 .bulk { display: flex; flex-direction: column; gap: 0.6rem; }
 
-/* --- Import da foto --- */
+/* --- photo import --- */
 .photo-pick {
   display: flex; align-items: center; justify-content: center; gap: 0.5rem;
   min-height: var(--tap); border: 1px dashed var(--navy); border-radius: 10px;

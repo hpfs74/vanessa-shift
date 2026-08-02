@@ -175,9 +175,23 @@ describe('stipendio', () => {
     await utente.type(screen.getByLabelText(/Tariffa oraria/), '10');
     await waitFor(() => expect(paga().tariffaOraria).toBe(10));
 
-    // 7 ore di M1 a 10 euro, piu' il rateo di un dodicesimo.
-    const riga = screen.getByRole('row', { name: /^Gennaio/ });
-    expect(within(riga).getByText(/75,83/)).toBeInTheDocument();
+    // 7 ore di M1 a 10 euro: il base e' vero anche senza le maggiorazioni.
+    const riga = () => screen.getByRole('row', { name: /^Gennaio/ });
+    expect(within(riga()).getByText(/70,00/)).toBeInTheDocument();
+    // Il lordo no: senza tutte le percentuali sottostimerebbe quanto spetta.
+    expect(within(riga()).getAllByText('–').length).toBeGreaterThanOrEqual(2);
+
+    for (const [etichetta, valore] of [
+      [/Maggiorazione sabato/, '20'],
+      [/Maggiorazione domenica/, '30'],
+      [/Maggiorazione festivo/, '50'],
+    ] as const) {
+      await utente.type(screen.getByLabelText(etichetta), valore);
+    }
+
+    // Gennaio 2026 non ha ore di sabato, domenica o festivo in questo scenario,
+    // quindi il lordo e' il base piu' il rateo di un dodicesimo.
+    await waitFor(() => expect(within(riga()).getByText(/75,83/)).toBeInTheDocument());
   });
 
   it('le percentuali si scrivono in centesimi e si salvano in frazione', async () => {

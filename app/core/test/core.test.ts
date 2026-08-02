@@ -220,19 +220,48 @@ describe('importi', () => {
     expect(i.nettoStimato).toBeCloseTo((imponibile + imponibile / 12) * 0.75, 10);
   });
 
-  it('una maggiorazione non impostata resta vuota senza azzerare il resto', () => {
+  it('con la sola tariffa mostra il lordo base ma non il totale', () => {
+    // Un totale che ignora le maggiorazioni sottostima quanto spetta:
+    // meglio niente che una cifra sbagliata per difetto.
     const i = importiDelMese(ORE, { ...PAGA_VUOTA, tariffaOraria: 10 });
     expect(i.lordoBase).toBe(1140);
     expect(i.maggSabato).toBeNull();
     expect(i.maggDomenica).toBeNull();
     expect(i.maggFestivo).toBeNull();
-    expect(i.lordoTotale).toBeCloseTo(1140 + 1140 / 12, 10);
+    expect(i.lordoTotale).toBeNull();
+    expect(i.rateo13a).toBeNull();
+    expect(i.nettoStimato).toBeNull();
+  });
+
+  it('basta una maggiorazione mancante per non mostrare il totale', () => {
+    const quasi = {
+      ...PAGA_VUOTA,
+      tariffaOraria: 10,
+      maggSabato: 0.2,
+      maggDomenica: 0.3,
+      coeffNetto: 0.7,
+    };
+    const i = importiDelMese(ORE, quasi);
+    expect(i.maggSabato).toBeCloseTo(16, 10);
+    expect(i.maggFestivo).toBeNull();
+    expect(i.lordoTotale).toBeNull();
     expect(i.nettoStimato).toBeNull();
   });
 
   it('il netto richiede anche il coefficiente', () => {
-    const i = importiDelMese(ORE, { ...PAGA_VUOTA, tariffaOraria: 10, coeffNetto: 0.7 });
-    expect(i.nettoStimato).toBeCloseTo((1140 + 1140 / 12) * 0.7, 10);
+    const completa = {
+      tariffaOraria: 10,
+      maggSabato: 0.2,
+      maggDomenica: 0.3,
+      maggFestivo: 0.5,
+      rateo13a: 1 / 12,
+      coeffNetto: null,
+    };
+    expect(importiDelMese(ORE, completa).lordoTotale).not.toBeNull();
+    expect(importiDelMese(ORE, completa).nettoStimato).toBeNull();
+    const con = importiDelMese(ORE, { ...completa, coeffNetto: 0.7 });
+    const imponibile = 1140 + 16 + 12 + 10;
+    expect(con.nettoStimato).toBeCloseTo((imponibile + imponibile / 12) * 0.7, 10);
   });
 
   it('il totale annuo resta vuoto se ogni mese e vuoto', () => {

@@ -109,12 +109,16 @@ export function importiDelMese(o: OreMese, p: Paga): ImportiMese {
   const mDom = p.maggDomenica == null ? null : o.domenica * p.tariffaOraria * p.maggDomenica;
   const mFest = p.maggFestivo == null ? null : o.festivo * p.tariffaOraria * p.maggFestivo;
 
-  // Il rateo si calcola su cio' che e' noto: una maggiorazione non impostata
-  // vale zero nella somma, non rende indefinito tutto il resto.
-  const imponibile = lordoBase + (mSab ?? 0) + (mDom ?? 0) + (mFest ?? 0);
-  const rateo = p.rateo13a == null ? null : imponibile * p.rateo13a;
-  const lordoTotale = imponibile + (rateo ?? 0);
-  const netto = p.coeffNetto == null ? null : lordoTotale * p.coeffNetto;
+  // Il vuoto si propaga: un totale che ignora una maggiorazione non e' un
+  // numero incompleto, e' un numero sbagliato per difetto presentato come
+  // totale. Sottostimare quanto spetta e' il danno peggiore di tutti.
+  const imponibile =
+    mSab == null || mDom == null || mFest == null
+      ? null
+      : lordoBase + mSab + mDom + mFest;
+  const rateo = imponibile == null || p.rateo13a == null ? null : imponibile * p.rateo13a;
+  const lordoTotale = imponibile == null || rateo == null ? null : imponibile + rateo;
+  const netto = lordoTotale == null || p.coeffNetto == null ? null : lordoTotale * p.coeffNetto;
 
   return {
     lordoBase,

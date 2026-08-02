@@ -77,6 +77,7 @@ export function Stipendio({ anno, turni, paga, onCambiaPaga }: StipendioProps) {
               <th scope="col">Sab</th>
               <th scope="col">Dom</th>
               <th scope="col">Fest</th>
+              <th scope="col">Base</th>
               <th scope="col">Lordo</th>
               <th scope="col">Netto stimato</th>
             </tr>
@@ -89,6 +90,7 @@ export function Stipendio({ anno, turni, paga, onCambiaPaga }: StipendioProps) {
                 <td>{m.ore.sabato || ''}</td>
                 <td>{m.ore.domenica || ''}</td>
                 <td>{m.ore.festivo || ''}</td>
+                <td>{euro(m.importi.lordoBase)}</td>
                 <td>{euro(m.importi.lordoTotale)}</td>
                 <td>{euro(m.importi.nettoStimato)}</td>
               </tr>
@@ -98,6 +100,7 @@ export function Stipendio({ anno, turni, paga, onCambiaPaga }: StipendioProps) {
             <tr>
               <th scope="row">Totale</th>
               <td colSpan={4}>{oreAnno} ore</td>
+              <td>{euro(totale.lordoBase)}</td>
               <td>{euro(totale.lordoTotale)}</td>
               <td>{euro(totale.nettoStimato)}</td>
             </tr>
@@ -105,6 +108,11 @@ export function Stipendio({ anno, turni, paga, onCambiaPaga }: StipendioProps) {
         </table>
       </div>
 
+      <p className="nota">
+        <strong>Base</strong> e' la retribuzione sulle ore lavorate; <strong>Lordo</strong>
+        aggiunge maggiorazioni e rateo, e compare solo quando tutte le percentuali sono
+        impostate: un totale che ne ignora una sottostimerebbe quanto ti spetta.
+      </p>
       <p className="nota">
         Non calcola: straordinari, lavoro notturno, scatti di anzianità, TFR, conguagli,
         addizionali regionali e comunali. È una stima di ciò che ci si può aspettare, non

@@ -902,7 +902,10 @@ describe('leggiFoto', () => {
       anno,
     );
 
-    for (let i = 0; i < 10; i++) expect((await h(eventoFoto('AAAA'))) as any).toBeTruthy();
+    for (let i = 0; i < 10; i++) {
+      const consentita: any = await h(eventoFoto('AAAA'));
+      expect(consentita.statusCode).toBe(200);
+    }
     const r: any = await h(eventoFoto('AAAA'));
     expect(r.statusCode).toBe(429);
     expect(chiamate).toBe(10);
@@ -1767,38 +1770,45 @@ function estrazioneLuglio(incerti: readonly number[] = []): EstrazioneFoto {
   };
 }
 
-/** Il componente riceve gia' l'estrazione: il ridimensionamento su canvas non
- *  esiste in jsdom, quindi il test entra dal punto in cui la foto e' letta. */
-function renderCon(estrazione: EstrazioneFoto, existing = new Map<IsoDate, ShiftCode>()) {
+/** jsdom non ha canvas ne createImageBitmap: il ridimensionamento vero si
+ *  prova su un browser. Sostituendo il modulo, il test entra dal file input
+ *  come ci entra Vanessa, invece di scavalcare il componente da dentro. */
+vi.mock('../src/immagine.js', () => ({
+  LATO_MASSIMO: 2576,
+  scalaPer: () => 1,
+  ridimensiona: () => Promise.resolve('AAAA'),
+}));
+
+async function renderCon(
+  estrazione: EstrazioneFoto,
+  existing = new Map<IsoDate, ShiftCode>(),
+) {
   const onSave = vi.fn().mockResolvedValue(undefined);
   const onLeggi = vi.fn().mockResolvedValue(estrazione);
-  render(
-    <PhotoImport
-      year={2026}
-      existing={existing}
-      onLeggi={onLeggi}
-      onSave={onSave}
-      estrazioneIniziale={estrazione}
-    />,
+  render(<PhotoImport year={2026} existing={existing} onLeggi={onLeggi} onSave={onSave} />);
+
+  await userEvent.upload(
+    screen.getByLabelText(/Leggi da una foto/i),
+    new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
   );
   return { onSave, onLeggi };
 }
 
 describe('PhotoImport', () => {
   it('mostra il mese e la riga che ha trovato', async () => {
-    renderCon(estrazioneLuglio());
+    await renderCon(estrazioneLuglio());
     expect(await screen.findByText(/Luglio 2026/i)).toBeInTheDocument();
     expect(screen.getByText(/Vanessa/)).toBeInTheDocument();
   });
 
   it('conta i giorni senza turno invece di salvarli', async () => {
-    renderCon(estrazioneLuglio());
+    await renderCon(estrazioneLuglio());
     expect(await screen.findByText(/16 senza turno/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Salva 15 giorni/ })).toBeInTheDocument();
   });
 
   it('salva solo i giorni con un turno, a partire dal 17', async () => {
-    const { onSave } = renderCon(estrazioneLuglio());
+    const { onSave } = await renderCon(estrazioneLuglio());
     await userEvent.click(await screen.findByRole('button', { name: /Salva 15 giorni/ }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
@@ -1808,13 +1818,13 @@ describe('PhotoImport', () => {
   });
 
   it('segna le celle che il modello non ha letto con sicurezza', async () => {
-    renderCon(estrazioneLuglio([23]));
+    await renderCon(estrazioneLuglio([23]));
     const cella = await screen.findByRole('button', { name: /^23 / });
     expect(cella).toHaveClass('incerto');
   });
 
   it('correggere una cella cambia quello che verrebbe salvato', async () => {
-    const { onSave } = renderCon(estrazioneLuglio([23]));
+    const { onSave } = await renderCon(estrazioneLuglio([23]));
 
     await userEvent.click(await screen.findByRole('button', { name: /^23 / }));
     await userEvent.click(screen.getByRole('button', { name: /^P1/ }));
@@ -1829,7 +1839,7 @@ describe('PhotoImport', () => {
   });
 
   it('si puo togliere il turno da un giorno, e allora non si salva', async () => {
-    const { onSave } = renderCon(estrazioneLuglio());
+    const { onSave } = await renderCon(estrazioneLuglio());
 
     await userEvent.click(await screen.findByRole('button', { name: /^17 / }));
     await userEvent.click(screen.getByRole('button', { name: /Nessun turno/i }));
@@ -1843,18 +1853,18 @@ describe('PhotoImport', () => {
 
   it('avvisa quando i giorni verrebbero sovrascritti', async () => {
     const existing = new Map<IsoDate, ShiftCode>([['2026-07-17', 'L']]);
-    renderCon(estrazioneLuglio(), existing);
+    await renderCon(estrazioneLuglio(), existing);
     expect(await screen.findByText(/1 da sovrascrivere/)).toBeInTheDocument();
   });
 
   it('rifiuta una foto di un altro anno invece di salvare date sbagliate', async () => {
-    renderCon({ ...estrazioneLuglio(), anno: 2025 });
+    await renderCon({ ...estrazioneLuglio(), anno: 2025 });
     expect(await screen.findByRole('alert')).toHaveTextContent(/2025/);
     expect(screen.queryByRole('button', { name: /^Salva/ })).not.toBeInTheDocument();
   });
 
   it('si puo correggere il mese, e i giorni seguono', async () => {
-    const { onSave } = renderCon(estrazioneLuglio());
+    const { onSave } = await renderCon(estrazioneLuglio());
 
     // Se il modello avesse letto il titolo sbagliato, rifotografare non
     // servirebbe: leggerebbe di nuovo lo stesso. Il mese deve essere correggibile.
@@ -1866,7 +1876,7 @@ describe('PhotoImport', () => {
   });
 
   it('passando a un mese piu corto i giorni in eccesso spariscono', async () => {
-    const { onSave } = renderCon(estrazioneLuglio());
+    const { onSave } = await renderCon(estrazioneLuglio());
 
     // Luglio ha 31 giorni, febbraio 28: il 29, 30 e 31 non esistono piu'.
     // Dei quindici turni di luglio, i tre ultimi cadono li'.
@@ -1908,8 +1918,6 @@ export interface PhotoImportProps {
   existing: ReadonlyMap<IsoDate, ShiftCode>;
   onLeggi: (immagine: string) => Promise<EstrazioneFoto>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
-  /** Solo per i test: entra dal punto in cui la foto e' gia' stata letta. */
-  estrazioneIniziale?: EstrazioneFoto;
 }
 
 interface Letta {
@@ -1931,16 +1939,8 @@ function daEstrazione(e: EstrazioneFoto): Letta {
   return { mese: e.mese, anno: e.anno, nome: e.nomeTrovato ?? '', riga: e.rigaTrovata, codici, incerti };
 }
 
-export function PhotoImport({
-  year,
-  existing,
-  onLeggi,
-  onSave,
-  estrazioneIniziale,
-}: PhotoImportProps) {
-  const [letta, setLetta] = useState<Letta | null>(
-    estrazioneIniziale ? daEstrazione(estrazioneIniziale) : null,
-  );
+export function PhotoImport({ year, existing, onLeggi, onSave }: PhotoImportProps) {
+  const [letta, setLetta] = useState<Letta | null>(null);
   const [leggendo, setLeggendo] = useState(false);
   const [errore, setErrore] = useState<string | null>(null);
   const [aperto, setAperto] = useState<number | null>(null);

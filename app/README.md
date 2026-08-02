@@ -120,8 +120,10 @@ firmata. In più `crypto.subtle`, con cui il browser calcola l'hash del corpo,
 esiste solo in un contesto sicuro, e `http://localhost` non lo è in tutti i
 browser. Una lettura vera va provata in linea.
 
-Ogni lettura costa circa 0,09 €, su un'API che resta aperta. Le difese sono un
-**tetto di 10 letture al giorno** (contatore su DynamoDB, condizione e
+Ogni lettura costa circa 0,09 €. L'endpoint è dietro lo stesso token verificato in
+**Autenticazione** — la Lambda lo controlla per primo, prima della quota e prima di Bedrock —
+quindi le difese sotto fermano un chiamante già autenticato che esagera, non sostituiscono quel
+controllo: un **tetto di 10 letture al giorno** (contatore su DynamoDB, condizione e
 incremento nella stessa operazione), la concorrenza riservata a 2, e il rifiuto
 dei corpi oltre 2 MB. Il contatore si consuma **prima** della chiamata e non si
 restituisce se la chiamata fallisce: altrimenti basta far fallire la lettura per
@@ -174,7 +176,7 @@ Il job dichiara `environment: produzione`, e in quel caso il `sub` finisce con
 a sua volta limitato al solo branch `main`, quindi le due protezioni concordano.
 
 Il ruolo non e' amministratore: puo' solo assumere i ruoli che il bootstrap CDK ha creato
-nelle due regioni usate, e leggere gli output dei due stack di questo progetto. Un altro
+nelle due regioni usate, e leggere gli output dei tre stack di questo progetto. Un altro
 repository, o un altro branch di questo, non riesce ad assumerlo.
 
 Se il repository viene ricreato da zero (non rinominato: gli ID restano), la condizione di
@@ -222,20 +224,40 @@ aws cognito-idp admin-create-user \
 
 Tre cose sorprendono, se non si sa già:
 
-- **La password temporanea dura 24 ore.** Un utente creato che non completa il primo accesso
-  entro un giorno ha la password morta: va riemessa (`admin-create-user` di nuovo, o
-  `admin-set-user-password` senza `--permanent`).
-- **Il primo accesso pretende subito una password sostitutiva di almeno 32 caratteri, con tutte
-  e quattro le classi.** Cognito apre la sfida `NEW_PASSWORD_REQUIRED` nello stesso istante, non
-  dopo: il gestore di password va tenuto **aperto durante** la creazione dell'utente, non
-  riaperto dopo per salvarci qualcosa già scelto al volo.
+- **La password temporanea dura 24 ore.** Un utente creato che non completa la sfida sotto
+  entro un giorno ha la password morta, e va riemessa con lo stesso comando qui sopra più
+  `--message-action RESEND` in coda:
+
+  ```bash
+  aws cognito-idp admin-create-user \
+    --region eu-south-1 \
+    --user-pool-id "$(aws cloudformation describe-stacks --stack-name VanessaAccesso \
+        --query "Stacks[0].Outputs[?OutputKey=='IdPool'].OutputValue" --output text)" \
+    --username vanessa@esempio.it \
+    --user-attributes Name=email,Value=vanessa@esempio.it Name=email_verified,Value=true \
+    --message-action RESEND
+  ```
+
+  Senza `RESEND`, Cognito rifiuta con `UsernameExistsException` perché l'utente esiste già.
+  `RESEND` manda una nuova email con una nuova password temporanea, esattamente come la prima
+  volta. `admin-set-user-password` è un'alternativa che funziona, ma **non manda nessuna
+  notifica**: la password nuova va comunicata a mano a chi deve completare la sfida sotto.
+- **Subito dopo la creazione (o la riemissione), la sfida `NEW_PASSWORD_REQUIRED` pretende una
+  password sostitutiva di almeno 32 caratteri, con tutte e quattro le classi.** Non c'è un
+  comando CLI per soddisfarla: si fa dalla pagina di Managed Login, con lo username e la
+  password temporanea appena arrivata via email — ed è **chi ha appena eseguito il comando** a
+  completarla lì per lì, non Vanessa. Il gestore di password va tenuto **aperto in quel
+  momento**, non riaperto dopo per salvarci qualcosa già scelto al volo. Non va confuso col
+  primo accesso di Vanessa, sotto: sono due passi separati, in due momenti diversi, di solito
+  fatti da due persone diverse.
 - **Il reset della password è solo da amministratore.** `accountRecovery` è `NONE`: non c'è un
   "password dimenticata" nella pagina di login. Una password persa si recupera entrando col
   codice via email, oppure la resetta chi ha le credenziali AWS dell'account
   (`admin-set-user-password`).
 
-Poi: primo accesso dal telefono con il codice via email, e da lì si registra la passkey. Ogni
-dispositivo nuovo rifà il giro — codice via email, poi passkey su quel dispositivo.
+Poi, separatamente: il primo accesso di Vanessa dal telefono, col codice una-tantum via email —
+da lì si registra la passkey. Ogni dispositivo nuovo rifà lo stesso giro: codice via email, poi
+passkey su quel dispositivo.
 
 ### Le due origini restano protette, ma è una domanda diversa
 

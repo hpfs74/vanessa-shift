@@ -204,6 +204,12 @@ Le ore si ricavano senza modificare la struttura di `Presenze`:
 **Precedenza: festivo > domenica > sabato.** Ogni ora ricade in esattamente una categoria, mai
 due maggiorazioni sullo stesso giorno.
 
+Ogni colonna in euro resta vuota finché il parametro da cui dipende non è compilato: le
+maggiorazioni sulla loro percentuale, il rateo sul suo, il netto sul coefficiente, tutte
+sulla tariffa. Anche la riga del totale anno è condizionata: `SUM()` ignora il testo vuoto e
+sommerebbe a zero, mostrando «€ 0,00» come stipendio annuo su un file appena generato. Il
+principio è che nessuna cifra compare finché non è vera.
+
 Importi, tutti condizionati a `IF($B$4="","",…)`:
 
 ```

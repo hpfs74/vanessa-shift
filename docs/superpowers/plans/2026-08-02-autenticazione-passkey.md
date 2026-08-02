@@ -174,15 +174,20 @@ export class AuthStack extends Stack {
       // plan, not a preference.
       featurePlan: FeaturePlan.ESSENTIALS,
       signInPolicy: {
-        // `password` is not optional — Cognito's own API says "This must be
-        // true". A password therefore always exists and always works: the
-        // passkey is the pleasant route, not the only one. Generate it long
-        // and random, and keep it in a password manager.
-        password: true,
-        // The bootstrap: a passkey cannot be registered on an account that
-        // does not exist yet.
-        emailOtp: true,
-        passkey: true,
+        // Nested under `allowedFirstAuthFactors`, and it must be: given the
+        // flat shape CDK drops the whole `Policies` key without a word, and
+        // the pool deploys with no sign-in policy and no passkey at all.
+        allowedFirstAuthFactors: {
+          // `password` is not optional — Cognito's own API says "This must be
+          // true". A password therefore always exists and always works: the
+          // passkey is the pleasant route, not the only one. Generate it long
+          // and random, and keep it in a password manager.
+          password: true,
+          // The bootstrap: a passkey cannot be registered on an account that
+          // does not exist yet.
+          emailOtp: true,
+          passkey: true,
+        },
       },
       passkeyRelyingPartyId: props.domain,
       // `required` is the whole point. Without it a passkey is satisfied by a

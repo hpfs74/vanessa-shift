@@ -298,12 +298,12 @@ export function validateReading(v: unknown, expectedYear: number): PhotoReading 
   }
   const e = v as Record<string, unknown>;
 
-  if (e.found !== true) throw new RowNotFound(`riga di ${ROW_NAME} non trovata`);
+  if (e.found !== true) throw new RowNotFound(`row for ${ROW_NAME} not found`);
 
-  const month = integer(e.month, 'mese');
+  const month = integer(e.month, 'month');
   if (month < 1 || month > 12) throw new InvalidReading('month: out of 1-12');
 
-  const year = integer(e.year, 'anno');
+  const year = integer(e.year, 'year');
   if (Math.abs(year - expectedYear) > 1) throw new InvalidReading('year: too far off');
 
   if (typeof e.foundName !== 'string' || e.foundName.length === 0) {
@@ -628,7 +628,7 @@ const GOOD_RESPONSE = {
   stop_reason: 'end_turn',
   content: [
     { type: 'thinking', thinking: '' },
-    { type: 'text', text: '{"mese":8,"anno":2026,"trovata":true}' },
+    { type: 'text', text: '{"month":8,"year":2026,"found":true}' },
   ],
 };
 
@@ -636,7 +636,7 @@ describe('createVision', () => {
   it('returns the JSON of the text block, already deserialized', async () => {
     const { client } = clientReturning(GOOD_RESPONSE);
     const out = await createVision(client)('AAAA');
-    expect(out).toEqual({ mese: 8, anno: 2026, trovata: true });
+    expect(out).toEqual({ month: 8, year: 2026, found: true });
   });
 
   it('sends image, model, schema and the row name', async () => {
@@ -674,7 +674,7 @@ describe('createVision', () => {
   it('a truncated response is not JSON to read', async () => {
     const { client } = clientReturning({
       stop_reason: 'max_tokens',
-      content: [{ type: 'text', text: '{"mese":8' }],
+      content: [{ type: 'text', text: '{"month":8' }],
     });
     await expect(createVision(client)('AAAA')).rejects.toThrow(VisionFailed);
   });
@@ -998,11 +998,11 @@ export class TooLarge extends Error {}
 
 export function requireImage(v: unknown): string {
   if (typeof v !== 'string' || v.length === 0) {
-    throw new InvalidInput('immagine: attesa l immagine in base64');
+    throw new InvalidInput('image: attesa l immagine in base64');
   }
   // The base64 length is an over-estimate of the bytes: that's fine, the
   // check is meant to stop the huge, not to measure the exact.
-  if (v.length > MAX_BODY_BYTES) throw new TooLarge('immagine troppo grande');
+  if (v.length > MAX_BODY_BYTES) throw new TooLarge('image: immagine troppo grande');
   return v;
 }
 ```
@@ -1313,7 +1313,7 @@ Il client Mantle chiama l'endpoint Messages di Bedrock, che potrebbe volere un'a
 **Interfaces:**
 - Produces:
   - `MAX_EDGE = 2576`, `scaleFor(larghezza: number, altezza: number): number`, `resize(file: File): Promise<string>` da `image.js`
-  - `PHOTO_URL: string` e `Api.readPhoto(immagine: string): Promise<PhotoReading>` da `api.js`
+  - `PHOTO_URL: string` e `Api.readPhoto(image: string): Promise<PhotoReading>` da `api.js`
 
 - [ ] **Step 1: Scrivi il test che fallisce**
 
@@ -1412,17 +1412,17 @@ export const PHOTO_URL: string = import.meta.env.VITE_PHOTO_URL ?? '';
 Aggiungi alla `interface Api`:
 
 ```ts
-  readPhoto(immagine: string): Promise<PhotoReading>;
+  readPhoto(image: string): Promise<PhotoReading>;
 ```
 
 E all'oggetto `api`:
 
 ```ts
-  async readPhoto(immagine) {
+  async readPhoto(image) {
     const r = await fetch(PHOTO_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ image: immagine }),
+      body: JSON.stringify({ image }),
     });
     if (!r.ok) {
       const text = await r.text().catch(() => '');
@@ -1731,7 +1731,7 @@ Il pezzo che Vanessa tocca. Il vincolo forte: dopo la lettura, ogni cella deve e
 export interface PhotoImportProps {
   year: number;
   existing: ReadonlyMap<IsoDate, ShiftCode>;
-  onRead: (immagine: string) => Promise<PhotoReading>;
+  onRead: (image: string) => Promise<PhotoReading>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
 }
 ```
@@ -1917,7 +1917,7 @@ import { resize } from './image.js';
 export interface PhotoImportProps {
   year: number;
   existing: ReadonlyMap<IsoDate, ShiftCode>;
-  onRead: (immagine: string) => Promise<PhotoReading>;
+  onRead: (image: string) => Promise<PhotoReading>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
 }
 
@@ -2179,7 +2179,7 @@ Expected: PASS (8 test).
 In `web/src/BulkEntry.tsx`, aggiungi alle props:
 
 ```ts
-  onReadPhoto: (immagine: string) => Promise<import('@vanessa/core').PhotoReading>;
+  onReadPhoto: (image: string) => Promise<import('@vanessa/core').PhotoReading>;
 ```
 
 importa `PhotoImport`, e mettilo subito sotto `<h2>Caricamento rapido</h2>`, prima della nota:

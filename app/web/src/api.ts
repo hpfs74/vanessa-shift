@@ -1,6 +1,6 @@
 /** The only place that talks to the network. */
 
-import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import type { PhotoReading, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
 
 export interface RemoteShift {
   date: IsoDate;
@@ -13,6 +13,10 @@ export interface RemoteShift {
 }
 
 export const API_URL: string = import.meta.env.VITE_API_URL ?? '';
+
+/** Photo reading lives on its own Function URL: API Gateway truncates the
+ *  integration at 30 seconds, and a reading can take longer than that. */
+export const PHOTO_URL: string = import.meta.env.VITE_PHOTO_URL ?? '';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${API_URL}${path}`, {
@@ -41,6 +45,7 @@ export interface Api {
   saveShifts(shifts: readonly { date: IsoDate; code: ShiftCode }[]): Promise<void>;
   paySettings(): Promise<PaySettings>;
   savePaySettings(p: PaySettings): Promise<void>;
+  readPhoto(image: string): Promise<PhotoReading>;
 }
 
 export const api: Api = {
@@ -79,5 +84,25 @@ export const api: Api = {
   },
   async savePaySettings(p) {
     await request('/config', { method: 'PUT', body: JSON.stringify(p) });
+  },
+  async readPhoto(image) {
+    const r = await fetch(PHOTO_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ image }),
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      let message = `lettura fallita (${r.status})`;
+      try {
+        const j = JSON.parse(text) as { errore?: string };
+        if (j.errore) message = j.errore;
+      } catch {
+        /* the body wasn't JSON: the generic message stays */
+      }
+      throw new Error(message);
+    }
+    const j = (await r.json()) as { reading: PhotoReading };
+    return j.reading;
   },
 };

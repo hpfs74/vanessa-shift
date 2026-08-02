@@ -19,6 +19,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
+from calendario import foglio_calendario
 from comune import (AZZURRO, BLU_SCURO, BOX, CODICI, GIORNI, GRIGIO_INT, MESI,
                     N_COLLEGHE, TIPI_SCAMBIO, TURNI_LAVORATI, VERDE, intesta,
                     titolo)
@@ -284,6 +285,7 @@ def main():
     wb.remove(wb.active)
     _, cod_r1, cod_r2 = foglio_codici(wb)
     _, p_r1, p_r2 = foglio_presenze(wb, anno, cod_r1, cod_r2)
+    foglio_calendario(wb, anno, cod_r1, cod_r2)
     foglio_riepilogo(wb, anno, p_r1, p_r2)
     foglio_scambi(wb, anno, p_r1, p_r2)
     wb.move_sheet("Presenze", offset=-wb.sheetnames.index("Presenze"))

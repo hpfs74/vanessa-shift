@@ -66,6 +66,27 @@ Conseguenza pratica: la sicurezza di questa app ha come pavimento la forza di qu
 non la biometria. Va generata lunga e casuale, e messa in un gestore di password — non
 memorizzata, perché nessuno deve doverla digitare.
 
+E il pavimento è scritto nello stack, non lasciato al default: `passwordPolicy` con lunghezza
+minima 32 e tutte e quattro le classi di caratteri. Senza, il pool eredita gli otto caratteri
+di default di Cognito, che è un numero che nessuna riga di questo repository dichiara e che
+chiunque può cambiare in console senza che un test se ne accorga.
+
+### Il perimetro vero è la sua casella di posta
+
+Il codice via email non è solo il primo accesso: resta un modo per entrare, completo, per
+sempre. La passkey quindi **non fa da cancello a niente** — sta accanto ad altre due strade,
+la password e il codice, ed è la più comoda delle tre, non l'anello più forte di una catena.
+
+Chi ha accesso alla casella di Vanessa ha accesso all'app, volto o non volto.
+
+È una conseguenza del bootstrap, non una svista: senza il codice via email non esisterebbe
+modo di registrare la prima passkey, né di rientrare da un telefono nuovo o perso senza che
+qualcun altro riaccenda qualcosa in console. Il costo di toglierlo è un passo manuale addosso a
+un'altra persona ogni volta che lei cambia telefono, ed è stato valutato e scartato.
+
+Va detto perché «si entra col volto» suona come una garanzia che non è: il volto è la porta di
+tutti i giorni, la casella è il perimetro.
+
 ### Il primo accesso non può essere una passkey
 
 Non si registra un volto su un account che non esiste. Il primo ingresso è un codice una-tantum
@@ -138,5 +159,7 @@ leggendo la fonte sbagliata, e non ho intenzione di scriverne una quarta senza g
 ## Fuori perimetro
 
 Niente registrazione aperta: gli utenti si creano a mano, sono uno o due. Niente recupero
-password self-service. Niente ruoli o permessi. Niente logout su tutti i dispositivi. Niente
+password self-service — `accountRecovery: NONE`: con il codice via email già fra i primi
+fattori, una procedura di reset non darebbe a un attaccante con la casella niente che non abbia
+già, e aggiungerebbe una superficie in più e un link sulla pagina di accesso. Niente ruoli o permessi. Niente logout su tutti i dispositivi. Niente
 multiutente sui dati, come detto sopra.

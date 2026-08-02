@@ -530,6 +530,41 @@ describe('summary view', () => {
   });
 });
 
+describe('while the data is still loading', () => {
+  /** An API whose read never resolves: the app stays in its loading state. */
+  function apiThatHangs(): Api {
+    const never = () => new Promise<never>(() => {});
+    return {
+      shifts: never,
+      saveShift: never,
+      deleteShift: never,
+      saveShifts: never,
+      paySettings: never,
+      savePaySettings: never,
+    };
+  }
+
+  it('says it is loading instead of showing a confident zero', async () => {
+    const user = userEvent.setup();
+    render(<App api={apiThatHangs()} today={JAN} />);
+
+    expect(screen.getByText(/Carico i turni/)).toBeInTheDocument();
+
+    // Every view, not just the calendar: a summary reading "0 ore" during the
+    // fetch looks like an empty year rather than an unread one.
+    for (const tab of [/Riepilogo/, /Scambi/, /Stipendio/, /Carica/]) {
+      await user.click(
+        within(screen.getByRole('navigation', { name: 'Sezioni' })).getByRole('button', {
+          name: tab,
+        }),
+      );
+      expect(screen.getByText(/Carico i turni/), String(tab)).toBeInTheDocument();
+      expect(screen.queryByText(/0 giorni lavorati/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Nessuna ora registrata/)).not.toBeInTheDocument();
+    }
+  });
+});
+
 describe('summary charts', () => {
   const goToSummary = async (user: ReturnType<typeof userEvent.setup>) =>
     user.click(

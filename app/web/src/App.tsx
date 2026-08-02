@@ -177,7 +177,13 @@ export function App({
       )}
 
       <main>
-        {view === 'calendar' && (
+        {/* Finche' i dati non sono arrivati nessuna vista puo' dire la verita':
+            un riepilogo a zero durante il caricamento sembra un anno vuoto,
+            non un anno non ancora letto. Vale per tutte le viste, non solo
+            per il calendario. */}
+        {loading && <p className="waiting">Carico i turni…</p>}
+
+        {!loading && view === 'calendar' && (
           <>
             <div className="month-nav">
               <button
@@ -201,23 +207,19 @@ export function App({
               </button>
             </div>
 
-            {loading ? (
-              <p className="waiting">Carico i turni…</p>
-            ) : (
-              <Calendar
-                year={YEAR}
-                month={month}
-                shifts={entries}
-                swapped={new Set(records.filter((r) => r.originalCode).map((r) => r.date))}
-                today={today}
-                selected={editing}
-                onPick={setEditing}
-              />
-            )}
+            <Calendar
+              year={YEAR}
+              month={month}
+              shifts={entries}
+              swapped={new Set(records.filter((r) => r.originalCode).map((r) => r.date))}
+              today={today}
+              selected={editing}
+              onPick={setEditing}
+            />
           </>
         )}
 
-        {view === 'bulk' && (
+        {!loading && view === 'bulk' && (
           <BulkEntry
             year={YEAR}
             month={month}
@@ -227,9 +229,9 @@ export function App({
           />
         )}
 
-        {view === 'swaps' && <Swaps days={records} />}
-        {view === 'summary' && <Summary year={YEAR} shifts={entries} />}
-        {view === 'pay' && (
+        {!loading && view === 'swaps' && <Swaps days={records} />}
+        {!loading && view === 'summary' && <Summary year={YEAR} shifts={entries} />}
+        {!loading && view === 'pay' && (
           <Pay year={YEAR} shifts={entries} settings={settings} onChange={changeSettings} />
         )}
       </main>

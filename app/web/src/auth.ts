@@ -90,6 +90,14 @@ export async function completaAccesso(url: URL = new URL(location.href)): Promis
   if (!r.ok) return false;
 
   const j = (await r.json()) as { id_token: string; expires_in: number };
+  // The ID token, not `access_token` — and not by convention, by necessity.
+  // The photo Lambda verifies with `tokenUse: 'id'`, so it takes the ID token
+  // alone; the five API Gateway routes are more permissive (their JWT
+  // authorizer falls back to `client_id` when `aud` is absent, so they accept
+  // either). Store the access token here instead and the five routes keep
+  // working — the failure hides behind the half of the app that still
+  // functions — while the photo import 401s a signed-in Vanessa forever,
+  // with nothing in any test able to see why.
   localStorage.setItem(
     CHIAVE_SESSIONE,
     JSON.stringify({ idToken: j.id_token, scade: Date.now() + j.expires_in * 1000 }),

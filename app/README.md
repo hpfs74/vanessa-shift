@@ -105,8 +105,8 @@ l'integrazione a 30 secondi: una lettura ne può prendere di più.
 Il frontend chiama sempre la propria origine: `/api/...` e `/foto/leggi`,
 inoltrati da CloudFront verso API Gateway e verso la Function URL. Un solo
 dominio, niente da incollare in un file dopo il deploy. Le due origini non si
-raggiungono più direttamente — con che forza, lo dice «Nessuna autenticazione»
-più sotto.
+raggiungono più direttamente — con che forza, lo dice più sotto, dentro
+**Autenticazione**.
 
 Il sotto-path della lettura serve: la behaviour è `/foto/*`, e in CloudFront
 l'asterisco vale zero o più caratteri **dopo** il prefisso letterale, quindi
@@ -140,11 +140,12 @@ PROVA_BEDROCK=1 FOTO_LUGLIO=~/vanessa-foto/luglio.jpeg \
 ## Risorse AWS
 
 Account `495133941005`, regione `eu-south-1`. Il certificato sta in `us-east-1` perché
-CloudFront non ne accetta altrove: da qui i due stack.
+CloudFront non ne accetta altrove: da qui i tre stack.
 
 | Stack | Contenuto |
 |-------|-----------|
 | `VanessaCertificato` | certificato ACM (us-east-1) |
+| `VanessaAccesso` | user pool Cognito, app client, dominio di login |
 | `VanessaApp` | tabella, Lambda, API, bucket, distribuzione, record DNS |
 
 Il frontend non conosce l'endpoint dell'API: CloudFront lo inoltra da `/api`, e la distribuzione
@@ -179,16 +180,70 @@ repository, o un altro branch di questo, non riesce ad assumerlo.
 Se il repository viene ricreato da zero (non rinominato: gli ID restano), la condizione di
 trust va aggiornata con i nuovi ID, altrimenti il deploy smette di funzionare — di proposito.
 
-## Nessuna autenticazione
+## Autenticazione
 
-Scelta deliberata del proprietario, documentata in
-`docs/superpowers/specs/2026-08-02-web-app-aws-design.md`. **Nessuna delle protezioni qui sotto
-autentica chi chiama**: dietro CloudFront l'API resta aperta, e chiunque arrivi a
-`https://vanessa.matteo.cool/api/...` può leggere e modificare turni e parametri. Quello che è
-cambiato è che non ci si arriva più da nessun'altra parte.
+Si entra con la passkey: verifica biometrica obbligatoria, non basta che il telefono sia
+sbloccato. Cognito, user pool `featurePlan: ESSENTIALS` (le passkey non esistono nel piano
+Lite), Managed Login come pagina di accesso. La sessione dura un giorno **di proposito** — un
+tocco di Face ID quando si apre l'app la mattina, non un rientro silenzioso che dura mesi se il
+telefono va perso.
 
-Le due origini non si raggiungono più direttamente, ma non con la stessa forza — e la differenza
-conta, quindi sta scritta:
+**Una password esiste comunque.** L'API di Cognito la dichiara obbligatoria — non si può
+togliere — anche se non è la strada normale per entrare. Il pavimento della sicurezza dell'app è
+la sua forza, non il volto: lo stack impone almeno 32 caratteri con tutte e quattro le classi
+(maiuscole, minuscole, numeri, simboli), quindi va generata da un gestore di password, non a
+memoria, e conservata lì — mai digitata.
+
+### Il perimetro vero è la casella email di Vanessa
+
+Passkey e password non sono le uniche due strade d'accesso: c'è anche il codice una-tantum via
+email, ed è un accesso completo e permanente — non solo per il primo ingresso. La passkey quindi
+**non fa da cancello a niente**: è la più comoda delle tre strade, non l'anello più forte di una
+catena.
+
+Chi ha accesso alla casella di posta di Vanessa ha accesso all'app, volto o non volto. Il Face ID
+è la porta di tutti i giorni; la casella è il perimetro vero. È una conseguenza del bootstrap, non
+una svista — senza il codice via email non ci sarebbe modo di registrare la prima passkey né di
+rientrare da un telefono nuovo o perso — spiegata per esteso in
+`docs/superpowers/specs/2026-08-02-autenticazione-passkey-design.md`.
+
+### Creare l'utente
+
+Non c'è registrazione: l'utente si crea a mano, con l'AWS CLI.
+
+```bash
+aws cognito-idp admin-create-user \
+  --region eu-south-1 \
+  --user-pool-id "$(aws cloudformation describe-stacks --stack-name VanessaAccesso \
+      --query "Stacks[0].Outputs[?OutputKey=='IdPool'].OutputValue" --output text)" \
+  --username vanessa@esempio.it \
+  --user-attributes Name=email,Value=vanessa@esempio.it Name=email_verified,Value=true
+```
+
+Tre cose sorprendono, se non si sa già:
+
+- **La password temporanea dura 24 ore.** Un utente creato che non completa il primo accesso
+  entro un giorno ha la password morta: va riemessa (`admin-create-user` di nuovo, o
+  `admin-set-user-password` senza `--permanent`).
+- **Il primo accesso pretende subito una password sostitutiva di almeno 32 caratteri, con tutte
+  e quattro le classi.** Cognito apre la sfida `NEW_PASSWORD_REQUIRED` nello stesso istante, non
+  dopo: il gestore di password va tenuto **aperto durante** la creazione dell'utente, non
+  riaperto dopo per salvarci qualcosa già scelto al volo.
+- **Il reset della password è solo da amministratore.** `accountRecovery` è `NONE`: non c'è un
+  "password dimenticata" nella pagina di login. Una password persa si recupera entrando col
+  codice via email, oppure la resetta chi ha le credenziali AWS dell'account
+  (`admin-set-user-password`).
+
+Poi: primo accesso dal telefono con il codice via email, e da lì si registra la passkey. Ogni
+dispositivo nuovo rifà il giro — codice via email, poi passkey su quel dispositivo.
+
+### Le due origini restano protette, ma è una domanda diversa
+
+Oltre all'autenticazione resta il segreto d'origine introdotto quando l'app era ancora aperta a
+chiunque (`docs/superpowers/specs/2026-08-02-api-dietro-cloudfront-design.md`): risponde a *da
+quale porta sei entrato*, non a *chi sei*, e le due cose non si sostituiscono a vicenda. Le due
+origini non si raggiungono più direttamente, ma non con la stessa forza — e la differenza conta,
+quindi sta scritta:
 
 - **`/foto` è chiuso davvero.** La Function URL è su `AWS_IAM` dietro Origin Access Control:
   CloudFront firma ogni richiesta con SigV4 e il permesso di invocazione è ristretto a questa
@@ -201,8 +256,10 @@ conta, quindi sta scritta:
   quante volte vuole, da dove vuole. Ferma gli scanner e l'accesso diretto casuale, che è quello
   per cui c'è. Non è una barriera crittografica e non va scambiata per tale.
 
-Restano le difese di prima: il throttling su API Gateway (100 richieste al secondo) e il
-point-in-time recovery sulla tabella, che permette di tornare indietro dopo un danno.
+Restano anche le difese di prima: il throttling su API Gateway (100 richieste al secondo) — il
+freno contro chi è autenticato ma martella l'API più veloce di quanto farebbe una persona, non
+contro chi non lo è, che l'authorizer ferma prima — e il point-in-time recovery sulla tabella,
+che permette di tornare indietro dopo un danno.
 
 ## Modello dati
 

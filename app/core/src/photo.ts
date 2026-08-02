@@ -29,7 +29,9 @@ export interface PhotoReading {
   readonly month: number;
   readonly year: number;
   readonly found: boolean;
-  readonly foundName: string | null;
+  /** The name as it is written on the sheet, and the row number when the sheet
+   *  shows one. Both are captions: nothing downstream computes with them. */
+  readonly foundName: string;
   readonly foundRow: number | null;
   readonly days: readonly ReadDay[];
 }
@@ -86,7 +88,7 @@ export function validateReading(v: unknown, expectedYear: number): PhotoReading 
   }
   const e = v as Record<string, unknown>;
 
-  if (e.found !== true) throw new RowNotFound(`riga di ${ROW_NAME} non trovata`);
+  if (e.found !== true) throw new RowNotFound(`no row for ${ROW_NAME}`);
 
   const month = integer(e.month, 'month');
   if (month < 1 || month > 12) throw new InvalidReading('month: out of 1-12');
@@ -97,7 +99,9 @@ export function validateReading(v: unknown, expectedYear: number): PhotoReading 
   if (typeof e.foundName !== 'string' || e.foundName.length === 0) {
     throw new InvalidReading('foundName: expected a name');
   }
-  const foundRow = integer(e.foundRow, 'foundRow');
+  // A photo cropped so the row number is not visible is still a readable
+  // photo: the all-or-nothing rule is about `days`, not about a caption.
+  const foundRow = e.foundRow === null ? null : integer(e.foundRow, 'foundRow');
 
   if (!Array.isArray(e.days)) throw new InvalidReading('days: expected an array');
   const expected = daysInMonth(year, month);

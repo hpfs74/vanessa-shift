@@ -37,7 +37,7 @@ function fromReading(e: PhotoReading): Reading {
     codes[g.day - 1] = g.code;
     if (!g.confident) unsure.add(g.day);
   }
-  return { month: e.month, year: e.year, name: e.foundName ?? '', row: e.foundRow, codes, unsure };
+  return { month: e.month, year: e.year, name: e.foundName, row: e.foundRow, codes, unsure };
 }
 
 export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps) {

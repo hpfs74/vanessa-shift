@@ -54,17 +54,20 @@ turni e' quella del nome.
 Per ogni giorno del mese riporta la sigla che sta nella cella di quella riga.
 Le sigle valide sono soltanto: ${CODES}.
 Se la cella contiene una x, e' vuota, oppure non riesci a leggerla con
-ragionevole certezza, metti codice null.
+ragionevole certezza, metti code null.
 
 Attenzione: le altre righe contengono anche sigle diverse (F, R, C, N1 e altre).
 Non riguardano questa persona. Non riportare mai la cella di un'altra riga.
 
 Riporta un elemento per OGNI giorno del mese, dal primo all'ultimo, anche per i
-giorni con codice null. Metti sicuro a false quando la cella e' sbiadita,
+giorni con code null. Metti confident a false quando la cella e' sbiadita,
 corretta a mano, ambigua o coperta.
 
-Se nella foto non c'e' nessuna riga intestata a ${ROW_NAME}, metti trovata a
-false e giorni a un elenco vuoto.`;
+In foundName scrivi il nome cosi' come sta scritto sul foglio, e in foundRow il
+numero della riga se il foglio lo mostra, altrimenti null.
+
+Se nella foto non c'e' nessuna riga intestata a ${ROW_NAME}, metti found a
+false e days a un elenco vuoto.`;
 
 /** Reasoning on Claude Opus 5 is on by default, and that's what's needed:
  *  counting thirty-one crooked, handwritten columns isn't a glance. The token

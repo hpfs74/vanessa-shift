@@ -100,6 +100,28 @@ describe('validateReading', () => {
     expect(() => validateReading([], 2026)).toThrow(InvalidReading);
   });
 
+  // The row number is a caption, not data: a photo cropped past it is still
+  // readable, and rejecting it costs a reading and helps nobody.
+  it('accepts a reading where the row number was not visible', () => {
+    const e = validateReading({ ...emptyReading(8, 2026, 31), foundRow: null }, 2026);
+    expect(e.foundRow).toBeNull();
+    expect(e.days).toHaveLength(31);
+  });
+
+  it('rejects a row number that is not a number', () => {
+    const e = { ...emptyReading(8, 2026, 31), foundRow: 'quattordici' };
+    expect(() => validateReading(e, 2026)).toThrow(InvalidReading);
+  });
+
+  it('still wants a name for the row it says it found', () => {
+    expect(() =>
+      validateReading({ ...emptyReading(8, 2026, 31), foundName: null }, 2026),
+    ).toThrow(InvalidReading);
+    expect(() => validateReading({ ...emptyReading(8, 2026, 31), foundName: '' }, 2026)).toThrow(
+      InvalidReading,
+    );
+  });
+
   it('when the row is not there it says so with its own error', () => {
     const e = { ...emptyReading(8, 2026, 31), found: false, foundName: null, foundRow: null };
     expect(() => validateReading(e, 2026)).toThrow(RowNotFound);

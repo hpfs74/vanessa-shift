@@ -61,6 +61,14 @@ describe('PhotoImport', () => {
     expect(screen.getByText(/Vanessa/)).toBeInTheDocument();
   });
 
+  // A photo cropped past the row number is still a usable photo: the grid
+  // arrives, and only the number in brackets is missing.
+  it('shows the row it found even when the sheet had no row number', async () => {
+    await renderWith({ ...julyReading(), foundRow: null });
+    expect(await screen.findByText(/riga trovata: Vanessa/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Salva 15 giorni/ })).toBeInTheDocument();
+  });
+
   it('counts the days without a shift instead of saving them', async () => {
     await renderWith(julyReading());
     expect(await screen.findByText(/16 senza turno/)).toBeInTheDocument();

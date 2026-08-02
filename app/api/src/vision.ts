@@ -8,30 +8,34 @@
  * names and the word "turno" (shift) are the document's own vocabulary.
  */
 
-import { AnthropicBedrockMantle } from '@anthropic-ai/bedrock-sdk';
+import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
 
 import { ROW_NAME, READING_SCHEMA, SHIFTS } from '@vanessa/core';
 
-export const MODEL = 'anthropic.claude-opus-5';
-
-/** Ireland, not Milan, and not where this Lambda runs.
+/** Sonnet 4.6 through the `eu.` cross-region profile, in our own region.
  *
- * The Messages endpoint does not serve this model in eu-south-1: asking for it
- * there answers "the model does not exist", while the same call to eu-west-1
- * gets as far as permissions. That is the difference between an identifier the
- * endpoint does not know and one it knows but will not run for you.
+ * Two separate reasons this is not Opus 5, both found by asking rather than
+ * assuming:
  *
- * Worth knowing before changing it: `aws bedrock list-foundation-models` lists
- * the model in eu-south-1 quite happily. That is the older Bedrock API, and
- * what it lists is not what this endpoint serves — checking availability there
- * is how this was got wrong in the first place. The way to check is to call the
- * endpoint and read which of the two errors comes back.
+ * The Messages endpoint (`AnthropicBedrockMantle`) serves no model at all in
+ * eu-south-1 — every id answers "the model does not exist" — while the older
+ * InvokeModel path used here answers properly. Beware that
+ * `aws bedrock list-foundation-models` lists models for the older path, so it
+ * tells you nothing about the newer one; checking there is how this was got
+ * wrong twice.
  *
- * The photo therefore leaves Italy for Ireland. Both are in the EU, so nothing
- * crosses the EEA, but the sheet carries fourteen colleagues' names and that is
- * worth stating rather than leaving to be discovered.
+ * And Opus is not enabled for this account: `eu.anthropic.claude-opus-4-8`
+ * comes back "not available for this account", which is model access to be
+ * granted in the Bedrock console, not something code can fix. Sonnet is
+ * enabled and answers.
+ *
+ * The `eu.` prefix is the cross-region inference profile, and is required:
+ * the bare model id is not invokable here.
  */
-export const REGION = 'eu-west-1';
+export const MODEL = 'eu.anthropic.claude-sonnet-4-6';
+
+/** Milan, where the rest of the stack lives. The photo does not leave Italy. */
+export const REGION = 'eu-south-1';
 
 /** The minimum the client needs, so the tests don't pull in the SDK. */
 export interface MessagesResponse {
@@ -95,7 +99,7 @@ const MAX_TOKENS = 8000;
 
 export function createVision(client?: MessagesClient): Vision {
   const c: MessagesClient =
-    client ?? (new AnthropicBedrockMantle({ awsRegion: REGION }) as unknown as MessagesClient);
+    client ?? (new AnthropicBedrock({ awsRegion: REGION }) as unknown as MessagesClient);
 
   return async (imageBase64: string) => {
     const response = await c.messages.create({

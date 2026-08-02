@@ -247,35 +247,25 @@ describe('reading photos', () => {
   });
 
   it('can invoke the model, and nothing else of Bedrock', () => {
-    // Two statements, asserted separately rather than through one
-    // `Match.arrayWith`: that matcher wants its elements in the template's own
-    // order, which is CDK's business and not a fact worth pinning.
-    // CDK collapses a single-item Action array to a bare string, so a scalar
-    // match is what "nothing else" looks like.
-    const bedrock = (action: string, resource: string) =>
-      app.hasResourceProperties('AWS::IAM::Policy', {
-        PolicyDocument: Match.objectLike({
-          Statement: Match.arrayWith([
-            Match.objectLike({ Action: action, Effect: 'Allow', Resource: resource }),
-          ]),
-        }),
-      });
-
-    // eu-west-1, not the stack's own region: eu-south-1 does not serve this
-    // model on the Messages endpoint. If someone "corrects" the region back to
-    // match the stack, this fails rather than every reading failing in silence.
-    bedrock(
-      'bedrock:InvokeModel',
-      'arn:aws:bedrock:eu-west-1::foundation-model/anthropic.claude-opus-5',
-    );
-    // The one the Messages-API client actually calls. Granting only the obvious
-    // `bedrock:InvokeModel` produced an AccessDenied naming this action
-    // instead: a future edit that drops it breaks every reading, and nothing
-    // else would notice.
-    bedrock(
-      'bedrock-mantle:CreateInference',
-      `arn:aws:bedrock-mantle:eu-west-1:${CONFIG.account}:project/default`,
-    );
+    // Two resources, one statement: the `eu.` cross-region inference profile
+    // that the call names, and the model in whichever region that profile
+    // routes to. `bedrock-mantle` is deliberately absent — that namespace
+    // belongs to the newer Messages endpoint, which serves nothing in
+    // eu-south-1 (see the comment on MODEL in api/src/vision.ts).
+    app.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: 'bedrock:InvokeModel',
+            Effect: 'Allow',
+            Resource: [
+              `arn:aws:bedrock:${CONFIG.region}:${CONFIG.account}:inference-profile/eu.anthropic.claude-sonnet-4-6`,
+              'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6',
+            ],
+          }),
+        ]),
+      }),
+    });
   });
 
   it('the table expires the counter rows', () => {

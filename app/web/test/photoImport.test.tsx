@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
+import { SHORT_DAY_NAMES } from '@vanessa/core';
 
 import { PhotoImport } from '../src/PhotoImport.js';
 
@@ -178,6 +179,16 @@ describe('PhotoImport', () => {
     await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '6');
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  // Without the column labels, the offset that aligns day 1 to its weekday
+  // reads as an unexplained hole at the top of the grid.
+  it('labels the weekday columns, like the calendar', async () => {
+    const { container } = await renderWith(julyReading());
+
+    await waitFor(() => expect(container.querySelector('.photo-days')).toBeInTheDocument());
+    const labels = [...container.querySelectorAll('.photo-days span')].map((s) => s.textContent);
+    expect(labels).toEqual([...SHORT_DAY_NAMES]);
   });
 
   // Regression: a wrong offset direction, or dropping the `+ 1`, would put

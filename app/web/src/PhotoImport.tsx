@@ -12,6 +12,7 @@ import type { PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
 import {
   MONTH_NAMES,
   SHIFTS,
+  SHORT_DAY_NAMES,
   daysInMonth,
   entriesFromReading,
   toIso,
@@ -184,6 +185,17 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
             </p>
           ) : (
             <>
+              {/* The grid is weekday-aligned, like the calendar's. Without the
+                  column labels the offset on day 1 reads as an unexplained
+                  gap. Hidden from assistive technology: every cell already
+                  names its own day, and these are not real column headers —
+                  the grid is a group of buttons, not a table. */}
+              <div className="photo-days" aria-hidden="true">
+                {SHORT_DAY_NAMES.map((d) => (
+                  <span key={d}>{d}</span>
+                ))}
+              </div>
+
               <div className="photo-grid" role="group" aria-label="Giorni letti dalla foto">
                 {reading.codes.map((code, i) => {
                   const day = i + 1;

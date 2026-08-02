@@ -266,8 +266,13 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
 }
 .photo-pick input { display: none; }
 .photo-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
-.photo-head h3 { margin: 0.4rem 0; }
-.photo-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin: 0.5rem 0; }
+/* Same columns as the calendar's header, so the two grids read as one thing. */
+.photo-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin: 0.5rem 0 2px; }
+.photo-days span {
+  background: var(--navy); color: #fff; font-size: 0.7rem; font-weight: 600;
+  text-align: center; padding: 0.3rem 0; border-radius: 4px;
+}
+.photo-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin: 0 0 0.5rem; }
 .photo-cell {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   min-height: var(--tap); border: 1px solid var(--border); border-radius: 6px;

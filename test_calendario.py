@@ -131,3 +131,67 @@ def test_totale_del_mese(wb):
     assert ws.cell(row=r, column=6).value == '=COUNTIF(Presenze!$E$5:$E$35,">0")'
     assert ws.cell(row=r, column=7).value == "Ore"
     assert ws.cell(row=r, column=8).value == "=SUM(Presenze!$E$5:$E$35)"
+
+
+def colore(cella):
+    f = cella.fill
+    return f.fgColor.rgb[-6:] if f and f.fgColor and f.fgColor.rgb else None
+
+
+def test_colori_dei_tipi_di_giorno(wb):
+    ws = wb["Calendario"]
+    # 25 aprile 2026 e' un sabato ed e' festivo: vince il festivo.
+    r = trova_titolo_mese(ws, f"APRILE {ANNO}") + 2
+    while True:
+        cols = [c for c in range(1, 8) if ws.cell(row=r, column=c).value == 25]
+        if cols:
+            break
+        r += 3
+    assert colore(ws.cell(row=r, column=cols[0])) == "FAE6B8"
+    # 26 aprile e' domenica non festiva.
+    assert colore(ws.cell(row=r, column=7)) == "F3DCE4"
+    # 24 aprile e' un venerdi feriale.
+    assert colore(ws.cell(row=r, column=5)) == "FFFFFF"
+
+
+def test_pasquetta_e_festiva(wb):
+    # 6 aprile 2026, lunedi dell'Angelo.
+    ws = wb["Calendario"]
+    r = trova_titolo_mese(ws, f"APRILE {ANNO}") + 2
+    while True:
+        cols = [c for c in range(1, 8) if ws.cell(row=r, column=c).value == 6]
+        if cols:
+            break
+        r += 3
+    assert colore(ws.cell(row=r, column=cols[0])) == "FAE6B8"
+
+
+def test_caselle_fuori_mese_sono_grigie(wb):
+    ws = wb["Calendario"]
+    r = trova_titolo_mese(ws, f"GENNAIO {ANNO}") + 2
+    for c in range(1, 4):  # lun, mar, mer prima del giovedi 1 gennaio
+        assert colore(ws.cell(row=r, column=c)) == "F7F9FB"
+
+
+def test_regole_di_colore_per_ogni_codice(wb):
+    ws = wb["Calendario"]
+    formule = set()
+    for intervallo in ws.conditional_formatting:
+        for regola in intervallo.rules:
+            formule.update(regola.formula)
+    for cod in ("L", "M", "M1", "P", "P1"):
+        assert f'"{cod}"' in formule, cod
+        assert f'"{cod}*"' in formule, cod
+    for orario in ("07:00-13:00", "07:00-14:00", "13:00-20:00", "13:00-21:00", "–"):
+        assert f'"{orario}"' in formule, orario
+
+
+def test_legenda(wb):
+    ws = wb["Calendario"]
+    assert ws["A1"].value == f"Calendario {ANNO}"
+    testi = [ws.cell(row=r, column=c).value
+             for r in range(1, 10) for c in range(1, 9)]
+    assert "Sabato" in testi
+    assert "Domenica" in testi
+    assert "Festivo" in testi
+    assert any(isinstance(t, str) and t.startswith("* accanto al codice") for t in testi)

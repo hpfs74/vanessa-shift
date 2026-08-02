@@ -18,6 +18,7 @@ import {
   monthPay,
   sumPay,
   timeRange,
+  today,
   weekday,
   yearDays,
 } from '../src/index.js';
@@ -75,6 +76,16 @@ describe('dates', () => {
     expect(monthDays(2024, 2)).toHaveLength(29);
     expect(yearDays(2026)).toHaveLength(365);
     expect(yearDays(2024)).toHaveLength(366);
+  });
+
+  it('reads today as a civil local date, not a UTC one', () => {
+    // 22:30 on 2 August in Rome is 20:30 UTC: same day either way.
+    expect(today(new Date(2026, 7, 2, 22, 30))).toBe('2026-08-02');
+    // 00:30 on 3 August in Rome is 22:30 UTC on the 2nd. Deriving the date
+    // from toISOString() here would show yesterday.
+    expect(today(new Date(2026, 7, 3, 0, 30))).toBe('2026-08-03');
+    // Single-digit month and day still come out padded.
+    expect(today(new Date(2026, 0, 5, 12, 0))).toBe('2026-01-05');
   });
 
   it('does not drift by a day across a daylight-saving change', () => {

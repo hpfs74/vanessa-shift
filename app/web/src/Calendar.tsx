@@ -19,6 +19,8 @@ export interface CalendarProps {
   shifts: ReadonlyMap<IsoDate, ShiftCode>;
   /** Days that were swapped with a colleague: marked with a dot. */
   swapped?: ReadonlySet<IsoDate>;
+  /** Today, so it can be picked out of the grid. Injected to keep tests fixed. */
+  today?: IsoDate;
   selected: IsoDate | null;
   onPick: (d: IsoDate) => void;
 }
@@ -47,6 +49,7 @@ export function Calendar({
   month,
   shifts,
   swapped,
+  today,
   selected,
   onPick,
 }: CalendarProps) {
@@ -84,6 +87,7 @@ export function Calendar({
                   'day',
                   `d-${kind}`,
                   code ? `t-${code}` : '',
+                  d === today ? 'is-today' : '',
                   selected === d ? 'selected' : '',
                 ]
                   .filter(Boolean)
@@ -92,6 +96,7 @@ export function Calendar({
                 aria-label={
                   `${dayNumber} ${MONTH_NAMES[month - 1]}` +
                   (holidayName ? `, ${holidayName}` : '') +
+                  (d === today ? ', oggi' : '') +
                   (code ? `, turno ${code}` : ', nessun turno') +
                   (swapped?.has(d) ? ', scambiato' : '')
                 }

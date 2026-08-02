@@ -4,7 +4,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { DayRecord, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS, MONTH_NAMES, knownColleagues } from '@vanessa/core';
+import {
+  EMPTY_PAY_SETTINGS,
+  MONTH_NAMES,
+  knownColleagues,
+  parseIso,
+  today as realToday,
+} from '@vanessa/core';
 
 import { BulkEntry } from './BulkEntry.js';
 import { Calendar } from './Calendar.js';
@@ -30,10 +36,22 @@ export interface AppProps {
   api?: Api;
   initialMonth?: number;
   initialView?: View;
+  /** Injected so tests do not depend on the day they are run. */
+  today?: IsoDate;
 }
 
-export function App({ api = realApi, initialMonth = 1, initialView = 'calendar' }: AppProps) {
-  const [month, setMonth] = useState(initialMonth);
+export function App({
+  api = realApi,
+  initialMonth,
+  initialView = 'calendar',
+  today = realToday(),
+}: AppProps) {
+  // Open on the month you are living in. In another year the rota does not
+  // cover, January is the only honest default.
+  const todayParts = parseIso(today);
+  const [month, setMonth] = useState(
+    initialMonth ?? (todayParts.year === YEAR ? todayParts.month : 1),
+  );
   const [view, setView] = useState<View>(initialView);
   const [days, setDays] = useState<Map<IsoDate, RemoteShift>>(new Map());
   const [settings, setSettings] = useState<PaySettings>(EMPTY_PAY_SETTINGS);
@@ -180,6 +198,7 @@ export function App({ api = realApi, initialMonth = 1, initialView = 'calendar' 
                 month={month}
                 shifts={codes}
                 swapped={new Set(records.filter((r) => r.originalCode).map((r) => r.date))}
+                today={today}
                 selected={editing}
                 onPick={setEditing}
               />

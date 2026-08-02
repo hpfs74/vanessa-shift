@@ -80,6 +80,16 @@ export function daysBetween(a: IsoDate, b: IsoDate): number {
   return Math.round((tb - ta) / 86_400_000);
 }
 
+/** Today as a civil local date.
+ *
+ * Deliberately not derived from toISOString(), which is UTC: in Italy that
+ * turns every evening after 01:00 CEST into tomorrow, so the calendar would
+ * highlight the wrong day for a couple of hours each night.
+ */
+export function today(now: Date = new Date()): IsoDate {
+  return toIso(now.getFullYear(), now.getMonth() + 1, now.getDate());
+}
+
 /** Displayed to the user, hence Italian. */
 export const MONTH_NAMES = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',

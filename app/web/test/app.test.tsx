@@ -37,6 +37,10 @@ function fakeApi(initial: RemoteShift[] = [], settings: PaySettings = EMPTY_PAY_
   return { api, saved, deleted, bulk, settings: () => current };
 }
 
+/** A fixed "today" so the suite does not depend on the day it runs.
+ *  15 January 2026 is an ordinary Thursday: no weekend, no holiday. */
+const JAN = '2026-01-15';
+
 const openDay = async (user: ReturnType<typeof userEvent.setup>, label: RegExp) =>
   user.click(await screen.findByRole('button', { name: label }));
 
@@ -76,7 +80,7 @@ describe('navigation', () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it('offers the five sections in the bottom bar', async () => {
-    render(<App api={fakeApi().api} />);
+    render(<App api={fakeApi().api} today={JAN} />);
     const bar = screen.getByRole('navigation', { name: 'Sezioni' });
     for (const label of ['Calendario', 'Carica', 'Scambi', 'Riepilogo', 'Stipendio']) {
       expect(within(bar).getByRole('button', { name: new RegExp(label) })).toBeInTheDocument();
@@ -85,7 +89,7 @@ describe('navigation', () => {
 
   it('moves between months without leaving the year', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} />);
+    render(<App api={fakeApi().api} today={JAN} />);
     expect(await screen.findByRole('heading', { name: /Gennaio 2026/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mese precedente' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Mese successivo' }));
@@ -93,17 +97,65 @@ describe('navigation', () => {
   });
 });
 
+describe('opening on today', () => {
+  it('starts on the calendar, on the month you are living in', async () => {
+    render(<App api={fakeApi().api} today="2026-08-02" />);
+    expect(await screen.findByRole('heading', { name: /Agosto 2026/ })).toBeInTheDocument();
+    const bar = screen.getByRole('navigation', { name: 'Sezioni' });
+    expect(within(bar).getByRole('button', { name: /Calendario/ })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+  });
+
+  it('picks today out of the grid', async () => {
+    render(<App api={fakeApi().api} today="2026-08-02" />);
+    const cell = await screen.findByRole('button', { name: /^2 Agosto, oggi/ });
+    expect(cell.className).toContain('is-today');
+    // Exactly one day is today, never two.
+    expect(
+      screen.getAllByRole('button').filter((b) => b.className.includes('is-today')),
+    ).toHaveLength(1);
+  });
+
+  it('marks today even when it is a holiday or a weekend', async () => {
+    // 15 August 2026 is Ferragosto, and a Saturday.
+    render(<App api={fakeApi().api} today="2026-08-15" />);
+    const cell = await screen.findByRole('button', { name: /^15 Agosto, Ferragosto, oggi/ });
+    expect(cell.className).toContain('is-today');
+    expect(cell.className).toContain('d-holiday');
+  });
+
+  it('falls back to January for a year the rota does not cover', async () => {
+    render(<App api={fakeApi().api} today="2031-05-09" />);
+    expect(await screen.findByRole('heading', { name: /Gennaio 2026/ })).toBeInTheDocument();
+    expect(
+      screen.queryAllByRole('button').filter((b) => b.className.includes('is-today')),
+    ).toHaveLength(0);
+  });
+
+  it('marks no day as today when looking at another month', async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi().api} today="2026-08-02" />);
+    await screen.findByRole('heading', { name: /Agosto 2026/ });
+    await user.click(screen.getByRole('button', { name: 'Mese successivo' }));
+    expect(
+      screen.queryAllByRole('button').filter((b) => b.className.includes('is-today')),
+    ).toHaveLength(0);
+  });
+});
+
 describe('day editor', () => {
   it('shows the loaded shift', async () => {
     const { api } = fakeApi([{ date: '2026-01-05', code: 'M1' }]);
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
     const cell = await screen.findByRole('button', { name: /^5 Gennaio, turno M1$/ });
     expect(within(cell).getByText('M1')).toBeInTheDocument();
     expect(within(cell).getByText('07:00-14:00')).toBeInTheDocument();
   });
 
   it('marks holidays even when they fall on a Saturday', async () => {
-    render(<App api={fakeApi().api} initialMonth={4} />);
+    render(<App api={fakeApi().api} today={JAN} initialMonth={4} />);
     const cell = await screen.findByRole('button', { name: /^25 Aprile, Liberazione/ });
     expect(cell.className).toContain('d-holiday');
     expect(cell.className).not.toContain('d-saturday');
@@ -112,7 +164,7 @@ describe('day editor', () => {
   it('creates a day', async () => {
     const user = userEvent.setup();
     const { api, saved } = fakeApi();
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, nessun turno$/);
     const sheet = screen.getByRole('dialog');
@@ -129,7 +181,7 @@ describe('day editor', () => {
     const { api, saved } = fakeApi([
       { date: '2026-01-05', code: 'M', originalCode: 'P', colleague: 'Giulia', swapKind: 'Ho coperto' },
     ]);
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M, scambiato$/);
     const sheet = screen.getByRole('dialog');
@@ -149,7 +201,7 @@ describe('day editor', () => {
   it('records a swap on a day that had none', async () => {
     const user = userEvent.setup();
     const { api, saved } = fakeApi([{ date: '2026-01-05', code: 'M' }]);
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M$/);
     const sheet = screen.getByRole('dialog');
@@ -170,7 +222,7 @@ describe('day editor', () => {
 
   it('shows the hour difference of a swap', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi([{ date: '2026-01-05', code: 'P1', originalCode: 'M' }]).api} />);
+    render(<App api={fakeApi([{ date: '2026-01-05', code: 'P1', originalCode: 'M' }]).api} today={JAN} />);
     await openDay(user, /^5 Gennaio, turno P1, scambiato$/);
     expect(within(screen.getByRole('dialog')).getByText(/\+2/)).toBeInTheDocument();
   });
@@ -178,7 +230,7 @@ describe('day editor', () => {
   it('deletes a day', async () => {
     const user = userEvent.setup();
     const { api, deleted } = fakeApi([{ date: '2026-01-05', code: 'M' }]);
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M$/);
     await user.click(
@@ -191,7 +243,7 @@ describe('day editor', () => {
 
   it('cannot delete a day that does not exist yet', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} />);
+    render(<App api={fakeApi().api} today={JAN} />);
     await openDay(user, /^5 Gennaio, nessun turno$/);
     expect(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancella giorno' }),
@@ -204,7 +256,7 @@ describe('day editor', () => {
     api.saveShift = async () => {
       throw new Error('rete non raggiungibile');
     };
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M$/);
     const sheet = screen.getByRole('dialog');
@@ -220,7 +272,7 @@ describe('day editor', () => {
     api.shifts = async () => {
       throw new Error('API non disponibile');
     };
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('API non disponibile');
   });
 });
@@ -232,7 +284,7 @@ describe('bulk entry', () => {
   it('saves a whole month from a sequence', async () => {
     const user = userEvent.setup();
     const { api, bulk } = fakeApi();
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
     await goToBulk(user);
 
     await user.type(screen.getByLabelText(/Sequenza/), 'M M P1 L');
@@ -251,7 +303,7 @@ describe('bulk entry', () => {
   it('refuses to save while a code is unrecognised', async () => {
     const user = userEvent.setup();
     const { api, bulk } = fakeApi();
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
     await goToBulk(user);
 
     await user.type(screen.getByLabelText(/Sequenza/), 'M ZZ P');
@@ -262,7 +314,7 @@ describe('bulk entry', () => {
 
   it('refuses a sequence longer than the month', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} />);
+    render(<App api={fakeApi().api} today={JAN} />);
     await goToBulk(user);
 
     await user.selectOptions(screen.getByLabelText(/Mese/), '2');
@@ -272,7 +324,7 @@ describe('bulk entry', () => {
 
   it('warns before overwriting days that already have a shift', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi([{ date: '2026-01-01', code: 'L' }]).api} />);
+    render(<App api={fakeApi([{ date: '2026-01-01', code: 'L' }]).api} today={JAN} />);
     await goToBulk(user);
 
     await user.type(screen.getByLabelText(/Sequenza/), 'P1 M');
@@ -290,6 +342,7 @@ describe('swaps view', () => {
     const user = userEvent.setup();
     render(
       <App
+        today={JAN}
         api={
           fakeApi([
             { date: '2026-01-05', code: 'P1', originalCode: 'M', colleague: 'Giulia', swapKind: 'Ho coperto' },
@@ -310,6 +363,7 @@ describe('swaps view', () => {
     const user = userEvent.setup();
     render(
       <App
+        today={JAN}
         api={
           fakeApi([
             { date: '2026-01-05', code: 'M', originalCode: 'P', colleague: 'Anna', swapKind: 'Ho coperto' },
@@ -324,7 +378,7 @@ describe('swaps view', () => {
 
   it('says so plainly when there are no swaps', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi([{ date: '2026-01-05', code: 'M' }]).api} />);
+    render(<App api={fakeApi([{ date: '2026-01-05', code: 'M' }]).api} today={JAN} />);
     await goToSwaps(user);
     expect(await screen.findByText(/non c'è ancora nessuno scambio/i)).toBeInTheDocument();
   });
@@ -335,6 +389,7 @@ describe('summary view', () => {
     const user = userEvent.setup();
     render(
       <App
+        today={JAN}
         api={
           fakeApi([
             { date: '2026-01-05', code: 'M' },
@@ -364,7 +419,7 @@ describe('pay view', () => {
 
   it('with no hourly rate it shows no figures, not even in the total', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi([{ date: '2026-01-05', code: 'M1' }]).api} />);
+    render(<App api={fakeApi([{ date: '2026-01-05', code: 'M1' }]).api} today={JAN} />);
     await goToPay(user);
 
     const total = screen.getByRole('row', { name: /Totale/ });
@@ -375,7 +430,7 @@ describe('pay view', () => {
   it('with the hourly rate filled in it computes the base and saves', async () => {
     const user = userEvent.setup();
     const { api, settings } = fakeApi([{ date: '2026-01-05', code: 'M1' }]);
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
     await goToPay(user);
 
     await user.type(screen.getByLabelText(/Tariffa oraria/), '10');
@@ -389,7 +444,7 @@ describe('pay view', () => {
   it('clearing a field returns it to empty, not to zero', async () => {
     const user = userEvent.setup();
     const { api, settings } = fakeApi([], { ...EMPTY_PAY_SETTINGS, hourlyRate: 10 });
-    render(<App api={api} />);
+    render(<App api={api} today={JAN} />);
     await goToPay(user);
 
     await user.clear(screen.getByLabelText(/Tariffa oraria/));

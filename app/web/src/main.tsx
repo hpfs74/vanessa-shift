@@ -12,16 +12,32 @@ if (!radice) throw new Error('elemento #root mancante');
 // i dati che non arrivano perché l'API risponde 401, è peggio di un redirect
 // che lei non nota nemmeno.
 const avvia = async () => {
-  await completaAccesso();
-  const s = sessioneValida();
-  if (!s) {
+  try {
+    try {
+      await completaAccesso();
+    } catch {
+      // A dropped connection or a non-JSON body during the token exchange —
+      // a phone that changed cell tower on the way back from Cognito is the
+      // ordinary case here, not the exotic one. Treat it exactly like no
+      // code was ever there, and let the check below send her to a fresh
+      // login instead of leaving #root blank forever.
+    }
+    const s = sessioneValida();
+    if (s) {
+      createRoot(radice).render(
+        <StrictMode>
+          <App sessione={s} />
+        </StrictMode>,
+      );
+      return;
+    }
     await iniziaAccesso();
-    return;
+  } catch (e) {
+    // Only the belt-and-braces guard in auth.ts reaches here (a build that
+    // shipped without the pool configured) — the network-drop case above is
+    // already handled. #root must not stay blank either way: a blank screen
+    // gives her nothing to act on.
+    radice.textContent = e instanceof Error ? e.message : 'Accesso non riuscito.';
   }
-  createRoot(radice).render(
-    <StrictMode>
-      <App sessione={s} />
-    </StrictMode>,
-  );
 };
 void avvia();

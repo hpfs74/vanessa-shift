@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 
 // Node's own global `localStorage` (behind `--experimental-webstorage` on
 // some Node versions, unflagged on newer ones) shadows jsdom's per-window
@@ -14,8 +14,28 @@ const noNodeWebStorage = process.allowedNodeEnvironmentFlags.has(
   ? ['--no-experimental-webstorage']
   : [];
 
-export default defineConfig({
-  plugins: [react()],
+/** Without this, an empty `VITE_CLIENT_ID` builds clean, deploys clean, and
+ *  only fails once she opens the app: the authorize URL goes out with
+ *  `client_id=` empty, and what she sees is an error page on Cognito's own
+ *  domain, naming nothing. Only for `vite build` — `vite dev` and the test
+ *  runner both go through `command: 'serve'`, and neither has a real value
+ *  to check, so neither should be stopped by its absence. */
+function richiedeConfigAccesso(mode: string): Plugin {
+  const env = loadEnv(mode, process.cwd(), 'VITE_');
+  return {
+    name: 'richiede-config-accesso',
+    buildStart() {
+      if (!env.VITE_LOGIN_DOMAIN || !env.VITE_CLIENT_ID) {
+        this.error(
+          'VITE_LOGIN_DOMAIN o VITE_CLIENT_ID mancante: build fermata prima di spedire un app che lei non potrebbe piu aprire.',
+        );
+      }
+    },
+  };
+}
+
+export default defineConfig(({ command, mode }) => ({
+  plugins: [react(), ...(command === 'build' ? [richiedeConfigAccesso(mode)] : [])],
   resolve: {
     alias: {
       '@vanessa/core': fileURLToPath(new URL('../core/src/index.ts', import.meta.url)),
@@ -46,4 +66,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

@@ -54,7 +54,19 @@ export async function verifierEsfida(): Promise<{ verifier: string; challenge: s
   return { verifier, challenge: base64url(digest) };
 }
 
+/** Belt and braces: `vite.config.ts` is the primary guard and stops a build
+ *  that would ship without these, but if a bad build is ever served anyway,
+ *  this names the cause instead of letting `new URL()` throw "Invalid URL",
+ *  or letting an empty `client_id` reach Cognito's own, unbranded error
+ *  page. */
+function assicuraConfigurata(): void {
+  if (!POOL_DOMAIN || !CLIENT_ID) {
+    throw new Error('Configurazione di accesso mancante (VITE_LOGIN_DOMAIN o VITE_CLIENT_ID).');
+  }
+}
+
 export async function iniziaAccesso(): Promise<void> {
+  assicuraConfigurata();
   const { verifier, challenge } = await verifierEsfida();
   // sessionStorage, not localStorage: the verifier belongs to this attempt in
   // this tab, and outliving it buys nothing.

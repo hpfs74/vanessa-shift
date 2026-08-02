@@ -1,10 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { esci, sessioneValida, verifierEsfida } from '../src/auth.js';
+import { completaAccesso, esci, sessioneValida, verifierEsfida } from '../src/auth.js';
 
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('PKCE', () => {
@@ -51,5 +55,30 @@ describe('sessioneValida', () => {
     localStorage.setItem('sessione', JSON.stringify({ idToken: 't', scade: 9e12 }));
     esci();
     expect(sessioneValida()).toBeNull();
+  });
+});
+
+describe('completaAccesso', () => {
+  // The photo Lambda verifies with `tokenUse: 'id'`: it takes the ID token
+  // alone, not the access token, even though the five API Gateway routes
+  // would accept either. A future edit reaching for `access_token` — the
+  // more familiar name for "the thing you send as a bearer token" — must
+  // fail here, not on a phone.
+  it('stores the ID token, not the access token', async () => {
+    sessionStorage.setItem('pkce', 'un-verifier');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ id_token: 'IL-TOKEN-ID', access_token: 'IL-TOKEN-ACCESS', expires_in: 3600 }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+
+    const ok = await completaAccesso(new URL('https://esempio.test/?code=un-codice'));
+
+    expect(ok).toBe(true);
+    expect(sessioneValida()?.idToken).toBe('IL-TOKEN-ID');
   });
 });

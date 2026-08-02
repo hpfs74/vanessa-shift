@@ -44,11 +44,19 @@ function requireJson(r: Response): void {
 }
 
 /** Every call carries the token. A 401 means the session died despite the
- *  margin — forget it and let the app send her back to the login rather than
- *  showing a failure she can do nothing about. */
+ *  margin — forget it and reload: main.tsx's gate then sends her straight to
+ *  a fresh login. Without the reload she is left staring at "richiesta
+ *  fallita (401)" with every subsequent tap repeating it, because requests
+ *  now go out with no token at all — every write here is single and
+ *  repeatable, so nothing is lost by starting over. */
 function autorizzazione(): Record<string, string> {
   const s = sessioneValida();
   return s ? { authorization: `Bearer ${s.idToken}` } : {};
+}
+
+function sessioneScaduta(): void {
+  esci();
+  location.reload();
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -61,7 +69,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!r.ok) {
-    if (r.status === 401) esci();
+    if (r.status === 401) sessioneScaduta();
     const text = await r.text().catch(() => '');
     // The fallback stays in Italian: it reaches the screen.
     let message = `richiesta fallita (${r.status})`;
@@ -142,7 +150,7 @@ export const api: Api = {
     }
 
     if (!r.ok) {
-      if (r.status === 401) esci();
+      if (r.status === 401) sessioneScaduta();
       const text = await r.text().catch(() => '');
       let message = `lettura fallita (${r.status})`;
       try {

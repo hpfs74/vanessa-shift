@@ -130,17 +130,17 @@ describe('lambdas', () => {
 });
 
 describe('api', () => {
-  it('exposes the five expected routes', () => {
+  it('exposes the five expected routes, under /api so CloudFront can forward the path as it is', () => {
     const rotte = Object.values(app.findResources('AWS::ApiGatewayV2::Route')).map(
       (r: any) => r.Properties.RouteKey,
     );
     expect(rotte).toEqual(
       expect.arrayContaining([
-        'GET /shifts',
-        'PUT /shifts',
-        'PUT /shifts/{date}',
-        'GET /config',
-        'PUT /config',
+        'GET /api/shifts',
+        'PUT /api/shifts',
+        'PUT /api/shifts/{date}',
+        'GET /api/config',
+        'PUT /api/config',
       ]),
     );
   });
@@ -193,9 +193,11 @@ describe('hosting', () => {
   });
 
   it('CloudFront reads the bucket through Origin Access Control', () => {
+    // One for the site bucket, one for the photo Function URL (see "one door
+    // only" below) — both origins are closed behind OAC, none directly public.
     expect(
       Object.keys(app.findResources('AWS::CloudFront::OriginAccessControl')),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 
   it('serves the domain, forces HTTPS and sends 404s back to the app', () => {
@@ -235,11 +237,8 @@ describe('reading photos', () => {
     });
   });
 
-  it('sits behind a Function URL, not behind API Gateway', () => {
-    app.hasResourceProperties('AWS::Lambda::Url', {
-      AuthType: 'NONE',
-      Cors: Match.objectLike({ AllowOrigins: ['https://vanessa.matteo.cool'] }),
-    });
+  it('sits behind a Function URL, not behind API Gateway, closed to anything but CloudFront', () => {
+    app.hasResourceProperties('AWS::Lambda::Url', { AuthType: 'AWS_IAM' });
   });
 
   it('can invoke the model, and nothing else of Bedrock', () => {
@@ -261,5 +260,74 @@ describe('reading photos', () => {
     app.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
       TimeToLiveSpecification: { AttributeName: 'expires', Enabled: true },
     });
+  });
+});
+
+describe('one door only', () => {
+  it('routes the API under /api, so CloudFront can forward the path as it is', () => {
+    for (const path of ['/api/shifts', '/api/shifts/{date}', '/api/config']) {
+      app.hasResourceProperties('AWS::ApiGatewayV2::Route', {
+        RouteKey: Match.stringLikeRegexp(`^(GET|PUT) ${path.replace(/[{}]/g, '\\$&')}$`),
+      });
+    }
+  });
+
+  it('serves /api and /foto from the same distribution as the site', () => {
+    app.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        CacheBehaviors: Match.arrayWith([
+          Match.objectLike({ PathPattern: '/api/*' }),
+          Match.objectLike({ PathPattern: '/foto/*' }),
+        ]),
+      }),
+    });
+  });
+
+  it('caches neither of them: they are not pages', () => {
+    const behaviours = app.findResources('AWS::CloudFront::Distribution');
+    const config = Object.values(behaviours)[0].Properties.DistributionConfig;
+    for (const b of config.CacheBehaviors) {
+      // The managed CachingDisabled policy.
+      expect(b.CachePolicyId).toBe('4135ea2d-6df8-44a3-9df3-4b5a84be39ad');
+    }
+  });
+
+  it('does not forward Host, which both origins would refuse', () => {
+    const behaviours = app.findResources('AWS::CloudFront::Distribution');
+    const config = Object.values(behaviours)[0].Properties.DistributionConfig;
+    for (const b of config.CacheBehaviors) {
+      // Managed AllViewerExceptHostHeader.
+      expect(b.OriginRequestPolicyId).toBe('b689b0a8-53d0-40ab-baf2-68738e2966ac');
+    }
+  });
+
+  it('closes the photo function to anything that is not the distribution', () => {
+    app.hasResourceProperties('AWS::Lambda::Url', { AuthType: 'AWS_IAM' });
+    // FunctionUrlOrigin.withOriginAccessControl's generated CfnPermission
+    // (aws-cdk-lib 2.263.0) never sets FunctionUrlAuthType — AuthType is
+    // already asserted on the Function URL itself above, so it isn't repeated
+    // here. Principal and Action are what tie the permission to CloudFront.
+    app.hasResourceProperties('AWS::Lambda::Permission', {
+      Action: 'lambda:InvokeFunctionUrl',
+      Principal: 'cloudfront.amazonaws.com',
+    });
+  });
+
+  it('hands the API its shared secret as an origin header, never to the browser', () => {
+    const behaviours = app.findResources('AWS::CloudFront::Distribution');
+    const config = Object.values(behaviours)[0].Properties.DistributionConfig;
+    const apiOrigin = config.Origins.find((o: { OriginPath?: string; Id: string }) =>
+      config.CacheBehaviors.some(
+        (b: { PathPattern: string; TargetOriginId: string }) =>
+          b.PathPattern === '/api/*' && b.TargetOriginId === o.Id,
+      ),
+    );
+    // Match.anyValue() is a CDK assertions matcher: it has no meaning to
+    // vitest's own toEqual, which would compare against it structurally and
+    // always fail. Assert the same fact — a header with this name, and some
+    // value that isn't hardcoded to nothing — without that matcher.
+    expect(apiOrigin.OriginCustomHeaders).toHaveLength(1);
+    expect(apiOrigin.OriginCustomHeaders[0].HeaderName).toBe('x-cloudfront-origin');
+    expect(apiOrigin.OriginCustomHeaders[0].HeaderValue).toBeTruthy();
   });
 });

@@ -9,7 +9,7 @@
 
 import { join } from 'node:path';
 
-import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
+import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import { HttpApi, HttpMethod, CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
@@ -18,24 +18,21 @@ import {
   CachePolicy,
   Distribution,
   HttpVersion,
+  OriginRequestPolicy,
   PriceClass,
   ViewerProtocolPolicy,
 } from 'aws-cdk-lib/aws-cloudfront';
-import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
+import { FunctionUrlOrigin, HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { AttributeType, Billing, TableV2 } from 'aws-cdk-lib/aws-dynamodb';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
-import {
-  Architecture,
-  FunctionUrlAuthType,
-  HttpMethod as LambdaHttpMethod,
-  Runtime,
-} from 'aws-cdk-lib/aws-lambda';
+import { Architecture, FunctionUrlAuthType, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { ARecord, HostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
 import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
 import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import type { Construct } from 'constructs';
 
 export interface AppStackProps extends StackProps {
@@ -73,6 +70,14 @@ export class AppStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
+    // Shared with CloudFront so the API can tell a request that came through
+    // the distribution from one aimed at its own hostname. RETAIN because a
+    // regenerated value would refuse every request until both sides catch up.
+    const originSecret = new Secret(this, 'SegretoOrigine', {
+      generateSecretString: { passwordLength: 40, excludePunctuation: true },
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
     // --- Lambdas ---
     const lambda = (constructId: string, handler: string) =>
       new NodejsFunction(this, constructId, {
@@ -91,6 +96,7 @@ export class AppStack extends Stack {
         environment: {
           TABLE_NAME: table.tableName,
           ALLOWED_ORIGIN: `https://${props.domain}`,
+          ORIGIN_SECRET: originSecret.secretValue.unsafeUnwrap(),
         },
         bundling: { format: undefined, minify: true, sourceMap: true },
       });
@@ -139,13 +145,7 @@ export class AppStack extends Stack {
     );
 
     const photoFunctionUrl = readPhotoFn.addFunctionUrl({
-      authType: FunctionUrlAuthType.NONE,
-      cors: {
-        allowedOrigins: [`https://${props.domain}`],
-        allowedMethods: [LambdaHttpMethod.POST],
-        allowedHeaders: ['content-type'],
-        maxAge: Duration.hours(1),
-      },
+      authType: FunctionUrlAuthType.AWS_IAM,
     });
     this.photoUrl = photoFunctionUrl.url;
 
@@ -173,11 +173,11 @@ export class AppStack extends Stack {
         integration: new HttpLambdaIntegration(constructId, fn),
       });
 
-    route('/shifts', HttpMethod.GET, getShiftsFn, 'IntGetShifts');
-    route('/shifts', HttpMethod.PUT, putShiftsFn, 'IntPutShifts');
-    route('/shifts/{date}', HttpMethod.PUT, putShiftFn, 'IntPutShift');
-    route('/config', HttpMethod.GET, getConfigFn, 'IntGetConfig');
-    route('/config', HttpMethod.PUT, putConfigFn, 'IntPutConfig');
+    route('/api/shifts', HttpMethod.GET, getShiftsFn, 'IntGetShifts');
+    route('/api/shifts', HttpMethod.PUT, putShiftsFn, 'IntPutShifts');
+    route('/api/shifts/{date}', HttpMethod.PUT, putShiftFn, 'IntPutShift');
+    route('/api/config', HttpMethod.GET, getConfigFn, 'IntGetConfig');
+    route('/api/config', HttpMethod.PUT, putConfigFn, 'IntPutConfig');
 
     // With no authentication, throttling is the only brake on third-party traffic.
     api.defaultStage!.node.addDependency(table);
@@ -202,6 +202,32 @@ export class AppStack extends Stack {
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         allowedMethods: AllowedMethods.ALLOW_GET_HEAD,
         cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+      },
+      additionalBehaviors: {
+        // Neither of these is a page: no caching, every method, and Host left
+        // behind — forwarding it makes both origins refuse the request.
+        '/api/*': {
+          origin: new HttpOrigin(Fn.select(2, Fn.split('/', api.apiEndpoint)), {
+            customHeaders: { 'x-cloudfront-origin': originSecret.secretValue.unsafeUnwrap() },
+          }),
+          viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          allowedMethods: AllowedMethods.ALLOW_ALL,
+          cachePolicy: CachePolicy.CACHING_DISABLED,
+          originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        },
+        '/foto/*': {
+          origin: FunctionUrlOrigin.withOriginAccessControl(photoFunctionUrl, {
+            // CloudFront caps the origin at 60 seconds and will not go higher
+            // without a quota increase. A reading should take 15 to 40; past
+            // 60 the viewer gets a 504, which the app already shows as "the
+            // service is not responding" with a way out.
+            readTimeout: Duration.seconds(60),
+          }),
+          viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          allowedMethods: AllowedMethods.ALLOW_ALL,
+          cachePolicy: CachePolicy.CACHING_DISABLED,
+          originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        },
       },
       domainNames: [props.domain],
       certificate: Certificate.fromCertificateArn(this, 'Cert', props.certificateArn),

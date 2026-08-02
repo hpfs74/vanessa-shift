@@ -1,12 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
-/** `PHOTO_URL` is read once, when the module loads: every case stubs the
- *  variable first and then imports a fresh copy of the module. */
-async function apiWith(photoUrl: string) {
-  vi.stubEnv('VITE_PHOTO_URL', photoUrl);
-  vi.resetModules();
-  return (await import('../src/api.js')).api;
-}
+import { api } from '../src/api.js';
 
 /** The message, whatever the failure was. */
 async function messageOf(promise: Promise<unknown>): Promise<string> {
@@ -18,27 +11,74 @@ async function messageOf(promise: Promise<unknown>): Promise<string> {
   return error.message;
 }
 
+const JSON_HEADERS = { 'content-type': 'application/json' };
+
+/** The answer as it comes off the wire: a status, a body, and a content-type
+ *  the code is entitled to look at. */
+function response(body: unknown, init: ResponseInit = {}): Response {
+  return new Response(typeof body === 'string' ? body : JSON.stringify(body), {
+    headers: JSON_HEADERS,
+    ...init,
+  });
+}
+
 afterEach(() => {
-  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
 describe('readPhoto', () => {
-  it('says so, in Italian, when the address was never filled in', async () => {
-    const api = await apiWith('');
-    const fetching = vi.fn();
-    vi.stubGlobal('fetch', fetching);
+  it('calls the reading endpoint on its own origin, under the forwarded prefix', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ reading: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.readPhoto('AAAA');
+    // Not a bare '/foto': the CloudFront behaviour is '/foto/*', which only
+    // matches paths carrying the literal '/foto/' prefix.
+    expect(fetchMock.mock.calls[0][0]).toBe('/foto/leggi');
+  });
 
-    expect(await messageOf(api.readPhoto('AAAA'))).toMatch(/non è configurata/);
-    // An empty address makes fetch call the page itself: better not to call.
-    expect(fetching).not.toHaveBeenCalled();
+  // Origin Access Control makes CloudFront sign the request with SigV4, and
+  // Lambda refuses an unsigned payload: the hash of the body has to come from
+  // the viewer, because CloudFront signs the one it was handed.
+  it('sends the SHA-256 of the exact body it posts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ reading: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.readPhoto('AAAA');
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = init.body as string;
+    const sent = (init.headers as Record<string, string>)['x-amz-content-sha256'];
+
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+    const expected = [...new Uint8Array(digest)]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    expect(sent).toBe(expected);
+    // The hash covers what is sent, not a second serialisation of it.
+    expect(body).toBe(JSON.stringify({ image: 'AAAA' }));
+  });
+
+  // 403 and 404 come back from the distribution as index.html with a 200, for
+  // the client router. Without a content-type check that HTML reaches
+  // JSON.parse and the screen reads «unexpected token '<'».
+  it('an HTML answer with a 200 becomes an Italian sentence, not a parse error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('<!doctype html><html></html>', {
+          headers: { 'content-type': 'text/html' },
+        }),
+      ),
+    );
+
+    const message = await messageOf(api.readPhoto('AAAA'));
+    expect(message).not.toMatch(/token|JSON/);
+    expect(message).toMatch(/a mano/);
   });
 
   // The reading can take two minutes, from a phone: the timeout and the lost
   // connection are the likely failures, not the rare ones. Uncaught, they
   // reach the screen as the browser's own «Failed to fetch».
   it('a connection that drops becomes an Italian sentence with a way out', async () => {
-    const api = await apiWith('https://foto.example/');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
 
     const message = await messageOf(api.readPhoto('AAAA'));
@@ -48,14 +88,9 @@ describe('readPhoto', () => {
   });
 
   it('a body that is not the expected JSON does not surface as a parse error', async () => {
-    const api = await apiWith('https://foto.example/');
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
-      }),
-    );
+    // A body that stops halfway: the content-type promises JSON and the bytes
+    // do not deliver it.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response('{"reading":')));
 
     const message = await messageOf(api.readPhoto('AAAA'));
     expect(message).not.toMatch(/JSON/);
@@ -63,21 +98,15 @@ describe('readPhoto', () => {
   });
 
   it('keeps the message the service sent, when there is one', async () => {
-    const api = await apiWith('https://foto.example/');
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 429,
-        text: () => Promise.resolve(JSON.stringify({ errore: 'Hai gia usato le 10 letture' })),
-      }),
+      vi.fn().mockResolvedValue(response({ errore: 'Hai gia usato le 10 letture' }, { status: 429 })),
     );
 
     expect(await messageOf(api.readPhoto('AAAA'))).toBe('Hai gia usato le 10 letture');
   });
 
   it('returns the reading when the call goes through', async () => {
-    const api = await apiWith('https://foto.example/');
     const reading = {
       month: 7,
       year: 2026,
@@ -86,11 +115,34 @@ describe('readPhoto', () => {
       foundRow: 14,
       days: [],
     };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ reading }) }),
-    );
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ reading })));
 
     expect(await api.readPhoto('AAAA')).toEqual(reading);
+  });
+});
+
+describe('the API calls', () => {
+  it('stay on the page own origin, under the prefix CloudFront forwards', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ pay: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.paySettings();
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/config');
+  });
+
+  // The same collision as on the photo path: a refusal from the API origin
+  // comes back through the distribution as the app own HTML with a 200.
+  it('an HTML answer with a 200 becomes an Italian sentence, not a parse error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('<!doctype html><html></html>', {
+          headers: { 'content-type': 'text/html' },
+        }),
+      ),
+    );
+
+    const message = await messageOf(api.paySettings());
+    expect(message).not.toMatch(/token|JSON/);
+    expect(message).toMatch(/a mano/);
   });
 });

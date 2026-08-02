@@ -12,16 +12,56 @@ export interface RemoteShift {
   notes?: string | null;
 }
 
-export const API_URL: string = import.meta.env.VITE_API_URL ?? '';
-
-/** Photo reading lives on its own Function URL: API Gateway truncates the
- *  integration at 30 seconds, and a reading can take longer than that. */
-export const PHOTO_URL: string = import.meta.env.VITE_PHOTO_URL ?? '';
+/** Same origin as the page: CloudFront forwards these two prefixes to the API
+ *  and to the photo-reading function. Nothing to configure per environment,
+ *  and nothing to paste in after a deploy — which is the step that used to be
+ *  forgotten, leaving the feature mute. */
+export const API_URL = '/api';
+/** A sub-path, not a bare `/foto`: the CloudFront behaviour is `/foto/*`, and
+ *  `*` matches zero or more characters *after* the literal `/foto/`, so a
+ *  request for exactly `/foto` falls through to the default behaviour — the
+ *  site bucket, which answers GET and HEAD only — and is refused at the edge.
+ *  The Lambda behind it ignores the path, so the segment costs nothing and
+ *  spares the distribution a third behaviour. */
+export const PHOTO_URL = '/foto/leggi';
 
 /** The reading never left, or never came back whole. Every message on this
  *  path ends with a way out: the textarea is always one tap away. */
 const UNREACHABLE =
   'Non sono riuscito a contattare il servizio. Controlla la connessione, oppure scrivi i codici a mano.';
+
+/** The distribution maps 403 and 404 to `index.html` with a 200, because the
+ *  client router serves its own paths. Any refusal from either origin — a
+ *  request that did not come through CloudFront, a signature that did not
+ *  check out, a path nobody serves — therefore reaches the browser as the
+ *  app's own HTML, with the status of a success. This is the only place that
+ *  can tell that apart from an answer: without it `JSON.parse` speaks first,
+ *  in English, and the screen reads `unexpected token '<'`. */
+function requireJson(r: Response): void {
+  if (!(r.headers.get('content-type') ?? '').includes('json')) throw new Error(UNREACHABLE);
+}
+
+/** The SHA-256 of the body, hex-encoded, as `x-amz-content-sha256`.
+ *
+ * The photo function sits behind Origin Access Control: CloudFront signs the
+ * request to it with SigV4, and Lambda does not accept unsigned payloads. It
+ * signs using the hash *the viewer supplied* — it does not hash the body
+ * itself — so a POST that omits this header fails the signature check at the
+ * origin. The `/foto/*` behaviour forwards every viewer header except Host,
+ * so it arrives.
+ *
+ * The hash must cover the exact string that is sent, byte for byte: hashing a
+ * second serialisation of the same object is not the same thing.
+ *
+ * `crypto.subtle` exists only in a secure context. The site is HTTPS-only, so
+ * it holds there; `http://localhost` is not a secure context in every browser,
+ * which is one more reason the photo path cannot be exercised from
+ * `npm run dev`.
+ */
+async function bodyHash(body: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${API_URL}${path}`, {
@@ -40,6 +80,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(message);
   }
+  requireJson(r);
   return (await r.json()) as T;
 }
 
@@ -91,25 +132,25 @@ export const api: Api = {
     await request('/config', { method: 'PUT', body: JSON.stringify(p) });
   },
   async readPhoto(image) {
-    // The address is filled in after the stack is deployed. Left empty, `fetch`
-    // would call the page itself and fail with something meaningless.
-    if (!PHOTO_URL) {
-      throw new Error(
-        'La lettura da foto non è configurata su questa installazione. Scrivi i codici a mano.',
-      );
-    }
+    // The one string that is hashed and the one string that is sent.
+    const body = JSON.stringify({ image });
 
     let r: Response;
     try {
       r = await fetch(PHOTO_URL, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ image }),
+        headers: {
+          'content-type': 'application/json',
+          'x-amz-content-sha256': await bodyHash(body),
+        },
+        body,
       });
     } catch {
       // The reading takes up to two minutes, from a phone: a timeout or a lost
       // connection is not the rare case. `fetch` rejects with the browser's own
-      // message — English, and with no way out.
+      // message — English, and with no way out. A `crypto.subtle` missing
+      // because the page is not in a secure context lands here too, and it is
+      // the same outcome for whoever is reading: the request never left.
       throw new Error(UNREACHABLE);
     }
 
@@ -126,6 +167,7 @@ export const api: Api = {
     }
 
     try {
+      requireJson(r);
       const j = (await r.json()) as { reading: PhotoReading };
       return j.reading;
     } catch {

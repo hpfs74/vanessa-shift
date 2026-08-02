@@ -93,11 +93,25 @@ mano, revisione compresa. I giorni senza codice — le `x` di un mese iniziato a
 metà — non si salvano e non cancellano niente.
 
 Sta dietro una **Lambda Function URL** e non dietro API Gateway, che tronca
-l'integrazione a 30 secondi: una lettura ne può prendere di più. L'indirizzo è
-l'output `PhotoUrl` dello stack e va in `web/.env.production` come
-`VITE_PHOTO_URL` prima di ricompilare il frontend. Finché è vuoto il pulsante lo
-dice — «la lettura da foto non è configurata su questa installazione» — invece di
-chiamare un indirizzo che non esiste e mostrare l'errore del browser.
+l'integrazione a 30 secondi: una lettura ne può prendere di più.
+
+Il frontend chiama sempre la propria origine: `/api/...` e `/foto/leggi`,
+inoltrati da CloudFront verso API Gateway e verso la Function URL. Un solo
+dominio, niente da incollare in un file dopo il deploy. Le due origini non si
+raggiungono più direttamente — con che forza, lo dice «Nessuna autenticazione»
+più sotto.
+
+Il sotto-path della lettura serve: la behaviour è `/foto/*`, e in CloudFront
+l'asterisco vale zero o più caratteri **dopo** il prefisso letterale, quindi
+`/foto` secco non la incontra e finisce sul bucket. La Lambda il path non lo
+guarda.
+
+Per questo il percorso foto non si prova più da `npm run dev`: il server di
+sviluppo inoltra `/foto` alla Function URL così com'è, ma quella pretende una
+firma SigV4 che solo CloudFront sa produrre, e rifiuta la richiesta non
+firmata. In più `crypto.subtle`, con cui il browser calcola l'hash del corpo,
+esiste solo in un contesto sicuro, e `http://localhost` non lo è in tutti i
+browser. Una lettura vera va provata in linea.
 
 Ogni lettura costa circa 0,09 €, su un'API che resta aperta. Le difese sono un
 **tetto di 10 letture al giorno** (contatore su DynamoDB, condizione e
@@ -126,8 +140,8 @@ CloudFront non ne accetta altrove: da qui i due stack.
 | `VanessaCertificato` | certificato ACM (us-east-1) |
 | `VanessaApp` | tabella, Lambda, API, bucket, distribuzione, record DNS |
 
-L'endpoint dell'API sta in `web/.env.production`. Se lo stack viene ricreato l'endpoint cambia
-e va aggiornato lì prima di ricompilare il frontend.
+Il frontend non conosce l'endpoint dell'API: CloudFront lo inoltra da `/api`, e la distribuzione
+lo legge dallo stack a ogni deploy. Se lo stack viene ricreato non c'è niente da aggiornare a mano.
 
 ## Deploy automatico
 
@@ -161,10 +175,26 @@ trust va aggiornata con i nuovi ID, altrimenti il deploy smette di funzionare �
 ## Nessuna autenticazione
 
 Scelta deliberata del proprietario, documentata in
-`docs/superpowers/specs/2026-08-02-web-app-aws-design.md`. L'API è aperta: chiunque conosca
-l'indirizzo può leggere e modificare turni e parametri.
+`docs/superpowers/specs/2026-08-02-web-app-aws-design.md`. **Nessuna delle protezioni qui sotto
+autentica chi chiama**: dietro CloudFront l'API resta aperta, e chiunque arrivi a
+`https://vanessa.matteo.cool/api/...` può leggere e modificare turni e parametri. Quello che è
+cambiato è che non ci si arriva più da nessun'altra parte.
 
-Le uniche difese attive sono il throttling su API Gateway (100 richieste al secondo) e il
+Le due origini non si raggiungono più direttamente, ma non con la stessa forza — e la differenza
+conta, quindi sta scritta:
+
+- **`/foto` è chiuso davvero.** La Function URL è su `AWS_IAM` dietro Origin Access Control:
+  CloudFront firma ogni richiesta con SigV4 e il permesso di invocazione è ristretto a questa
+  distribuzione. Senza la firma non si entra, e la firma non si indovina. Per questo una
+  richiesta POST deve portare `x-amz-content-sha256` con lo SHA-256 del corpo: Lambda non accetta
+  payload non firmati, e CloudFront firma con l'hash che il browser gli ha dato.
+- **`/api` è chiuso più debolmente.** Un HTTP API non ha resource policy — è una funzionalità dei
+  REST API — quindi al suo posto CloudFront inietta un header con un segreto condiviso, e l'API
+  rifiuta con 401 chi non lo porta. È un segreto al portatore: chi lo ottiene lo può rigiocare
+  quante volte vuole, da dove vuole. Ferma gli scanner e l'accesso diretto casuale, che è quello
+  per cui c'è. Non è una barriera crittografica e non va scambiata per tale.
+
+Restano le difese di prima: il throttling su API Gateway (100 richieste al secondo) e il
 point-in-time recovery sulla tabella, che permette di tornare indietro dopo un danno.
 
 ## Modello dati

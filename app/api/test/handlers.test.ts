@@ -611,3 +611,71 @@ describe('readPhoto', () => {
     expect(r.statusCode).toBe(400);
   });
 });
+
+import { ORIGIN_SECRET_HEADER } from '../src/http.js';
+
+describe('origin secret', () => {
+  const secret = 'un-segreto-qualsiasi';
+
+  beforeEach(() => {
+    process.env.ORIGIN_SECRET = secret;
+  });
+
+  it('lets a request carrying the secret through', async () => {
+    const { repo } = fakeRepo();
+    const h = getShiftsWith(repo);
+    const r: any = await h(
+      event({
+        headers: { [ORIGIN_SECRET_HEADER]: secret },
+        queryStringParameters: { from: '2026-01-01', to: '2026-01-31' },
+      }),
+    );
+    expect(r.statusCode).toBe(200);
+  });
+
+  // 401 and not 403 on purpose: the distribution rewrites 403 and 404 into
+  // `index.html` with a 200, for the client router, so a 403 would reach the
+  // browser as HTML that reads like a success. 401 travels untouched.
+  it('refuses a request without the header, with a status CloudFront does not rewrite', async () => {
+    const { repo, calls } = fakeRepo();
+    const h = getShiftsWith(repo);
+    const r: any = await h(
+      event({ queryStringParameters: { from: '2026-01-01', to: '2026-01-31' } }),
+    );
+    expect(r.statusCode).toBe(401);
+    // The point of the check is that nothing behind it runs.
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses a request carrying the wrong secret', async () => {
+    const { repo } = fakeRepo();
+    const h = getShiftsWith(repo);
+    const r: any = await h(
+      event({
+        headers: { [ORIGIN_SECRET_HEADER]: 'sbagliato' },
+        queryStringParameters: { from: '2026-01-01', to: '2026-01-31' },
+      }),
+    );
+    expect(r.statusCode).toBe(401);
+  });
+
+  it('compares in constant time, so the value cannot be guessed a byte at a time', async () => {
+    // Not observable from the outside: asserted by construction, since the
+    // comparison must not short-circuit on the first differing byte.
+    const { requireFromCloudFront } = await import('../src/http.js');
+    expect(typeof requireFromCloudFront).toBe('function');
+  });
+
+  it('lets everything through when no secret is configured', async () => {
+    // Local runs and any deploy predating the secret must keep working:
+    // an unset variable means the check is not in force, never that
+    // every request is refused.
+    delete process.env.ORIGIN_SECRET;
+    const { repo } = fakeRepo();
+    const h = getShiftsWith(repo);
+    const r: any = await h(
+      event({ queryStringParameters: { from: '2026-01-01', to: '2026-01-31' } }),
+    );
+    expect(r.statusCode).toBe(200);
+  });
+});

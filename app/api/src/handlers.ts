@@ -20,6 +20,7 @@ import {
   optionalText,
   parseJson,
   requireDate,
+  requireFromCloudFront,
   requireHoursOverride,
   requireImage,
   requirePaySettings,
@@ -40,6 +41,7 @@ function repoFromEnvironment(): Repo {
 export function getShiftsWith(repo: Repo) {
   return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
     handle(async () => {
+      requireFromCloudFront(event.headers);
       const q = event.queryStringParameters ?? {};
       const { from, to } = requireRange(q.from, q.to);
       return ok({ shifts: await repo.shiftsBetween(from, to) });
@@ -49,6 +51,7 @@ export function getShiftsWith(repo: Repo) {
 export function putShiftWith(repo: Repo) {
   return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
     handle(async () => {
+      requireFromCloudFront(event.headers);
       const date = requireDate(event.pathParameters?.date, 'date');
       const b = parseJson(event.body);
 
@@ -79,6 +82,7 @@ export function putShiftWith(repo: Repo) {
 export function putShiftsWith(repo: Repo) {
   return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
     handle(async () => {
+      requireFromCloudFront(event.headers);
       const shifts = requireShiftList(parseJson(event.body));
       await repo.saveShifts(shifts);
       return ok({ saved: shifts.length });
@@ -86,14 +90,17 @@ export function putShiftsWith(repo: Repo) {
 }
 
 export function getConfigWith(repo: Repo) {
-  // The event is unused, but the signature stays uniform with the other routes.
-  return (_event?: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
-    handle(async () => ok({ pay: await repo.readPaySettings() }));
+  return (event?: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
+    handle(async () => {
+      requireFromCloudFront(event?.headers);
+      return ok({ pay: await repo.readPaySettings() });
+    });
 }
 
 export function putConfigWith(repo: Repo) {
   return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
     handle(async () => {
+      requireFromCloudFront(event.headers);
       const pay = requirePaySettings(parseJson(event.body));
       await repo.savePaySettings(pay);
       return ok({ pay });

@@ -20,6 +20,19 @@ import {
 
 export const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? 'https://vanessa.matteo.cool';
 
+/** The header CloudFront injects on requests it forwards to the API.
+ *
+ * HTTP APIs have no resource policy — that is a REST API feature — so this
+ * shared value is the practical way to tell a request that came through the
+ * distribution from one aimed straight at the API's own hostname.
+ *
+ * It is a bearer secret, not a cryptographic control: anyone who obtains the
+ * value can replay it. It stops scanners and casual direct access, which is
+ * what it is for. The photo Function URL is a different story — that one is
+ * signed with SigV4 through Origin Access Control and is genuinely closed.
+ */
+export const ORIGIN_SECRET_HEADER = 'x-cloudfront-origin';
+
 const HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-origin': ALLOWED_ORIGIN,
@@ -174,11 +187,62 @@ export function requireImage(v: unknown): string {
   return v;
 }
 
+/** Timing-safe string comparison.
+ *
+ * A plain `===` on a secret leaks its length and returns sooner the earlier
+ * the first difference falls, which is enough to recover the value one byte
+ * at a time given enough attempts. The API is public, so the attempts are
+ * free.
+ */
+function sameSecret(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/** Refuses a request that did not come through CloudFront.
+ *
+ * When ORIGIN_SECRET is unset the check is not in force: a local run, and any
+ * deploy made before the secret existed, must keep working. An unset variable
+ * meaning "refuse everything" would take the app down on the way in.
+ */
+export function requireFromCloudFront(
+  headers: Record<string, string | undefined> | undefined,
+): void {
+  const expected = process.env.ORIGIN_SECRET;
+  if (!expected) return;
+  // API Gateway lowercases header names; be explicit rather than trusting it.
+  const found = Object.entries(headers ?? {}).find(
+    ([k]) => k.toLowerCase() === ORIGIN_SECRET_HEADER,
+  )?.[1];
+  if (!found || !sameSecret(found, expected)) throw new NotFromCloudFront();
+}
+
+/** The request did not come through the distribution. */
+export class NotFromCloudFront extends Error {}
+
+/** 401, not 403.
+ *
+ * The distribution maps 403 and 404 onto `index.html` with a 200, because the
+ * client router serves its own paths. A 403 from here would therefore reach
+ * the browser as `200 text/html`, which the frontend reads as a success and
+ * then fails to parse — «unexpected token '<'» instead of something the app
+ * can name. CloudFront does not rewrite 401, so the collision does not arise.
+ *
+ * It is also the more accurate of the two: the request carried no credential,
+ * rather than being refused a resource it was identified for.
+ */
+const NO_CREDENTIAL = 401;
+
 /** Wraps a handler: InvalidInput becomes 400, everything else a bare 500. */
 export function handle(
   fn: () => Promise<APIGatewayProxyResultV2>,
 ): Promise<APIGatewayProxyResultV2> {
   return fn().catch((e: unknown) => {
+    if (e instanceof NotFromCloudFront) {
+      return failure(NO_CREDENTIAL, 'credenziale di origine mancante o non valida');
+    }
     if (e instanceof TooLarge) return failure(413, e.message);
     if (e instanceof InvalidInput) return failure(400, e.message);
     console.error('unhandled error', e);

@@ -74,3 +74,60 @@ def test_ogni_mese_ha_tutti_i_suoi_giorni(wb):
                       if isinstance(ws.cell(row=r, column=c).value, int)]
             r += 3
         assert sorted(visti) == list(range(1, cal.monthrange(ANNO, m)[1] + 1)), nome
+
+
+def test_la_cella_codice_punta_alla_riga_giusta_di_presenze(wb):
+    # 15 marzo 2026 = 73esimo giorno dell'anno -> riga 5 + 73 = 78 in Presenze.
+    from datetime import date
+
+    import comune
+    riga = comune.riga_presenze(date(ANNO, 3, 15), ANNO)
+    assert riga == 78
+
+    ws = wb["Calendario"]
+    r = trova_titolo_mese(ws, f"MARZO {ANNO}") + 2
+    while True:
+        colonne = [c for c in range(1, 8) if ws.cell(row=r, column=c).value == 15]
+        if colonne:
+            break
+        r += 3
+    col = colonne[0]
+    assert ws.cell(row=r + 1, column=col).value == (
+        f'=IF(Presenze!$D${riga}="","",Presenze!$D${riga}'
+        f'&IF(Presenze!$F${riga}="","","*"))'
+    )
+    assert ws.cell(row=r + 2, column=col).value == (
+        f'=IF(Presenze!$D${riga}="","",'
+        f'IFERROR(VLOOKUP(Presenze!$D${riga},Codici!$A$5:$F$9,6,FALSE),""))'
+    )
+
+
+def test_le_ore_della_settimana_sommano_solo_i_giorni_del_mese(wb):
+    # La settimana del 30 marzo va a cavallo con aprile: nel blocco di marzo
+    # somma lun-mar (righe 93-94), in quello di aprile mer-dom (righe 95-99).
+    ws = wb["Calendario"]
+
+    def ore_delle_settimane(nome_mese):
+        r = trova_titolo_mese(ws, nome_mese) + 2
+        formule = []
+        while not str(ws.cell(row=r, column=1).value or "").startswith("TOTALE"):
+            formule.append(ws.cell(row=r, column=8).value)
+            r += 3
+        return formule
+
+    assert "=IF(SUM(Presenze!$E$93:$E$94)=0,\"\",SUM(Presenze!$E$93:$E$94))" \
+        in ore_delle_settimane(f"MARZO {ANNO}")
+    assert "=IF(SUM(Presenze!$E$95:$E$99)=0,\"\",SUM(Presenze!$E$95:$E$99))" \
+        in ore_delle_settimane(f"APRILE {ANNO}")
+
+
+def test_totale_del_mese(wb):
+    # Gennaio: righe 5..35 in Presenze.
+    ws = wb["Calendario"]
+    r = trova_titolo_mese(ws, f"GENNAIO {ANNO}")
+    while ws.cell(row=r, column=1).value != "TOTALE GENNAIO":
+        r += 1
+    assert ws.cell(row=r, column=5).value == "Giorni"
+    assert ws.cell(row=r, column=6).value == '=COUNTIF(Presenze!$E$5:$E$35,">0")'
+    assert ws.cell(row=r, column=7).value == "Ore"
+    assert ws.cell(row=r, column=8).value == "=SUM(Presenze!$E$5:$E$35)"

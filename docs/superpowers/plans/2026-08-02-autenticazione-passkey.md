@@ -145,6 +145,7 @@ import {
   AccountRecovery,
   FeaturePlan,
   OAuthScope,
+  PasskeyUserVerification,
   UserPool,
   UserPoolClient,
   UserPoolClientIdentityProvider,
@@ -186,7 +187,7 @@ export class AuthStack extends Stack {
       passkeyRelyingPartyId: props.domain,
       // `required` is the whole point. Without it a passkey is satisfied by a
       // phone that happens to be unlocked, which is not what was asked for.
-      passkeyUserVerification: 'required',
+      passkeyUserVerification: PasskeyUserVerification.REQUIRED,
       // The users, their passkeys and their history are not re-creatable.
       removalPolicy: RemovalPolicy.RETAIN,
     });

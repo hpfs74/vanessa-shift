@@ -63,10 +63,15 @@ def _parametri(ws, anno):
 
 
 def _somma_righe(righe):
-    """Somma esplicita di celle di Presenze, o 0 se non ce n'e' nessuna."""
+    """Somma esplicita di celle di Presenze, o 0 se non ce n'e' nessuna.
+    N() tratta una cella ancora vuota come zero ore: qui, a differenza degli
+    importi in euro, il vuoto e' un dato vero (nessun turno scritto), non
+    un'informazione mancante, quindi zero e' la lettura corretta, non
+    fuorviante. Senza N(), sommare due celle di testo vuoto con "+" da'
+    #VALUE! anziche' 0."""
     if not righe:
         return 0
-    return "=" + "+".join(f"Presenze!$E${r}" for r in righe)
+    return "=" + "+".join(f"N(Presenze!$E${r})" for r in righe)
 
 
 def foglio_stipendio(wb, anno, p_r1, p_r2):
@@ -91,12 +96,15 @@ def foglio_stipendio(wb, anno, p_r1, p_r2):
         ws.cell(row=r, column=1, value=nome).font = Font(bold=True)
         # Precedenza: festivo, poi domenica, poi sabato. Ogni ora una categoria sola.
         ws.cell(row=r, column=5, value=_somma_righe(r_fest))
+        # N() sulle sottrazioni per lo stesso motivo di _somma_righe: un
+        # festivo di sabato/domenica non ancora lavorato non deve rompere il
+        # calcolo con #VALUE!, deve semplicemente sottrarre zero.
         ws.cell(row=r, column=3, value=(
             f'=SUMIFS({ore},{mesi},$A{r},{giorni},"Sabato")'
-            + "".join(f"-Presenze!$E${n}" for n in r_fest_sab)))
+            + "".join(f"-N(Presenze!$E${n})" for n in r_fest_sab)))
         ws.cell(row=r, column=4, value=(
             f'=SUMIFS({ore},{mesi},$A{r},{giorni},"Domenica")'
-            + "".join(f"-Presenze!$E${n}" for n in r_fest_dom)))
+            + "".join(f"-N(Presenze!$E${n})" for n in r_fest_dom)))
         ws.cell(row=r, column=2, value=(
             f'=SUMIFS({ore},{mesi},$A{r})-C{r}-D{r}-E{r}'))
 

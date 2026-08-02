@@ -20,8 +20,8 @@ MESI_RIGHE = {m: 16 + i for i, m in enumerate(comune.MESI)}
 # colonne B/C/D/E. Servono al test di partizione qui sotto: dato un anno,
 # riconoscono qualunque intervallo Presenze!$E$p_r1:$E$p_r2 (non fisso
 # 5:369), cosi' il test resta valido anche cambiando anno. ---
-_RE_FEST_TERMINE = re.compile(r'^Presenze!\$E\$(\d+)$')
-_RE_SOTTRAZIONE = re.compile(r'-Presenze!\$E\$(\d+)')
+_RE_FEST_TERMINE = re.compile(r'^N\(Presenze!\$E\$(\d+)\)$')
+_RE_SOTTRAZIONE = re.compile(r'-N\(Presenze!\$E\$(\d+)\)')
 
 
 def _confini_anno(anno):
@@ -54,10 +54,11 @@ def test_i_dodici_mesi_in_ordine(wb):
 
 
 def test_ore_festive_di_dicembre(wb):
-    # Dicembre 2026 ha tre festivi: 8, 25 e 26.
+    # Dicembre 2026 ha tre festivi: 8, 25 e 26. N() cosi' un festivo non
+    # ancora lavorato (Presenze vuoto) conta zero ore, non #VALUE!.
     ws = wb["Stipendio"]
     righe = [comune.riga_presenze(date(ANNO, 12, g), ANNO) for g in (8, 25, 26)]
-    atteso = "=" + "+".join(f"Presenze!$E${r}" for r in righe)
+    atteso = "=" + "+".join(f"N(Presenze!$E${r})" for r in righe)
     assert ws.cell(row=MESI_RIGHE["Dicembre"], column=5).value == atteso
 
 
@@ -74,7 +75,7 @@ def test_le_ore_di_sabato_scartano_i_festivi_di_sabato(wb):
     riga_25 = comune.riga_presenze(date(ANNO, 4, 25), ANNO)
     r = MESI_RIGHE["Aprile"]
     atteso = (f'=SUMIFS(Presenze!$E$5:$E$369,Presenze!$C$5:$C$369,$A{r},'
-              f'Presenze!$B$5:$B$369,"Sabato")-Presenze!$E${riga_25}')
+              f'Presenze!$B$5:$B$369,"Sabato")-N(Presenze!$E${riga_25})')
     assert ws.cell(row=r, column=3).value == atteso
 
 
@@ -84,7 +85,7 @@ def test_le_ore_di_domenica_scartano_i_festivi_di_domenica(wb):
     riga_1 = comune.riga_presenze(date(ANNO, 11, 1), ANNO)
     r = MESI_RIGHE["Novembre"]
     atteso = (f'=SUMIFS(Presenze!$E$5:$E$369,Presenze!$C$5:$C$369,$A{r},'
-              f'Presenze!$B$5:$B$369,"Domenica")-Presenze!$E${riga_1}')
+              f'Presenze!$B$5:$B$369,"Domenica")-N(Presenze!$E${riga_1})')
     assert ws.cell(row=r, column=4).value == atteso
 
 
@@ -304,6 +305,39 @@ def test_i_valori_in_euro_sono_corretti_dopo_il_ricalcolo(tmp_path):
         assert ws.cell(row=28, column=col).value is None, ("totale", col)
 
 
+_RE_ERRORE = re.compile(r'^#[A-Z/0-9!]+$')  # #VALUE!, #DIV/0!, #N/A, ecc.
+
+
+@pytest.mark.skipif(
+    SOFFICE is None,
+    reason="LibreOffice (soffice) non e' sul PATH: serve a ricalcolare le formule.")
+def test_le_ore_sono_zero_non_errore_se_presenze_e_vuoto(tmp_path):
+    """Il primo avvio possibile: foglio appena generato, Presenze ancora
+    vuoto, ma i parametri della paga gia' compilati (e' la prima cosa che
+    una persona fa). Le colonne ore (B..E) devono leggersi come "zero ore
+    lavorate", un fatto vero, non come un errore di calcolo.
+    """
+    p = _genera_stipendio_per_ricalcolo(
+        tmp_path, "presenze_vuoto",
+        {"B5": 10, "B6": 0.2, "B7": 0.3, "B8": 0.5, "B9": 0.1, "B10": 0.75})
+    # Niente ore_uniformi qui apposta: si vuole il comportamento vero delle
+    # formule di B..E quando Presenze non ha ancora nessun codice scritto.
+    wb_conv = _ricalcola_con_soffice(p, tmp_path)
+    ws = wb_conv["Stipendio"]
+
+    for r in range(stipendio.RIGA_PRIMO_MESE, stipendio.RIGA_TOTALE + 1):
+        for col in range(1, 13):
+            v = ws.cell(row=r, column=col).value
+            assert not (isinstance(v, str) and _RE_ERRORE.match(v)), (r, col, v)
+
+    for r in range(stipendio.RIGA_PRIMO_MESE, stipendio.RIGA_TOTALE):
+        for col in range(2, 6):  # B..E: ore ordinarie/sabato/domenica/festivo
+            assert ws.cell(row=r, column=col).value == 0, (r, col)
+
+    controllo = ws.cell(row=stipendio.RIGA_CONTROLLO, column=2).value
+    assert controllo == 0, controllo
+
+
 def test_ogni_giorno_dell_anno_sta_in_esattamente_un_secchio(wb):
     """Le colonne C/D/E/B (sab/dom/fest/ord) devono partizionare esattamente
     le righe di Presenze di ogni mese: ogni giorno una volta sola, mai due,
@@ -323,7 +357,7 @@ def test_ogni_giorno_dell_anno_sta_in_esattamente_un_secchio(wb):
     re_sumifs_giorno = re.compile(
         r'^=SUMIFS\(' + re.escape(ore_rng) + ',' + re.escape(mesi_rng)
         + r',\$A(\d+),' + re.escape(giorni_rng) + r',"(Sabato|Domenica)"\)'
-        r'((?:-Presenze!\$E\$\d+)*)$')
+        r'((?:-N\(Presenze!\$E\$\d+\))*)$')
     re_sumifs_mese = re.compile(
         r'^=SUMIFS\(' + re.escape(ore_rng) + ',' + re.escape(mesi_rng)
         + r',\$A(\d+)\)-C(\d+)-D(\d+)-E(\d+)$')

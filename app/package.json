@@ -1,0 +1,13 @@
+{
+  "name": "vanessa-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["core", "api", "infra", "web"],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build -w @vanessa/web",
+    "deploy": "npm run build && npm run deploy -w @vanessa/infra"
+  }
+}

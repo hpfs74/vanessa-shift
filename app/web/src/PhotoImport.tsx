@@ -129,12 +129,15 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
     <div className="photo">
       {!reading && (
         <>
+          {/* No `capture` on the input: the sheet arrives by WhatsApp, so the
+              photo is already in her gallery. `capture` opens the camera and
+              hides everything else — the one thing she never needs, because
+              she is not standing in front of the sheet. */}
           <label className="photo-pick">
             <span aria-hidden="true">📷</span> Leggi da una foto
             <input
               type="file"
               accept="image/*"
-              capture="environment"
               disabled={loading}
               onChange={(e) => void pick(e.target.files?.[0])}
             />

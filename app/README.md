@@ -24,11 +24,30 @@ npm run build        # compila il frontend
 npm run deploy       # build + cdk deploy
 ```
 
-Deploy della sola infrastruttura:
+**`npm run build`, e quindi `npm run deploy`, si rifiutano se `web/.env.production` non ha
+`VITE_LOGIN_DOMAIN` e `VITE_CLIENT_ID` compilati.** Non è un checkout rotto: è una guardia
+voluta. Prima che esistesse, un client id lasciato vuoto per errore si buildava pulito, si
+distribuiva pulito, e falliva solo quando lei provava ad aprire l'app — un errore anonimo sulla
+pagina di Cognito, non qui. Un build rosso è il segnale giusto, non un guasto da aggirare:
+**non va sistemato inventando un valore.** Su un checkout nuovo, prima che `VanessaAccesso` sia
+mai stato distribuito, `VITE_CLIENT_ID` è vuoto di proposito — il pool non esiste ancora — e
+l'unica cosa giusta è la sequenza sotto.
 
-```bash
-cd infra && npx cdk deploy --all --require-approval never
-```
+### Primo deploy — e ogni volta che `VanessaAccesso` viene ricreato
+
+Ordine obbligato: **prima `VanessaAccesso`, poi il client id nel frontend, poi `VanessaApp`.**
+Il secondo stack legge gli output del primo, e il frontend deve conoscere il client id prima di
+poter compilare qualcosa che sappia entrare.
+
+1. `cd infra && npx cdk deploy VanessaAccesso` — leggi dagli output `IdPool`, `IdClient`,
+   `DominioLogin`.
+2. Incolla `IdClient` in `web/.env.production` (`VITE_CLIENT_ID=...`), committa.
+3. `git push` su `main` — la pipeline (**Deploy automatico**, più sotto) distribuisce
+   `VanessaApp` e il frontend.
+
+Una volta che il client id è nel repository, i deploy successivi non hanno più questo problema
+d'ordine: `cd infra && npx cdk deploy --all --require-approval never` distribuisce i tre stack
+insieme, e `npm run deploy` builda con il valore già presente.
 
 ## Viste
 

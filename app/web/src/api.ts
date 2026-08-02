@@ -78,11 +78,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(message);
   }
-  // A call that succeeds is proof the session is good: the 401 circuit
-  // breaker above must not fire on some unrelated failure later as though
-  // it were still the same loop.
-  sessioneConfermata();
   requireJson(r);
+  // A call that succeeds is proof the session is good — but only past this
+  // point: a CloudFront-rewritten refusal (a 403 or 404 turned into
+  // `index.html` with a 200) is `r.ok` too, and would otherwise clear the
+  // circuit breaker's marker on a response that was never a real answer.
+  // Confirming before `requireJson` let two such refusals in a row reset the
+  // counter between them, so a genuine second 401 right after was still read
+  // as attempt one — reloading forever instead of tripping the breaker.
+  sessioneConfermata();
   return (await r.json()) as T;
 }
 
@@ -163,12 +167,13 @@ export const api: Api = {
       throw new Error(message);
     }
 
-    // A call that succeeds is proof the session is good: see the matching
-    // comment in `request()`.
-    sessioneConfermata();
-
     try {
       requireJson(r);
+      // See the matching comment in `request()`: this has to run after
+      // `requireJson`, not before, or a CloudFront-rewritten refusal (a 200
+      // that isn't really an answer) would confirm a session that was never
+      // actually checked.
+      sessioneConfermata();
       const j = (await r.json()) as { reading: PhotoReading };
       return j.reading;
     } catch {

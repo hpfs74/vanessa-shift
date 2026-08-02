@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../src/api.js';
+import { sessioneRifiutata } from '../src/auth.js';
 
 /** The message, whatever the failure was. */
 async function messageOf(promise: Promise<unknown>): Promise<string> {
@@ -21,6 +22,11 @@ function response(body: unknown, init: ResponseInit = {}): Response {
     ...init,
   });
 }
+
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -127,5 +133,49 @@ describe('the API calls', () => {
     const message = await messageOf(api.paySettings());
     expect(message).not.toMatch(/token|JSON/);
     expect(message).toMatch(/a mano/);
+  });
+});
+
+describe('the 401 circuit breaker', () => {
+  // A CloudFront-rewritten refusal is `r.ok` — its status is 200 — so it
+  // must not be mistaken for a real, session-confirming answer. If it were,
+  // two of them in a row would reset the breaker's marker between them, and
+  // a genuine second 401 right after would still read as attempt one:
+  // reloading forever instead of ever reaching the login.
+  it('two HTML refusals in a row do not confirm the session; a second real 401 then reaches the login', async () => {
+    vi.stubGlobal('location', { reload: vi.fn() });
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
+    localStorage.setItem('refresh', 'un-refresh-token');
+
+    // A first 401 already happened elsewhere: the breaker has spent its one
+    // free retry, and the refresh token is kept for it.
+    sessioneRifiutata();
+    expect(sessionStorage.getItem('riprovaSessione')).not.toBeNull();
+    expect(localStorage.getItem('refresh')).toBe('un-refresh-token');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('<!doctype html><html></html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+      ),
+    );
+    await expect(api.paySettings()).rejects.toThrow();
+    await expect(api.paySettings()).rejects.toThrow();
+
+    // Neither refusal was a real answer: the marker from the first 401 must
+    // have survived both.
+    expect(sessionStorage.getItem('riprovaSessione')).not.toBeNull();
+    expect(localStorage.getItem('refresh')).toBe('un-refresh-token');
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
+    await expect(api.paySettings()).rejects.toThrow();
+
+    // A genuine second consecutive failure: everything is gone now, which
+    // sends her to a fresh login instead of a third reload.
+    expect(localStorage.getItem('refresh')).toBeNull();
+    expect(sessionStorage.getItem('riprovaSessione')).toBeNull();
   });
 });

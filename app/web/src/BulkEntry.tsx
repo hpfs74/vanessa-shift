@@ -22,6 +22,7 @@ export interface BulkEntryProps {
 
 export function BulkEntry({ year, month, onMonthChange, existing, onSave }: BulkEntryProps) {
   const [text, setText] = useState('');
+  const [savedCount, setSavedCount] = useState<number | null>(null);
 
   const parsed = useMemo(() => parseSequence(year, month, text), [year, month, text]);
   const blocked = parsed.unknown.length > 0 || parsed.tooMany;
@@ -54,7 +55,10 @@ export function BulkEntry({ year, month, onMonthChange, existing, onSave }: Bulk
           autoCapitalize="characters"
           autoCorrect="off"
           spellCheck={false}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setSavedCount(null);
+          }}
         />
       </label>
 
@@ -78,8 +82,12 @@ export function BulkEntry({ year, month, onMonthChange, existing, onSave }: Bulk
         existing={existing}
         month={month}
         blocked={blocked}
+        savedCount={savedCount}
         onSave={onSave}
-        onSaved={() => setText('')}
+        onSaved={(count) => {
+          setText('');
+          setSavedCount(count);
+        }}
       />
     </section>
   );

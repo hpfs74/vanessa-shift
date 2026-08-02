@@ -18,9 +18,12 @@ export interface SavePlanProps {
   withoutShift?: number;
   /** Blocca il salvataggio quando l'input a monte non e' valido. */
   blocked?: boolean;
+  /** Numero di giorni salvati da mostrare in conferma, o null per non mostrarla.
+   *  Il chiamante decide quando invalidarla: solo lui sa quando la sorgente e' cambiata. */
+  savedCount: number | null;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
-  /** Chiamato dopo un salvataggio riuscito, per ripulire la sorgente. */
-  onSaved?: () => void;
+  /** Chiamato dopo un salvataggio riuscito, con il numero di giorni salvati. */
+  onSaved: (count: number) => void;
 }
 
 export function SavePlan({
@@ -29,11 +32,11 @@ export function SavePlan({
   month,
   withoutShift = 0,
   blocked = false,
+  savedCount,
   onSave,
   onSaved,
 }: SavePlanProps) {
   const [saving, setSaving] = useState(false);
-  const [done, setDone] = useState<number | null>(null);
 
   const plan = useMemo(() => planChanges(entries, existing), [entries, existing]);
   const changed = plan.filter((c) => c.kind === 'changed');
@@ -41,11 +44,9 @@ export function SavePlan({
 
   const save = async () => {
     setSaving(true);
-    setDone(null);
     try {
       await onSave(entries.map(({ date, code }) => ({ date, code })));
-      setDone(entries.length);
-      onSaved?.();
+      onSaved(entries.length);
     } finally {
       setSaving(false);
     }
@@ -53,9 +54,9 @@ export function SavePlan({
 
   return (
     <>
-      {done !== null && (
+      {savedCount !== null && (
         <p className="ok" role="status">
-          Salvati {done} giorni di {MONTH_NAMES[month - 1]}.
+          Salvati {savedCount} giorni di {MONTH_NAMES[month - 1]}.
         </p>
       )}
 

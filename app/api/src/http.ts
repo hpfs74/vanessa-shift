@@ -222,12 +222,27 @@ export function requireFromCloudFront(
 /** The request did not come through the distribution. */
 export class NotFromCloudFront extends Error {}
 
+/** 401, not 403.
+ *
+ * The distribution maps 403 and 404 onto `index.html` with a 200, because the
+ * client router serves its own paths. A 403 from here would therefore reach
+ * the browser as `200 text/html`, which the frontend reads as a success and
+ * then fails to parse — «unexpected token '<'» instead of something the app
+ * can name. CloudFront does not rewrite 401, so the collision does not arise.
+ *
+ * It is also the more accurate of the two: the request carried no credential,
+ * rather than being refused a resource it was identified for.
+ */
+const NO_CREDENTIAL = 401;
+
 /** Wraps a handler: InvalidInput becomes 400, everything else a bare 500. */
 export function handle(
   fn: () => Promise<APIGatewayProxyResultV2>,
 ): Promise<APIGatewayProxyResultV2> {
   return fn().catch((e: unknown) => {
-    if (e instanceof NotFromCloudFront) return failure(403, 'accesso diretto non consentito');
+    if (e instanceof NotFromCloudFront) {
+      return failure(NO_CREDENTIAL, 'credenziale di origine mancante o non valida');
+    }
     if (e instanceof TooLarge) return failure(413, e.message);
     if (e instanceof InvalidInput) return failure(400, e.message);
     console.error('unhandled error', e);

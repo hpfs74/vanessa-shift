@@ -633,13 +633,16 @@ describe('origin secret', () => {
     expect(r.statusCode).toBe(200);
   });
 
-  it('refuses a request without the header', async () => {
+  // 401 and not 403 on purpose: the distribution rewrites 403 and 404 into
+  // `index.html` with a 200, for the client router, so a 403 would reach the
+  // browser as HTML that reads like a success. 401 travels untouched.
+  it('refuses a request without the header, with a status CloudFront does not rewrite', async () => {
     const { repo, calls } = fakeRepo();
     const h = getShiftsWith(repo);
     const r: any = await h(
       event({ queryStringParameters: { from: '2026-01-01', to: '2026-01-31' } }),
     );
-    expect(r.statusCode).toBe(403);
+    expect(r.statusCode).toBe(401);
     // The point of the check is that nothing behind it runs.
     expect(calls).toEqual([]);
   });
@@ -653,7 +656,7 @@ describe('origin secret', () => {
         queryStringParameters: { from: '2026-01-01', to: '2026-01-31' },
       }),
     );
-    expect(r.statusCode).toBe(403);
+    expect(r.statusCode).toBe(401);
   });
 
   it('compares in constant time, so the value cannot be guessed a byte at a time', async () => {

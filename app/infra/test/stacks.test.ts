@@ -155,7 +155,7 @@ describe('api', () => {
     });
   });
 
-  it('sets throttling, the only brake given there is no authentication', () => {
+  it('sets throttling, the brake against a signed-in caller moving too fast', () => {
     app.hasResourceProperties('AWS::ApiGatewayV2::Stage', {
       DefaultRouteSettings: Match.objectLike({
         ThrottlingRateLimit: 100,
@@ -163,7 +163,6 @@ describe('api', () => {
       }),
     });
   });
-
 });
 
 describe('hosting', () => {
@@ -357,7 +356,10 @@ describe('chi entra', () => {
   it('points the authorizer at the pool, and at our client alone', () => {
     app.hasResourceProperties('AWS::ApiGatewayV2::Authorizer', {
       AuthorizerType: 'JWT',
-      JwtConfiguration: Match.objectLike({ Audience: ['clientefinto'] }),
+      JwtConfiguration: Match.objectLike({
+        Audience: ['clientefinto'],
+        Issuer: 'https://cognito-idp.eu-south-1.amazonaws.com/eu-south-1_finto',
+      }),
     });
   });
 

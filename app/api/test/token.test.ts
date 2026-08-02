@@ -5,8 +5,8 @@ import { NotSignedIn, requireSignedInWith } from '../src/token.js';
 /** A verifier stub: the library's real one talks to Cognito for the keys. */
 function verifierThat(behaviour: 'accepts' | 'refuses') {
   return {
-    verify: vi.fn(async (token: string) => {
-      if (behaviour === 'refuses' || token === 'guasto') throw new Error('invalid');
+    verify: vi.fn(async () => {
+      if (behaviour === 'refuses') throw new Error('invalid');
       return { sub: 'utente-1' };
     }),
   };
@@ -52,5 +52,41 @@ describe('requireSignedIn', () => {
     // must not reach `handle` as an unknown error and become "errore interno".
     const v = { verify: vi.fn(async () => { throw new Error('kid non trovato'); }) };
     await expect(requireSignedInWith(v)({ authorization: 'Bearer x' })).rejects.toThrow(NotSignedIn);
+  });
+});
+
+// `aws-jwt-verify`'s real `create` reaches out to Cognito for the pool's
+// public keys: mocked here so this stays as network-free as everything else.
+vi.mock('aws-jwt-verify', () => ({
+  CognitoJwtVerifier: {
+    create: vi.fn(() => ({ verify: vi.fn(async () => ({ sub: 'utente-1' })) })),
+  },
+}));
+
+describe('requireSignedIn (the production entry point)', () => {
+  it('builds one ID-token verifier from the environment, and reuses it', async () => {
+    process.env.USER_POOL_ID = 'eu-south-1_finto';
+    process.env.USER_POOL_CLIENT_ID = 'clientefinto';
+    try {
+      const { CognitoJwtVerifier } = await import('aws-jwt-verify');
+      const { requireSignedIn } = await import('../src/token.js');
+
+      await requireSignedIn({ authorization: 'Bearer buono' });
+      await requireSignedIn({ authorization: 'Bearer buono' });
+
+      // `tokenUse: 'id'` is what makes this check accept the same tokens the
+      // gateway authorizer does — see the comment on it in token.ts.
+      expect(CognitoJwtVerifier.create).toHaveBeenCalledWith({
+        userPoolId: 'eu-south-1_finto',
+        clientId: 'clientefinto',
+        tokenUse: 'id',
+      });
+      // Once per container, not once per request: building it again would
+      // fetch the pool's public keys again every time.
+      expect(CognitoJwtVerifier.create).toHaveBeenCalledTimes(1);
+    } finally {
+      delete process.env.USER_POOL_ID;
+      delete process.env.USER_POOL_CLIENT_ID;
+    }
   });
 });

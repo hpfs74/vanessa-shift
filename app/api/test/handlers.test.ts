@@ -638,6 +638,24 @@ describe('readPhoto', () => {
     expect(modelCalls).toBe(0);
   });
 
+  it('checks the token before the body size, not after', async () => {
+    // The 429 and 413 tests each prove the token check runs before one other
+    // step; this one pins it against the step right after it, requireImage:
+    // an oversized body from a caller with no token is still a 401, not a 413.
+    const { repo, calls } = fakeRepo();
+    const h = readPhotoWith(
+      repo,
+      async () => augustReading(),
+      today,
+      year,
+      async () => { throw new NotSignedIn('nessun token'); },
+    );
+
+    const r: any = await h(photoEvent('A'.repeat(2 * 1024 * 1024 + 1)));
+    expect(r.statusCode).toBe(401);
+    expect(calls.filter((c) => c.startsWith('consumePhotoQuota'))).toEqual([]);
+  });
+
   it('reads for a caller who is signed in', async () => {
     const { repo } = fakeRepo();
     const h = readPhotoWith(repo, async () => augustReading(), today, year, async () => {});

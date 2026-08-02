@@ -4,6 +4,14 @@
  * authorizer that never reaches our code. A Lambda Function URL cannot have
  * one, so the photo endpoint checks it here instead. Same pool, same tokens,
  * two mechanisms — because of what AWS offers, not by choice.
+ *
+ * `tokenUse: 'id'` here has to match what the gateway's authorizer accepts:
+ * that one matches its audience against `aud` *or* `client_id`, so it takes
+ * either an ID token or an access token, while this check, given only one
+ * `tokenUse`, takes ID tokens alone. Swap it for `'access'` and the two
+ * routes would quietly diverge — the five gatewayed routes keep working, the
+ * photo endpoint starts refusing a properly signed-in caller — with nothing
+ * here to say why. `'id'` is the intersection: it is accepted by both.
  */
 
 import { CognitoJwtVerifier } from 'aws-jwt-verify';

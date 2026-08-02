@@ -212,7 +212,8 @@ export class AppStack extends Stack {
     route('/api/config', HttpMethod.GET, getConfigFn, 'IntGetConfig');
     route('/api/config', HttpMethod.PUT, putConfigFn, 'IntPutConfig');
 
-    // With no authentication, throttling is the only brake on third-party traffic.
+    // The authorizer stops a caller who isn't signed in; throttling is what
+    // stops one who is, from hammering the API faster than a person would.
     api.defaultStage!.node.addDependency(table);
     const stage = api.defaultStage!.node
       .defaultChild as import('aws-cdk-lib/aws-apigatewayv2').CfnStage;

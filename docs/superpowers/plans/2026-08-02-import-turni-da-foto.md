@@ -287,57 +287,57 @@ export class RowNotFound extends Error {}
 
 function integer(v: unknown, field: string): number {
   if (typeof v !== 'number' || !Number.isInteger(v)) {
-    throw new InvalidReading(`${field}: atteso un intero`);
+    throw new InvalidReading(`${field}: expected an integer`);
   }
   return v;
 }
 
 export function validateReading(v: unknown, expectedYear: number): PhotoReading {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) {
-    throw new InvalidReading('estrazione: atteso un oggetto');
+    throw new InvalidReading('reading: expected an object');
   }
   const e = v as Record<string, unknown>;
 
   if (e.found !== true) throw new RowNotFound(`riga di ${ROW_NAME} non trovata`);
 
   const month = integer(e.month, 'mese');
-  if (month < 1 || month > 12) throw new InvalidReading('mese: fuori da 1-12');
+  if (month < 1 || month > 12) throw new InvalidReading('month: out of 1-12');
 
   const year = integer(e.year, 'anno');
-  if (Math.abs(year - expectedYear) > 1) throw new InvalidReading('anno: troppo lontano');
+  if (Math.abs(year - expectedYear) > 1) throw new InvalidReading('year: too far off');
 
   if (typeof e.foundName !== 'string' || e.foundName.length === 0) {
-    throw new InvalidReading('nomeTrovato: atteso un nome');
+    throw new InvalidReading('foundName: expected a name');
   }
   const foundRow = integer(e.foundRow, 'rigaTrovata');
 
-  if (!Array.isArray(e.days)) throw new InvalidReading('giorni: atteso un elenco');
+  if (!Array.isArray(e.days)) throw new InvalidReading('days: expected an array');
   const expected = daysInMonth(year, month);
   if (e.days.length !== expected) {
-    throw new InvalidReading(`giorni: attesi ${expected}, ricevuti ${e.days.length}`);
+    throw new InvalidReading(`days: expected ${expected}, got ${e.days.length}`);
   }
 
   const seen = new Set<number>();
   const days: ReadDay[] = e.days.map((raw, i) => {
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-      throw new InvalidReading(`giorni[${i}]: atteso un oggetto`);
+      throw new InvalidReading(`days[${i}]: expected an object`);
     }
     const g = raw as Record<string, unknown>;
-    const day = integer(g.day, `giorni[${i}].giorno`);
+    const day = integer(g.day, `days[${i}].day`);
     if (day < 1 || day > expected) {
-      throw new InvalidReading(`giorni[${i}].giorno: ${day} non e nel mese`);
+      throw new InvalidReading(`days[${i}].day: ${day} not in the month`);
     }
     // The same day twice would mean that one column was read twice and
     // another never: the grid is not aligned.
-    if (seen.has(day)) throw new InvalidReading(`giorno ${day} compare due volte`);
+    if (seen.has(day)) throw new InvalidReading(`day ${day} appears twice`);
     seen.add(day);
 
     const code = g.code;
     if (code !== null && !isShiftCode(code)) {
-      throw new InvalidReading(`giorni[${i}].codice: codice turno sconosciuto`);
+      throw new InvalidReading(`days[${i}].code: unknown shift code`);
     }
     if (typeof g.confident !== 'boolean') {
-      throw new InvalidReading(`giorni[${i}].sicuro: atteso un booleano`);
+      throw new InvalidReading(`days[${i}].confident: expected a boolean`);
     }
     return { day, code: code as ShiftCode | null, confident: g.confident };
   });
@@ -391,7 +391,7 @@ Un contatore atomico. Il punto delicato è che due richieste simultanee al confi
 
 **Interfaces:**
 - Consumes: `MAX_READINGS_PER_DAY` da `@vanessa/core`.
-- Produces: sull'interfaccia `Repo`, `consumePhotoQuota(giorno: IsoDate, max: number): Promise<boolean>` — `true` se la lettura è concessa, `false` se il tetto è già stato raggiunto. Costante esportata `QUOTA_PK = 'QUOTA#FOTO'`.
+- Produces: sull'interfaccia `Repo`, `consumePhotoQuota(date: IsoDate, max: number): Promise<boolean>` — `true` se la lettura è concessa, `false` se il tetto è già stato raggiunto. Costante esportata `QUOTA_PK = 'QUOTA#FOTO'`.
 
 - [ ] **Step 1: Scrivi i test che falliscono**
 
@@ -511,20 +511,20 @@ Nell'interfaccia `Repo`, dopo `savePaySettings`:
   /** Consumes a photo reading for that day. `false` if the cap has already
    *  been reached. The condition and the increment are the same operation:
    *  two simultaneous requests at the boundary must not both go through. */
-  consumePhotoQuota(giorno: IsoDate, max: number): Promise<boolean>;
+  consumePhotoQuota(date: IsoDate, max: number): Promise<boolean>;
 ```
 
 E nell'oggetto restituito da `createRepo`, dopo `savePaySettings`:
 
 ```ts
-    async consumePhotoQuota(giorno, max) {
-      const { year, month, day } = parseIso(giorno);
+    async consumePhotoQuota(date, max) {
+      const { year, month, day } = parseIso(date);
       const expires = Math.floor(Date.UTC(year, month - 1, day + QUOTA_TTL_DAYS) / 1000);
       try {
         await doc.send(
           new UpdateCommand({
             TableName: table,
-            Key: { pk: QUOTA_PK, sk: giorno },
+            Key: { pk: QUOTA_PK, sk: date },
             UpdateExpression: 'SET expires = :expires ADD count :one',
             ConditionExpression: 'attribute_not_exists(count) OR count < :max',
             ExpressionAttributeValues: { ':one': 1, ':max': max, ':expires': expires },
@@ -550,11 +550,11 @@ Expected: PASS (4 test).
 In `app/api/test/handlers.test.ts`, dentro `fakeRepo()`, aggiungi al `Repo` — subito dopo `savePaySettings` — il metodo mancante, altrimenti non compila:
 
 ```ts
-    async consumePhotoQuota(giorno, max) {
-      calls.push(`consumePhotoQuota(${giorno},${max})`);
-      const used = (quota.get(giorno) ?? 0) + 1;
+    async consumePhotoQuota(date, max) {
+      calls.push(`consumePhotoQuota(${date},${max})`);
+      const used = (quota.get(date) ?? 0) + 1;
       if (used > max) return false;
-      quota.set(giorno, used);
+      quota.set(date, used);
       return true;
     },
 ```

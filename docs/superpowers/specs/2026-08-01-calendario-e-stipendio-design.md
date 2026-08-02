@@ -218,11 +218,19 @@ Netto stim.  = lordo totale * coeff. netto
 
 ### Riga di controllo
 
-Sotto la tabella, sulla riga del totale anno: la somma delle quattro colonne ore deve coincidere
-con `SUM(Presenze!$E$5:$E$369)`, cioè le ore totali dell'anno. La differenza deve essere zero;
-se non lo è, la cella si accende in rosso. È la rete di
-sicurezza contro un errore nella ripartizione sabato/domenica/festivo, sullo stesso principio
-della riga «Da controllare (refusi)» del foglio `Scambi`.
+Sotto la tabella: il minimo delle ore ordinarie sui dodici mesi, che deve essere maggiore o
+uguale a zero. Se scende sotto zero la cella si accende in rosso. È la rete di sicurezza contro
+un errore nella ripartizione sabato/domenica/festivo, sullo stesso principio della riga «Da
+controllare (refusi)» del foglio `Scambi`.
+
+Perché il minimo e non la somma: le ore ordinarie sono calcolate come resto
+(`totale − sabato − domenica − festivi`), quindi la somma delle quattro colonne è uguale al
+totale *per costruzione* e non può mai segnalare niente. Un giorno contato due volte erode
+invece la colonna delle ordinarie, ed è lì che il difetto diventa visibile.
+
+La garanzia forte sta nei test, non nel foglio: una property test cammina tutti i giorni
+dell'anno e verifica che ogni riga di `Presenze` compaia in esattamente una delle quattro
+categorie.
 
 ### Grafico
 

@@ -1622,3 +1622,15 @@ git push
 **Nota sulla numerazione dei parametri:** la spec collocava i parametri in `B4:B9`; il piano li mette in `B5:B10` perché la riga 4 ospita l'intestazione `Parametro | Valore`. Le formule del piano usano coerentemente `$B$5` per la tariffa e `$B$10` per il coefficiente netto.
 
 **Nota sull'asterisco:** la spec chiede il `*` accanto al codice. Con una regola «testo uguale a M» la cella `M*` non verrebbe colorata, quindi ogni codice ha due regole, `"M"` e `"M*"`. L'asterisco resta dove previsto.
+
+---
+
+## Correzioni emerse in esecuzione
+
+Due difetti di questo piano scoperti dalle review, corretti in corsa. Chi rilegge il piano deve sapere che le versioni qui sopra sono superate.
+
+**Task 5 — il test delle regole di colore non aveva denti.** `test_regole_di_colore_per_ogni_codice` raccoglie le formule delle regole in un `set()` e verifica solo l'appartenenza: se gli intervalli saltassero un blocco mensile o fossero sfasati di una riga, il test passerebbe e mezzo anno resterebbe senza colore. Aggiunto `test_le_regole_di_colore_coprono_tutte_le_righe_con_formula`, che confronta l'insieme delle righe con formula codice/orario con l'insieme delle righe coperte dagli `sqref`. Verificato per mutazione: fallisce sia togliendo un blocco sia sfasandolo di una riga.
+
+**Task 6 — la riga di controllo era una tautologia.** `B+C+D+E-SUM(ore)` non può mai essere diverso da zero, perché le ore ordinarie sono definite come resto: `B = SUMIFS(mese)-C-D-E`. Dimostrato iniettando due guasti veri (rimossa la sottrazione del 25 aprile dalle ore di sabato; azzerati i festivi di dicembre): il controllo è rimasto `0` in entrambi i casi. Sostituita con `=MIN(B16:B27)` etichettata «deve essere >= 0», che coglie la forma reale del guasto — un giorno contato due volte erode la colonna delle ordinarie. Aggiunta inoltre una property test che cammina tutti i giorni dell'anno e verifica che ogni riga di `Presenze` cada in esattamente una delle quattro categorie.
+
+Il conteggio dei test nei Task 6, 7 e 8 va aumentato di conseguenza: i valori scritti sopra (33, 39, 40) sono precedenti a queste aggiunte.

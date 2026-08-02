@@ -2,6 +2,18 @@ import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
+// Node's own global `localStorage` (behind `--experimental-webstorage` on
+// some Node versions, unflagged on newer ones) shadows jsdom's per-window
+// one inside the worker pool, leaving it `undefined` unless a
+// `--localstorage-file` was given. auth.ts and its tests need jsdom's
+// version, scoped to the fake window, not a file on disk. Feature-detected,
+// so it is a no-op on a Node build that never registered the flag.
+const noNodeWebStorage = process.allowedNodeEnvironmentFlags.has(
+  '--no-experimental-webstorage',
+)
+  ? ['--no-experimental-webstorage']
+  : [];
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -13,6 +25,10 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./test/setup.ts'],
     globals: true,
+    poolOptions: {
+      threads: { execArgv: noNodeWebStorage },
+      forks: { execArgv: noNodeWebStorage },
+    },
   },
   // `npm run dev` serves the page from localhost, where /api and /foto have
   // nobody behind them: forward both to the deployed origins. In production

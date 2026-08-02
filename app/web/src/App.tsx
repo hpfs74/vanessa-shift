@@ -18,6 +18,7 @@ import { DayEditor } from './DayEditor.js';
 import { Pay } from './Pay.js';
 import { Summary } from './Summary.js';
 import { Swaps } from './Swaps.js';
+import type { Sessione } from './auth.js';
 import { api as realApi, type Api, type RemoteShift } from './api.js';
 
 const YEAR = 2026;
@@ -38,6 +39,9 @@ export interface AppProps {
   initialView?: View;
   /** Injected so tests do not depend on the day they are run. */
   today?: IsoDate;
+  /** The gate in main.tsx has already checked it is good: App itself does
+   *  nothing with it beyond receiving it. */
+  sessione?: Sessione;
 }
 
 export function App({

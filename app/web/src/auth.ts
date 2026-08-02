@@ -1,0 +1,102 @@
+/** Getting in.
+ *
+ * Authorization code with PKCE against Cognito's managed login. No client
+ * secret: one inside a JavaScript bundle is not a secret, and PKCE is what
+ * replaces it — a random verifier stays in this tab, only its hash travels,
+ * and the code that comes back is worthless without the verifier.
+ */
+
+const CHIAVE_SESSIONE = 'sessione';
+const CHIAVE_VERIFIER = 'pkce';
+
+/** Config baked in at build time: none of it is secret. */
+const POOL_DOMAIN = import.meta.env.VITE_LOGIN_DOMAIN ?? '';
+const CLIENT_ID = import.meta.env.VITE_CLIENT_ID ?? '';
+
+export interface Sessione {
+  readonly idToken: string;
+  /** Epoch ms. */
+  readonly scade: number;
+}
+
+/** A minute of headroom: a token that dies mid-request is worse than one that
+ *  was never sent, because it fails halfway through saving a month. */
+const MARGINE_MS = 60_000;
+
+export function sessioneValida(now: number = Date.now()): Sessione | null {
+  const raw = localStorage.getItem(CHIAVE_SESSIONE);
+  if (!raw) return null;
+  try {
+    const s = JSON.parse(raw) as Sessione;
+    if (typeof s?.idToken !== 'string' || typeof s?.scade !== 'number') return null;
+    return s.scade - MARGINE_MS > now ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+export function esci(): void {
+  localStorage.removeItem(CHIAVE_SESSIONE);
+  sessionStorage.removeItem(CHIAVE_VERIFIER);
+}
+
+function base64url(bytes: ArrayBuffer): string {
+  return btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+export async function verifierEsfida(): Promise<{ verifier: string; challenge: string }> {
+  const raw = crypto.getRandomValues(new Uint8Array(32));
+  const verifier = base64url(raw.buffer);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return { verifier, challenge: base64url(digest) };
+}
+
+export async function iniziaAccesso(): Promise<void> {
+  const { verifier, challenge } = await verifierEsfida();
+  // sessionStorage, not localStorage: the verifier belongs to this attempt in
+  // this tab, and outliving it buys nothing.
+  sessionStorage.setItem(CHIAVE_VERIFIER, verifier);
+  const u = new URL(`${POOL_DOMAIN}/oauth2/authorize`);
+  u.searchParams.set('client_id', CLIENT_ID);
+  u.searchParams.set('response_type', 'code');
+  u.searchParams.set('scope', 'openid email');
+  u.searchParams.set('redirect_uri', `${location.origin}/`);
+  u.searchParams.set('code_challenge', challenge);
+  u.searchParams.set('code_challenge_method', 'S256');
+  location.assign(u.toString());
+}
+
+/** True when a code was present and exchanged. */
+export async function completaAccesso(url: URL = new URL(location.href)): Promise<boolean> {
+  const code = url.searchParams.get('code');
+  if (!code) return false;
+  const verifier = sessionStorage.getItem(CHIAVE_VERIFIER);
+  if (!verifier) return false;
+
+  const r = await fetch(`${POOL_DOMAIN}/oauth2/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: CLIENT_ID,
+      code,
+      redirect_uri: `${location.origin}/`,
+      code_verifier: verifier,
+    }),
+  });
+  if (!r.ok) return false;
+
+  const j = (await r.json()) as { id_token: string; expires_in: number };
+  localStorage.setItem(
+    CHIAVE_SESSIONE,
+    JSON.stringify({ idToken: j.id_token, scade: Date.now() + j.expires_in * 1000 }),
+  );
+  sessionStorage.removeItem(CHIAVE_VERIFIER);
+  // Take the code out of the address bar: it is single-use, but it has no
+  // business staying in history or in a shared link.
+  history.replaceState({}, '', location.origin + '/');
+  return true;
+}

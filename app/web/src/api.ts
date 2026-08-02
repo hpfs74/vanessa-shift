@@ -2,6 +2,8 @@
 
 import type { PhotoReading, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
 
+import { esci, sessioneValida } from './auth.js';
+
 export interface RemoteShift {
   date: IsoDate;
   code: ShiftCode;
@@ -41,12 +43,25 @@ function requireJson(r: Response): void {
   if (!(r.headers.get('content-type') ?? '').includes('json')) throw new Error(UNREACHABLE);
 }
 
+/** Every call carries the token. A 401 means the session died despite the
+ *  margin — forget it and let the app send her back to the login rather than
+ *  showing a failure she can do nothing about. */
+function autorizzazione(): Record<string, string> {
+  const s = sessioneValida();
+  return s ? { authorization: `Bearer ${s.idToken}` } : {};
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${API_URL}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...autorizzazione(),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!r.ok) {
+    if (r.status === 401) esci();
     const text = await r.text().catch(() => '');
     // The fallback stays in Italian: it reaches the screen.
     let message = `richiesta fallita (${r.status})`;
@@ -116,7 +131,7 @@ export const api: Api = {
     try {
       r = await fetch(PHOTO_URL, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...autorizzazione() },
         body,
       });
     } catch {
@@ -127,6 +142,7 @@ export const api: Api = {
     }
 
     if (!r.ok) {
+      if (r.status === 401) esci();
       const text = await r.text().catch(() => '');
       let message = `lettura fallita (${r.status})`;
       try {

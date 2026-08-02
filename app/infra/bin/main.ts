@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { App } from 'aws-cdk-lib';
 
 import { AppStack } from '../lib/app-stack.js';
+import { AuthStack } from '../lib/auth-stack.js';
 import { CertificateStack } from '../lib/certificate-stack.js';
 
 export const CONFIG = {
@@ -25,6 +26,11 @@ const cert = new CertificateStack(app, 'VanessaCertificato', {
   domain: CONFIG.domain,
   zoneDomain: CONFIG.zoneDomain,
   zoneId: CONFIG.zoneId,
+});
+
+const auth = new AuthStack(app, 'VanessaAccesso', {
+  env: { account: CONFIG.account, region: CONFIG.region },
+  domain: CONFIG.domain,
 });
 
 const webDist = join(import.meta.dirname, '..', '..', 'web', 'dist');

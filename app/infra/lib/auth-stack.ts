@@ -34,10 +34,27 @@ export class AuthStack extends Stack {
       // One or two people, created by hand. An open pool on a public address
       // is an invitation.
       selfSignUpEnabled: false,
-      accountRecovery: AccountRecovery.EMAIL_ONLY,
+      // No self-service recovery: the email OTP is already an allowed first
+      // factor, so a "forgot password" flow gives an attacker with the
+      // inbox nothing they did not already have, while adding a reset link
+      // the spec explicitly keeps out. A forgotten password is recovered by
+      // signing in with the email code, or reset by admin.
+      accountRecovery: AccountRecovery.NONE,
       // Passkeys do not exist on the Lite plan. This is the reason for the
       // plan, not a preference.
       featurePlan: FeaturePlan.ESSENTIALS,
+      // The security floor of this whole app is the strength of this
+      // password. Long and random, all character classes, so it earns its
+      // place in a password manager instead of a sticky note.
+      passwordPolicy: {
+        minLength: 32,
+        requireLowercase: true,
+        requireUppercase: true,
+        requireDigits: true,
+        requireSymbols: true,
+        // Only exists to bridge admin-create to first sign-in.
+        tempPasswordValidity: Duration.days(1),
+      },
       signInPolicy: {
         allowedFirstAuthFactors: {
           // `password` is not optional — Cognito's own API says "This must

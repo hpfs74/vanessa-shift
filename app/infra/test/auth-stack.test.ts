@@ -1,9 +1,17 @@
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, it } from 'vitest';
 
 import { AuthStack } from '../lib/auth-stack.js';
-import { CONFIG } from '../bin/main.js';
+
+// Duplicated from `bin/main.ts` rather than imported: importing `CONFIG`
+// from there instantiates the certificate and app stacks too, just to read
+// one constant.
+const CONFIG = {
+  account: '495133941005',
+  region: 'eu-south-1',
+  domain: 'vanessa.matteo.cool',
+};
 
 let auth: Template;
 
@@ -21,15 +29,61 @@ describe('user pool', () => {
     // `required` is the whole point: without it a passkey is satisfied by a
     // phone that happens to be unlocked, which is not what was asked for.
     auth.hasResourceProperties('AWS::Cognito::UserPool', {
-      Policies: Match.objectLike({
-        // CDK emits the factors in its own fixed order (password, emailOtp,
-        // smsOtp, passkey), not the order they were listed in the props.
-        SignInPolicy: { AllowedFirstAuthFactors: Match.arrayWith(['PASSWORD', 'EMAIL_OTP', 'WEB_AUTHN']) },
-      }),
       WebAuthnUserVerification: 'required',
       // CloudFormation spells this with a capitalised trailing "ID", unlike
       // the CDK prop name `passkeyRelyingPartyId` that sets it.
       WebAuthnRelyingPartyID: CONFIG.domain,
+    });
+  });
+
+  it('has exactly these three ways in, and no others', () => {
+    // arrayEquals, not arrayWith: a fourth factor added later (say
+    // `smsOtp: true`) would open a new, weaker way into the account, and an
+    // `arrayWith` check would keep passing right through it.
+    auth.hasResourceProperties('AWS::Cognito::UserPool', {
+      Policies: Match.objectLike({
+        // CDK emits the factors in its own fixed order (password, emailOtp,
+        // smsOtp, passkey), not the order they were listed in the props.
+        SignInPolicy: { AllowedFirstAuthFactors: Match.arrayEquals(['PASSWORD', 'EMAIL_OTP', 'WEB_AUTHN']) },
+      }),
+    });
+  });
+
+  it('allows the passkey as a first factor, whatever order the others end up in', () => {
+    // The one factor the feature is named after, checked on its own so a
+    // future CDK reordering of the other two cannot take this down with it.
+    auth.hasResourceProperties('AWS::Cognito::UserPool', {
+      Policies: Match.objectLike({
+        SignInPolicy: { AllowedFirstAuthFactors: Match.arrayWith(['WEB_AUTHN']) },
+      }),
+    });
+  });
+
+  it('demands a password long and varied enough to be the security floor', () => {
+    // Without an explicit policy the pool falls back to Cognito's default
+    // of eight characters — an invisible floor no line of this repo would
+    // state or protect. The spec's advice ("generate it long and random,
+    // keep it in a password manager") only holds if the pool enforces it.
+    auth.hasResourceProperties('AWS::Cognito::UserPool', {
+      Policies: Match.objectLike({
+        PasswordPolicy: {
+          MinimumLength: 32,
+          RequireLowercase: true,
+          RequireUppercase: true,
+          RequireNumbers: true,
+          RequireSymbols: true,
+          TemporaryPasswordValidityDays: 1,
+        },
+      }),
+    });
+  });
+
+  it('does not offer self-service password recovery', () => {
+    // The email OTP is already an allowed first factor, so a "forgot
+    // password" flow gives an attacker with the inbox nothing new, while
+    // adding a reset surface and a link the spec keeps off the login page.
+    auth.hasResourceProperties('AWS::Cognito::UserPool', {
+      AccountRecoverySetting: { RecoveryMechanisms: [{ Name: 'admin_only', Priority: 1 }] },
     });
   });
 
@@ -82,5 +136,13 @@ describe('user pool', () => {
     auth.hasResourceProperties('AWS::Cognito::UserPoolClient', {
       ExplicitAuthFlows: Match.arrayWith(['ALLOW_USER_AUTH']),
     });
+  });
+
+  it('publishes the three outputs the next tasks are built on', () => {
+    // Tasks 2 to 4 consume these by name. A rename or a drop here breaks a
+    // later task with no signal until then, unless this asserts them.
+    auth.hasOutput('IdPool', {});
+    auth.hasOutput('IdClient', {});
+    auth.hasOutput('DominioLogin', {});
   });
 });

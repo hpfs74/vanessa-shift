@@ -185,8 +185,13 @@ export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo
           new UpdateCommand({
             TableName: table,
             Key: { pk: QUOTA_PK, sk: date },
-            UpdateExpression: 'SET expires = :expires ADD count :one',
-            ConditionExpression: 'attribute_not_exists(count) OR count < :max',
+            // `count` is a DynamoDB reserved word: unescaped, the whole call is
+            // rejected with a ValidationException before the item is touched.
+            // The alias keeps the stored attribute name as it is. `expires` is
+            // not reserved and needs no alias.
+            UpdateExpression: 'SET expires = :expires ADD #count :one',
+            ConditionExpression: 'attribute_not_exists(#count) OR #count < :max',
+            ExpressionAttributeNames: { '#count': 'count' },
             ExpressionAttributeValues: { ':one': 1, ':max': max, ':expires': expires },
           }),
         );

@@ -24,10 +24,19 @@ export interface MessagesClient {
   messages: { create(body: unknown): Promise<MessagesResponse> };
 }
 
-export type Vision = (immagineBase64: string) => Promise<unknown>;
+export type Vision = (imageBase64: string) => Promise<unknown>;
+
+export type VisionFailureReason = 'refusal' | 'truncated' | 'no-text' | 'not-json';
 
 /** The reading didn't succeed. The caller translates it into a message. */
-export class VisionFailed extends Error {}
+export class VisionFailed extends Error {
+  constructor(
+    message: string,
+    public readonly reason: VisionFailureReason,
+  ) {
+    super(message);
+  }
+}
 
 const CODES = SHIFTS.map((s) => s.code).join(', ');
 
@@ -67,7 +76,7 @@ export function createVision(client?: MessagesClient): Vision {
   const c: MessagesClient =
     client ?? (new AnthropicBedrockMantle({ awsRegion: REGION }) as unknown as MessagesClient);
 
-  return async (immagineBase64: string) => {
+  return async (imageBase64: string) => {
     const response = await c.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
@@ -78,7 +87,7 @@ export function createVision(client?: MessagesClient): Vision {
           content: [
             {
               type: 'image',
-              source: { type: 'base64', media_type: 'image/jpeg', data: immagineBase64 },
+              source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 },
             },
             { type: 'text', text: PROMPT },
           ],
@@ -89,19 +98,19 @@ export function createVision(client?: MessagesClient): Vision {
     // Classifiers can refuse: that's a 200 with empty content, not an HTTP
     // error. Reading content[0] here would give an undefined that travels on.
     if (response.stop_reason === 'refusal') {
-      throw new VisionFailed('il modello ha rifiutato la richiesta');
+      throw new VisionFailed('the model refused the request', 'refusal');
     }
     if (response.stop_reason === 'max_tokens') {
-      throw new VisionFailed('risposta troncata');
+      throw new VisionFailed('response was truncated', 'truncated');
     }
 
     const text = response.content.find((b) => b.type === 'text')?.text;
-    if (!text) throw new VisionFailed('nessun blocco di testo nella risposta');
+    if (!text) throw new VisionFailed('no text block in the response', 'no-text');
 
     try {
       return JSON.parse(text);
     } catch {
-      throw new VisionFailed('la risposta non e JSON');
+      throw new VisionFailed('the response is not JSON', 'not-json');
     }
   };
 }

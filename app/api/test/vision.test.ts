@@ -4,13 +4,13 @@ import { ROW_NAME } from '@vanessa/core';
 
 import { MODEL, VisionFailed, createVision } from '../src/vision.js';
 
-function clientReturning(risposta: unknown) {
+function clientReturning(response: unknown) {
   const sent: any[] = [];
   const client = {
     messages: {
       async create(body: unknown) {
         sent.push(body);
-        return risposta as never;
+        return response as never;
       },
     },
   };
@@ -61,7 +61,9 @@ describe('createVision', () => {
 
   it('a refusal from the model is not JSON to read', async () => {
     const { client } = clientReturning({ stop_reason: 'refusal', content: [] });
-    await expect(createVision(client)('AAAA')).rejects.toThrow(VisionFailed);
+    const error = (await createVision(client)('AAAA').catch((e) => e)) as VisionFailed;
+    expect(error).toBeInstanceOf(VisionFailed);
+    expect(error.reason).toBe('refusal');
   });
 
   it('a truncated response is not JSON to read', async () => {
@@ -69,12 +71,16 @@ describe('createVision', () => {
       stop_reason: 'max_tokens',
       content: [{ type: 'text', text: '{"mese":8' }],
     });
-    await expect(createVision(client)('AAAA')).rejects.toThrow(VisionFailed);
+    const error = (await createVision(client)('AAAA').catch((e) => e)) as VisionFailed;
+    expect(error).toBeInstanceOf(VisionFailed);
+    expect(error.reason).toBe('truncated');
   });
 
   it('no text block is an error, not an undefined that travels on', async () => {
     const { client } = clientReturning({ stop_reason: 'end_turn', content: [] });
-    await expect(createVision(client)('AAAA')).rejects.toThrow(VisionFailed);
+    const error = (await createVision(client)('AAAA').catch((e) => e)) as VisionFailed;
+    expect(error).toBeInstanceOf(VisionFailed);
+    expect(error.reason).toBe('no-text');
   });
 
   it('text that is not JSON is an error', async () => {
@@ -82,6 +88,8 @@ describe('createVision', () => {
       stop_reason: 'end_turn',
       content: [{ type: 'text', text: 'mi dispiace' }],
     });
-    await expect(createVision(client)('AAAA')).rejects.toThrow(VisionFailed);
+    const error = (await createVision(client)('AAAA').catch((e) => e)) as VisionFailed;
+    expect(error).toBeInstanceOf(VisionFailed);
+    expect(error.reason).toBe('not-json');
   });
 });

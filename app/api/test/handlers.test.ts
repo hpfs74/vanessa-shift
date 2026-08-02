@@ -417,3 +417,138 @@ describe('responses', () => {
     expect(String(r.body)).not.toMatch(/arn:aws/);
   });
 });
+
+import { readPhotoWith } from '../src/handlers.js';
+import { VisionFailed } from '../src/vision.js';
+
+/** A valid August reading, with a single shift on the first of the month. */
+function augustReading() {
+  return {
+    month: 8,
+    year: 2026,
+    found: true,
+    foundName: 'Vanessa',
+    foundRow: 12,
+    days: Array.from({ length: 31 }, (_, i) => ({
+      day: i + 1,
+      code: i === 0 ? 'L' : null,
+      confident: true,
+    })),
+  };
+}
+
+function photoEvent(image: string) {
+  return event({ body: JSON.stringify({ image }) });
+}
+
+describe('readPhoto', () => {
+  const today = () => '2026-08-02';
+  const year = () => 2026;
+
+  it('reads the photo and returns the reading', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(repo, async () => augustReading(), today, year);
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(200);
+    expect(body(r).reading.days).toHaveLength(31);
+    expect(body(r).reading.month).toBe(8);
+  });
+
+  it('writes no shift', async () => {
+    const { repo, shifts } = fakeRepo();
+    const h = readPhotoWith(repo, async () => augustReading(), today, year);
+
+    await h(photoEvent('AAAA'));
+    expect(shifts.size).toBe(0);
+  });
+
+  it('past the cap it responds 429 without calling the model', async () => {
+    const { repo } = fakeRepo();
+    let calls = 0;
+    const h = readPhotoWith(
+      repo,
+      async () => {
+        calls += 1;
+        return augustReading();
+      },
+      today,
+      year,
+    );
+
+    for (let i = 0; i < 10; i++) {
+      const allowed: any = await h(photoEvent('AAAA'));
+      expect(allowed.statusCode).toBe(200);
+    }
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(429);
+    expect(calls).toBe(10);
+  });
+
+  it('an oversized body is 413, touching neither quota nor model', async () => {
+    const { repo, calls } = fakeRepo();
+    let readCalls = 0;
+    const h = readPhotoWith(
+      repo,
+      async () => {
+        readCalls += 1;
+        return augustReading();
+      },
+      today,
+      year,
+    );
+
+    const r: any = await h(photoEvent('A'.repeat(2 * 1024 * 1024 + 1)));
+    expect(r.statusCode).toBe(413);
+    expect(readCalls).toBe(0);
+    expect(calls.filter((c) => c.startsWith('consumePhotoQuota'))).toEqual([]);
+  });
+
+  it('when the model fails the quota stays spent', async () => {
+    const { repo, quota } = fakeRepo();
+    const h = readPhotoWith(
+      repo,
+      async () => {
+        throw new VisionFailed('boom', 'not-json');
+      },
+      today,
+      year,
+    );
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(502);
+    // Otherwise anyone abusing it gets free attempts by making the reading fail.
+    expect(quota.get('2026-08-02')).toBe(1);
+  });
+
+  it('a reading that fails validation is 422, not 500', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(repo, async () => ({ found: true, month: 99 }), today, year);
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(422);
+    expect(body(r).errore).toContain('leggere');
+  });
+
+  it('row not found has its own message', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(
+      repo,
+      async () => ({ ...augustReading(), found: false, foundName: null, foundRow: null }),
+      today,
+      year,
+    );
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(422);
+    expect(body(r).errore).toContain('Vanessa');
+  });
+
+  it('without an image it is 400', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(repo, async () => augustReading(), today, year);
+
+    const r: any = await h(event({ body: JSON.stringify({}) }));
+    expect(r.statusCode).toBe(400);
+  });
+});

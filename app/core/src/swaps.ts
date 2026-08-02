@@ -7,7 +7,7 @@
  */
 
 import type { ShiftCode } from './shifts.js';
-import { hours } from './shifts.js';
+import { entryHours, hours } from './shifts.js';
 import type { IsoDate } from './dates.js';
 
 export const SWAP_KINDS = ['Ho coperto', 'Mi ha coperto', 'Scambio pari'] as const;
@@ -27,6 +27,7 @@ export function isSwapKind(v: unknown): v is SwapKind {
 export interface DayRecord {
   readonly date: IsoDate;
   readonly code: ShiftCode;
+  readonly hoursOverride?: number | null;
   readonly originalCode?: ShiftCode | null;
   readonly colleague?: string | null;
   readonly swapKind?: string | null;
@@ -34,10 +35,14 @@ export interface DayRecord {
 }
 
 /** Hours actually worked minus hours originally rostered.
- *  Positive = worked more than planned, a credit towards the colleague. */
+ *  Positive = worked more than planned, a credit towards the colleague.
+ *
+ *  "Actually worked" means the override when there is one: that is the whole
+ *  point of overriding, and a credit computed from the shift's nominal hours
+ *  would contradict what the calendar shows for the same day. */
 export function hoursDelta(d: DayRecord): number {
   if (!d.originalCode) return 0;
-  return hours(d.code) - hours(d.originalCode);
+  return entryHours(d) - hours(d.originalCode);
 }
 
 export interface ColleagueBalance {

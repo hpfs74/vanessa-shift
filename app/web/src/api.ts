@@ -5,6 +5,7 @@ import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
 export interface RemoteShift {
   date: IsoDate;
   code: ShiftCode;
+  hoursOverride?: number | null;
   originalCode?: ShiftCode | null;
   colleague?: string | null;
   swapKind?: string | null;
@@ -54,6 +55,8 @@ export const api: Api = {
       method: 'PUT',
       body: JSON.stringify({
         code: shift.code,
+        // Zero is a real override, so '' only stands in for "none".
+        hoursOverride: shift.hoursOverride == null ? '' : shift.hoursOverride,
         originalCode: shift.originalCode ?? '',
         colleague: shift.colleague ?? '',
         swapKind: shift.swapKind ?? '',

@@ -106,6 +106,12 @@ button.wide { width: 100%; min-height: var(--tap); margin-top: 0.75rem; }
 .d-sunday { background: var(--sunday); }
 .d-holiday { background: var(--holiday); }
 .d-holiday .day-number { color: #b03030; }
+/* A day whose hours were set by hand: the dashed underline says "this cell
+   does not follow its shift", without stealing the colour that codes the shift. */
+.has-override .time {
+  font-style: italic; font-weight: 700; color: var(--navy);
+  text-decoration: underline dashed; text-underline-offset: 2px;
+}
 .is-today { box-shadow: inset 0 0 0 2px var(--navy); }
 .is-today .day-number {
   background: var(--navy); color: #fff; border-radius: 999px;

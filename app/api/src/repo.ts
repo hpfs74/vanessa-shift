@@ -16,6 +16,8 @@ import { EMPTY_PAY_SETTINGS, parseIso } from '@vanessa/core';
 export interface ShiftRecord {
   date: IsoDate;
   code: ShiftCode;
+  /** Hours actually worked, when they differed from the shift's own. */
+  hoursOverride?: number | null;
   originalCode?: ShiftCode | null;
   colleague?: string | null;
   swapKind?: string | null;
@@ -65,6 +67,8 @@ function itemOf(s: ShiftRecord): Record<string, unknown> {
     pk: shiftsPk(year),
     sk: s.date,
     code: s.code,
+    // Zero is a real override: check for null, not for falsiness.
+    ...(s.hoursOverride == null ? {} : { hoursOverride: s.hoursOverride }),
     ...(s.originalCode ? { originalCode: s.originalCode } : {}),
     ...(s.colleague ? { colleague: s.colleague } : {}),
     ...(s.swapKind ? { swapKind: s.swapKind } : {}),
@@ -93,6 +97,8 @@ export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo
             shifts.push({
               date: item.sk as IsoDate,
               code: item.code as ShiftCode,
+              hoursOverride:
+                typeof item.hoursOverride === 'number' ? item.hoursOverride : null,
               originalCode: (item.originalCode as ShiftCode | undefined) ?? null,
               colleague: (item.colleague as string | undefined) ?? null,
               swapKind: (item.swapKind as string | undefined) ?? null,

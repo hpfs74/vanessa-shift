@@ -38,6 +38,35 @@ export function hours(code: ShiftCode | undefined | null): number {
   return code ? shift(code).hours : 0;
 }
 
+/** A day as stored: the shift code, plus the hours actually worked when they
+ *  differed from the shift's own. */
+export interface DayEntry {
+  readonly code: ShiftCode;
+  readonly hoursOverride?: number | null;
+}
+
+/** Hours worked, honouring an override.
+ *
+ * Zero is a legitimate override — went in, sent home — so the check is for
+ * null, not for falsiness: `?? ` would silently discard a real 0. */
+export function entryHours(e: DayEntry | undefined | null): number {
+  if (!e) return 0;
+  return e.hoursOverride == null ? hours(e.code) : e.hoursOverride;
+}
+
+export function hasOverride(e: DayEntry | undefined | null): boolean {
+  return Boolean(e) && e!.hoursOverride != null && e!.hoursOverride !== hours(e!.code);
+}
+
+/** Half hours are the smallest unit worth typing; a day cannot exceed 24. */
+export const MAX_DAY_HOURS = 24;
+
+export function isValidHours(v: unknown): v is number {
+  return (
+    typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= MAX_DAY_HOURS
+  );
+}
+
 /** Readable time range, with a dash for days off. */
 export function timeRange(code: ShiftCode): string {
   const s = shift(code);

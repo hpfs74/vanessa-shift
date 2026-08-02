@@ -40,8 +40,19 @@ cd infra && npx cdk deploy --all --require-approval never
 | **Riepilogo** | turni per codice, giorni lavorati e ore per mese, con le barre. |
 | **Stipendio** | parametri e simulazione mensile. |
 
-Le ore **non si scrivono**: si derivano dal codice turno, come nel foglio. Una sola fonte
-di verità, nessun dato che può andare fuori sincrono con sé stesso.
+## Ore effettive
+
+Le ore si derivano dalla sigla del turno, ma ogni singolo giorno può essere corretto a mano:
+`M` vale 6 ore, e se quel giorno se ne sono fatte 4 si scrive 4. Il campo vuoto significa
+«come da contratto»; uno **zero** è una risposta vera (entrata e rimandata a casa), non un
+campo lasciato in bianco, e viene conservato come tale.
+
+Il giorno corretto a mano si riconosce nel calendario: al posto dell'orario compare il
+numero di ore, sottolineato tratteggiato. La correzione entra ovunque — ore della
+settimana, totali del mese, riepilogo, simulazione stipendio e differenza ore degli scambi.
+
+**Su questo l'app si discosta dal foglio Excel**, che deriva sempre le ore dalla sigla e non
+ha un campo per l'eccezione: sugli stessi dati i due possono dare totali diversi.
 
 ## Mobile first
 

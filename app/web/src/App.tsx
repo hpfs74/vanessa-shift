@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { DayRecord, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import type { DayEntry, DayRecord, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
 import {
   EMPTY_PAY_SETTINGS,
   MONTH_NAMES,
@@ -80,6 +80,17 @@ export function App({
     };
   }, [reload]);
 
+  // The views want the day as stored, not just its code: the hour override
+  // has to reach the calendar, the summary and the pay simulation alike.
+  const entries = useMemo(() => {
+    const m = new Map<IsoDate, DayEntry>();
+    for (const [date, s] of days) {
+      m.set(date, { code: s.code, hoursOverride: s.hoursOverride ?? null });
+    }
+    return m;
+  }, [days]);
+
+  /** The bulk screen only ever sets codes, so it compares codes. */
   const codes = useMemo(() => {
     const m = new Map<IsoDate, ShiftCode>();
     for (const [date, s] of days) m.set(date, s.code);
@@ -196,7 +207,7 @@ export function App({
               <Calendar
                 year={YEAR}
                 month={month}
-                shifts={codes}
+                shifts={entries}
                 swapped={new Set(records.filter((r) => r.originalCode).map((r) => r.date))}
                 today={today}
                 selected={editing}
@@ -217,9 +228,9 @@ export function App({
         )}
 
         {view === 'swaps' && <Swaps days={records} />}
-        {view === 'summary' && <Summary year={YEAR} shifts={codes} />}
+        {view === 'summary' && <Summary year={YEAR} shifts={entries} />}
         {view === 'pay' && (
-          <Pay year={YEAR} shifts={codes} settings={settings} onChange={changeSettings} />
+          <Pay year={YEAR} shifts={entries} settings={settings} onChange={changeSettings} />
         )}
       </main>
 

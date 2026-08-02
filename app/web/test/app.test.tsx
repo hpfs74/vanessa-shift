@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import type { DayEntry, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
 import { EMPTY_PAY_SETTINGS } from '@vanessa/core';
 
 import { App } from '../src/App.js';
@@ -67,9 +67,9 @@ describe('calendar layout', () => {
   });
 
   it('weekly hours sum only the days present', () => {
-    const shifts = new Map<IsoDate, ShiftCode>([
-      ['2026-01-01', 'M'],
-      ['2026-01-02', 'P1'],
+    const shifts = new Map<IsoDate, DayEntry>([
+      ['2026-01-01', { code: 'M' }],
+      ['2026-01-02', { code: 'P1' }],
     ]);
     expect(weekHours(weeksOfMonth(2026, 1)[0]!, shifts)).toBe(6 + 8);
     expect(weekHours([null, null, null], shifts)).toBe(0);
@@ -274,6 +274,123 @@ describe('day editor', () => {
     };
     render(<App api={api} today={JAN} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('API non disponibile');
+  });
+});
+
+describe('per-day hours', () => {
+  it('shows the shift hours as a placeholder, not as a value', async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi([{ date: '2026-01-05', code: 'M' }]).api} today={JAN} />);
+    await openDay(user, /^5 Gennaio, turno M$/);
+    const field = within(screen.getByRole('dialog')).getByLabelText(/Ore effettivamente/);
+    expect(field).toHaveValue(null);
+    expect(field).toHaveAttribute('placeholder', expect.stringContaining('6'));
+  });
+
+  it('saves the hours typed for that day', async () => {
+    const user = userEvent.setup();
+    const { api, saved } = fakeApi([{ date: '2026-01-05', code: 'M' }]);
+    render(<App api={api} today={JAN} />);
+
+    await openDay(user, /^5 Gennaio, turno M$/);
+    const sheet = screen.getByRole('dialog');
+    await user.type(within(sheet).getByLabelText(/Ore effettivamente/), '4.5');
+    await user.click(within(sheet).getByRole('button', { name: 'Salva' }));
+
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]).toMatchObject({ code: 'M', hoursOverride: 4.5 });
+  });
+
+  it('keeps a zero: went in and was sent home is not the same as untouched', async () => {
+    const user = userEvent.setup();
+    const { api, saved } = fakeApi([{ date: '2026-01-05', code: 'M' }]);
+    render(<App api={api} today={JAN} />);
+
+    await openDay(user, /^5 Gennaio, turno M$/);
+    const sheet = screen.getByRole('dialog');
+    await user.type(within(sheet).getByLabelText(/Ore effettivamente/), '0');
+    await user.click(within(sheet).getByRole('button', { name: 'Salva' }));
+
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]!.hoursOverride).toBe(0);
+  });
+
+  it('clearing the field goes back to the shift hours', async () => {
+    const user = userEvent.setup();
+    const { api, saved } = fakeApi([{ date: '2026-01-05', code: 'M', hoursOverride: 3 }]);
+    render(<App api={api} today={JAN} />);
+
+    await openDay(user, /^5 Gennaio, turno M, 3 ore$/);
+    const sheet = screen.getByRole('dialog');
+    await user.clear(within(sheet).getByLabelText(/Ore effettivamente/));
+    await user.click(within(sheet).getByRole('button', { name: 'Salva' }));
+
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]!.hoursOverride).toBeNull();
+  });
+
+  it('refuses hours a day cannot hold', async () => {
+    const user = userEvent.setup();
+    const { api, saved } = fakeApi([{ date: '2026-01-05', code: 'M' }]);
+    render(<App api={api} today={JAN} />);
+
+    await openDay(user, /^5 Gennaio, turno M$/);
+    const sheet = screen.getByRole('dialog');
+    await user.type(within(sheet).getByLabelText(/Ore effettivamente/), '30');
+    expect(within(sheet).getByRole('alert')).toHaveTextContent(/fra 0 e 24/);
+    expect(within(sheet).getByRole('button', { name: 'Salva' })).toBeDisabled();
+    expect(saved).toHaveLength(0);
+  });
+
+  it('marks the day in the grid and shows the real hours', async () => {
+    render(<App api={fakeApi([{ date: '2026-01-05', code: 'M', hoursOverride: 3 }]).api} today={JAN} />);
+    const cell = await screen.findByRole('button', { name: /^5 Gennaio, turno M, 3 ore$/ });
+    expect(cell.className).toContain('has-override');
+    expect(within(cell).getByText('3 ore')).toBeInTheDocument();
+  });
+
+  it('counts the override in the week, the month and the summary', async () => {
+    const user = userEvent.setup();
+    // 5 and 6 January are Monday and Tuesday of the same week; M is 6h each.
+    render(
+      <App
+        today={JAN}
+        api={
+          fakeApi([
+            { date: '2026-01-05', code: 'M', hoursOverride: 2 },
+            { date: '2026-01-06', code: 'M' },
+          ]).api
+        }
+      />,
+    );
+    const total = await screen.findByText(/giorni lavorati/);
+    expect(total).toHaveTextContent('8 ore · 2 giorni lavorati');
+
+    await user.click(
+      within(screen.getByRole('navigation', { name: 'Sezioni' })).getByRole('button', {
+        name: /Riepilogo/,
+      }),
+    );
+    expect(await screen.findByText(/8 ore/)).toBeInTheDocument();
+  });
+
+  it('uses the override for the swap hour difference', async () => {
+    const user = userEvent.setup();
+    // Rostered M (6h), covered P1 (8h) but actually worked 5.
+    render(
+      <App
+        today={JAN}
+        api={
+          fakeApi([
+            { date: '2026-01-05', code: 'P1', hoursOverride: 5, originalCode: 'M' },
+          ]).api
+        }
+      />,
+    );
+    await openDay(user, /^5 Gennaio, turno P1, 5 ore, scambiato$/);
+    const hint = within(screen.getByRole('dialog')).getByText(/Differenza ore/);
+    expect(hint).toHaveTextContent('-1');
+    expect(hint).toHaveTextContent(/meno del previsto/);
   });
 });
 

@@ -6,14 +6,9 @@
  * silently eroding them.
  */
 
-import { type ShiftCode, hours as shiftHours } from './shifts.js';
+import { type DayEntry, entryHours } from './shifts.js';
 import { type IsoDate, monthDays } from './dates.js';
 import { dayKind, italianHolidays } from './holidays.js';
-
-export interface Day {
-  readonly date: IsoDate;
-  readonly code?: ShiftCode | null;
-}
 
 export interface MonthHours {
   readonly ordinary: number;
@@ -41,11 +36,13 @@ export const EMPTY_PAY_SETTINGS: PaySettings = {
   netRatio: null,
 };
 
-/** Buckets a month's hours. `shifts` maps ISO date -> shift code. */
+/** Buckets a month's hours. `days` maps ISO date -> the day as stored.
+ *  Hours come from `entryHours`, so a per-day override is honoured here and
+ *  therefore in the pay simulation too. */
 export function monthHours(
   year: number,
   month: number,
-  shifts: ReadonlyMap<IsoDate, ShiftCode | null | undefined>,
+  days: ReadonlyMap<IsoDate, DayEntry | null | undefined>,
 ): MonthHours {
   const holidays = italianHolidays(year);
   let ordinary = 0;
@@ -54,7 +51,7 @@ export function monthHours(
   let holiday = 0;
 
   for (const d of monthDays(year, month)) {
-    const h = shiftHours(shifts.get(d));
+    const h = entryHours(days.get(d));
     if (h === 0) continue;
     switch (dayKind(d, holidays)) {
       case 'holiday':

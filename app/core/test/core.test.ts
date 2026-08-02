@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  type DayEntry,
   type IsoDate,
   type MonthHours,
   type ShiftCode,
@@ -9,7 +10,10 @@ import {
   dayKind,
   daysBetween,
   easter,
+  entryHours,
+  hasOverride,
   hours,
+  isValidHours,
   isIsoDate,
   isShiftCode,
   italianHolidays,
@@ -129,10 +133,10 @@ describe('holidays', () => {
 });
 
 /** Assigns a code to every day of the year, cycling through the worked ones. */
-function fullYear(year: number): Map<IsoDate, ShiftCode> {
+function fullYear(year: number): Map<IsoDate, DayEntry> {
   const worked: ShiftCode[] = ['M', 'M1', 'P', 'P1'];
-  const shifts = new Map<IsoDate, ShiftCode>();
-  yearDays(year).forEach((d, i) => shifts.set(d, worked[i % worked.length]));
+  const shifts = new Map<IsoDate, DayEntry>();
+  yearDays(year).forEach((d, i) => shifts.set(d, { code: worked[i % worked.length]! }));
   return shifts;
 }
 
@@ -148,7 +152,7 @@ describe('hour bucketing', () => {
       // Checked against an independent oracle, day by day.
       const expected = { weekday: 0, saturday: 0, sunday: 0, holiday: 0 };
       for (const d of monthDays(2026, month)) {
-        expected[dayKind(d, holidays)] += hours(shifts.get(d));
+        expected[dayKind(d, holidays)] += entryHours(shifts.get(d));
       }
       expect(h.ordinary).toBe(expected.weekday);
       expect(h.saturday).toBe(expected.saturday);
@@ -161,13 +165,13 @@ describe('hour bucketing', () => {
     const shifts = fullYear(2026);
     let sum = 0;
     for (let month = 1; month <= 12; month++) sum += monthHours(2026, month, shifts).total;
-    const all = yearDays(2026).reduce((acc, d) => acc + hours(shifts.get(d)), 0);
+    const all = yearDays(2026).reduce((acc, d) => acc + entryHours(shifts.get(d)), 0);
     expect(sum).toBe(all);
   });
 
   it('a Saturday holiday counts as a holiday, not as a Saturday', () => {
     // 25 April 2026 is a Saturday and a holiday.
-    const shifts = new Map<IsoDate, ShiftCode>([['2026-04-25', 'P1']]);
+    const shifts = new Map<IsoDate, DayEntry>([['2026-04-25', { code: 'P1' }]]);
     const h = monthHours(2026, 4, shifts);
     expect(h.holiday).toBe(8);
     expect(h.saturday).toBe(0);
@@ -176,14 +180,14 @@ describe('hour bucketing', () => {
 
   it('a Sunday holiday counts as a holiday, not as a Sunday', () => {
     // 1 November 2026 is a Sunday and a holiday.
-    const shifts = new Map<IsoDate, ShiftCode>([['2026-11-01', 'M']]);
+    const shifts = new Map<IsoDate, DayEntry>([['2026-11-01', { code: 'M' }]]);
     const h = monthHours(2026, 11, shifts);
     expect(h.holiday).toBe(6);
     expect(h.sunday).toBe(0);
   });
 
   it('days off and days never entered do not count', () => {
-    const shifts = new Map<IsoDate, ShiftCode>([['2026-01-05', 'L']]);
+    const shifts = new Map<IsoDate, DayEntry>([['2026-01-05', { code: 'L' }]]);
     expect(monthHours(2026, 1, shifts).total).toBe(0);
     expect(monthHours(2026, 1, new Map()).total).toBe(0);
   });
@@ -193,6 +197,63 @@ describe('hour bucketing', () => {
     const h = monthHours(2024, 2, shifts);
     expect(h.ordinary + h.saturday + h.sunday + h.holiday).toBe(h.total);
     expect(monthDays(2024, 2)).toHaveLength(29);
+  });
+});
+
+describe('per-day hour override', () => {
+  it('uses the shift hours when there is no override', () => {
+    expect(entryHours({ code: 'M' })).toBe(6);
+    expect(entryHours({ code: 'M', hoursOverride: null })).toBe(6);
+    expect(entryHours(undefined)).toBe(0);
+  });
+
+  it('uses the override when there is one', () => {
+    expect(entryHours({ code: 'M', hoursOverride: 4 })).toBe(4);
+    expect(entryHours({ code: 'M', hoursOverride: 8.5 })).toBe(8.5);
+  });
+
+  it('keeps a zero override instead of falling back to the shift hours', () => {
+    // Went in and was sent home: zero is a fact, not a missing value.
+    expect(entryHours({ code: 'M', hoursOverride: 0 })).toBe(0);
+  });
+
+  it('knows when a day genuinely differs from its shift', () => {
+    expect(hasOverride({ code: 'M', hoursOverride: 4 })).toBe(true);
+    expect(hasOverride({ code: 'M' })).toBe(false);
+    // An "override" equal to the shift's own hours is not a difference.
+    expect(hasOverride({ code: 'M', hoursOverride: 6 })).toBe(false);
+  });
+
+  it('accepts only hours a day can hold', () => {
+    for (const v of [0, 0.5, 6, 12, 24]) expect(isValidHours(v)).toBe(true);
+    for (const v of [-1, 24.5, 100, NaN, Infinity, '6', null, undefined]) {
+      expect(isValidHours(v)).toBe(false);
+    }
+  });
+
+  it('flows into the monthly buckets', () => {
+    const shifts = new Map<IsoDate, DayEntry>([
+      ['2026-01-05', { code: 'M', hoursOverride: 4 }], // Monday, 6h shift
+      ['2026-01-07', { code: 'M' }], // Wednesday, no override
+    ]);
+    const h = monthHours(2026, 1, shifts);
+    expect(h.ordinary).toBe(4 + 6);
+    expect(h.total).toBe(10);
+  });
+
+  it('flows into the right bucket on a holiday', () => {
+    // 25 April 2026 is a Saturday holiday: the override lands on holiday hours.
+    const shifts = new Map<IsoDate, DayEntry>([
+      ['2026-04-25', { code: 'P1', hoursOverride: 3 }],
+    ]);
+    const h = monthHours(2026, 4, shifts);
+    expect(h.holiday).toBe(3);
+    expect(h.saturday).toBe(0);
+  });
+
+  it('a zero override takes the day out of the worked days', () => {
+    const shifts = new Map<IsoDate, DayEntry>([['2026-01-05', { code: 'M', hoursOverride: 0 }]]);
+    expect(monthHours(2026, 1, shifts).total).toBe(0);
   });
 });
 

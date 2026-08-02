@@ -1,8 +1,8 @@
 /** Monthly summary: counts per code, worked days, total hours.
  *  Mirrors the Riepilogo sheet. */
 
-import type { ShiftCode } from './shifts.js';
-import { SHIFTS, hours } from './shifts.js';
+import type { DayEntry, ShiftCode } from './shifts.js';
+import { SHIFTS, entryHours } from './shifts.js';
 import type { IsoDate } from './dates.js';
 import { parseIso } from './dates.js';
 
@@ -18,7 +18,7 @@ const emptyPerCode = (): Record<ShiftCode, number> =>
 
 export function yearSummary(
   year: number,
-  shifts: ReadonlyMap<IsoDate, ShiftCode>,
+  days: ReadonlyMap<IsoDate, DayEntry>,
 ): MonthSummary[] {
   const months: MonthSummary[] = Array.from({ length: 12 }, (_, i) => ({
     month: i + 1,
@@ -27,7 +27,7 @@ export function yearSummary(
     totalHours: 0,
   }));
 
-  for (const [date, code] of shifts) {
+  for (const [date, entry] of days) {
     const { year: y, month } = parseIso(date);
     if (y !== year) continue;
     const m = months[month - 1]! as {
@@ -35,8 +35,8 @@ export function yearSummary(
       workedDays: number;
       totalHours: number;
     };
-    m.perCode[code] += 1;
-    const h = hours(code);
+    m.perCode[entry.code] += 1;
+    const h = entryHours(entry);
     if (h > 0) {
       m.workedDays += 1;
       m.totalHours += h;

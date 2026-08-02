@@ -10,6 +10,7 @@ import {
   optionalText,
   parseJson,
   requireDate,
+  requireHoursOverride,
   requirePaySettings,
   requireRange,
   requireShiftCode,
@@ -48,6 +49,7 @@ export function putShiftWith(repo: Repo) {
       const record = {
         date,
         code: requireShiftCode(b.code),
+        hoursOverride: requireHoursOverride(b.hoursOverride),
         originalCode:
           b.originalCode === null || b.originalCode === undefined || b.originalCode === ''
             ? null

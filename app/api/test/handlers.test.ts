@@ -188,6 +188,48 @@ describe('PUT /shifts/{date}', () => {
     }
   });
 
+  it('saves an hour override', async () => {
+    await putShiftWith(f.repo)(
+      event({
+        pathParameters: { date: '2026-01-05' },
+        body: JSON.stringify({ code: 'M', hoursOverride: 4.5 }),
+      }),
+    );
+    expect(f.shifts.get('2026-01-05')).toMatchObject({ code: 'M', hoursOverride: 4.5 });
+  });
+
+  it('keeps a zero override instead of treating it as absent', async () => {
+    await putShiftWith(f.repo)(
+      event({
+        pathParameters: { date: '2026-01-05' },
+        body: JSON.stringify({ code: 'M', hoursOverride: 0 }),
+      }),
+    );
+    expect(f.shifts.get('2026-01-05')!.hoursOverride).toBe(0);
+  });
+
+  it('an absent override stays null, so the shift hours apply', async () => {
+    await putShiftWith(f.repo)(
+      event({ pathParameters: { date: '2026-01-05' }, body: JSON.stringify({ code: 'M' }) }),
+    );
+    expect(f.shifts.get('2026-01-05')!.hoursOverride).toBeNull();
+  });
+
+  it('rejects hours a day cannot hold', async () => {
+    // NaN is not in this list on purpose: JSON.stringify turns it into null,
+    // which reaches the handler as "no override" and is legitimately accepted.
+    for (const v of [-1, 25, 'sei', true, []]) {
+      const r: any = await putShiftWith(f.repo)(
+        event({
+          pathParameters: { date: '2026-01-05' },
+          body: JSON.stringify({ code: 'M', hoursOverride: v }),
+        }),
+      );
+      expect(r.statusCode, String(v)).toBe(400);
+    }
+    expect(f.shifts.size).toBe(0);
+  });
+
   it('rejects an unknown swap kind', async () => {
     const r: any = await putShiftWith(f.repo)(
       event({

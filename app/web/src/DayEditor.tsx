@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 
 import type { IsoDate, ShiftCode } from '@vanessa/core';
-import { SHIFTS, SWAP_KINDS, hours, timeRange } from '@vanessa/core';
+import { MAX_DAY_HOURS, SHIFTS, SWAP_KINDS, hours, timeRange } from '@vanessa/core';
 
 import type { RemoteShift } from './api.js';
 
@@ -33,6 +33,9 @@ export function DayEditor({
   const [colleague, setColleague] = useState(shift?.colleague ?? '');
   const [swapKind, setSwapKind] = useState(shift?.swapKind ?? '');
   const [notes, setNotes] = useState(shift?.notes ?? '');
+  const [overrideText, setOverrideText] = useState(
+    shift?.hoursOverride == null ? '' : String(shift.hoursOverride),
+  );
   const [showSwap, setShowSwap] = useState(Boolean(shift?.originalCode || shift?.swapKind));
 
   useEffect(() => {
@@ -41,10 +44,20 @@ export function DayEditor({
     setColleague(shift?.colleague ?? '');
     setSwapKind(shift?.swapKind ?? '');
     setNotes(shift?.notes ?? '');
+    setOverrideText(shift?.hoursOverride == null ? '' : String(shift.hoursOverride));
     setShowSwap(Boolean(shift?.originalCode || shift?.swapKind));
   }, [shift, date]);
 
-  const delta = code && originalCode ? hours(code) - hours(originalCode) : null;
+  // An empty box means "no override": the shift's own hours apply. A typed 0
+  // is a real answer — went in, sent home — and must not read as empty.
+  const parsedOverride =
+    overrideText.trim() === '' ? null : Number(overrideText.replace(',', '.'));
+  const overrideValid =
+    parsedOverride === null ||
+    (Number.isFinite(parsedOverride) && parsedOverride >= 0 && parsedOverride <= MAX_DAY_HOURS);
+  const workedHours = code ? (parsedOverride ?? hours(code)) : null;
+  const delta =
+    code && originalCode ? (parsedOverride ?? hours(code)) - hours(originalCode) : null;
 
   return (
     <div className="sheet" role="dialog" aria-label={`Turno del ${date}`}>
@@ -75,7 +88,32 @@ export function DayEditor({
           </div>
           {code && (
             <p className="hint">
-              {hours(code)} ore · {timeRange(code)}
+              Da contratto: {hours(code)} ore · {timeRange(code)}
+            </p>
+          )}
+
+          <label>
+            <span>Ore effettivamente lavorate</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.5"
+              min={0}
+              max={MAX_DAY_HOURS}
+              value={overrideText}
+              placeholder={code ? `${hours(code)} (da contratto)` : ''}
+              onChange={(e) => setOverrideText(e.target.value)}
+            />
+          </label>
+          {!overrideValid && (
+            <p className="error" role="alert">
+              Le ore devono stare fra 0 e {MAX_DAY_HOURS}.
+            </p>
+          )}
+          {overrideValid && parsedOverride !== null && code && parsedOverride !== hours(code) && (
+            <p className="hint">
+              Questo giorno conta <strong>{workedHours} ore</strong> invece di {hours(code)}.
+              Lascia il campo vuoto per tornare alle ore del turno.
             </p>
           )}
         </fieldset>
@@ -165,12 +203,14 @@ export function DayEditor({
         <button
           type="button"
           className="primary"
-          disabled={!code}
+          disabled={!code || !overrideValid}
           onClick={() =>
             code &&
+            overrideValid &&
             onSave({
               date,
               code,
+              hoursOverride: parsedOverride,
               originalCode: originalCode || null,
               colleague: colleague.trim() || null,
               swapKind: swapKind || null,

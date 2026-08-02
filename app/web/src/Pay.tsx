@@ -3,12 +3,12 @@
  * All visible text stays in Italian: Vanessa reads it.
  */
 
-import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import type { DayEntry, IsoDate, PaySettings } from '@vanessa/core';
 import { MONTH_NAMES, monthHours, monthPay, sumPay } from '@vanessa/core';
 
 export interface PayProps {
   year: number;
-  shifts: ReadonlyMap<IsoDate, ShiftCode>;
+  shifts: ReadonlyMap<IsoDate, DayEntry>;
   settings: PaySettings;
   onChange: (p: PaySettings) => void;
 }

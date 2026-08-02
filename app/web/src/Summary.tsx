@@ -4,12 +4,12 @@
  * whole app for something a width percentage already says.
  */
 
-import type { IsoDate, ShiftCode } from '@vanessa/core';
+import type { DayEntry, IsoDate } from '@vanessa/core';
 import { MONTH_NAMES, SHIFTS, summaryTotals, yearSummary } from '@vanessa/core';
 
 export interface SummaryProps {
   year: number;
-  shifts: ReadonlyMap<IsoDate, ShiftCode>;
+  shifts: ReadonlyMap<IsoDate, DayEntry>;
 }
 
 export function Summary({ year, shifts }: SummaryProps) {

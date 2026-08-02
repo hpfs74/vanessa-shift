@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  type DayEntry,
   type IsoDate,
   type ShiftCode,
   parseSequence,
@@ -90,12 +91,12 @@ describe('planning the changes', () => {
 
 describe('year summary', () => {
   it('counts shifts per code, worked days and hours per month', () => {
-    const shifts = new Map<IsoDate, ShiftCode>([
-      ['2026-01-05', 'M'],
-      ['2026-01-06', 'M'],
-      ['2026-01-07', 'P1'],
-      ['2026-01-08', 'L'],
-      ['2026-02-02', 'M1'],
+    const shifts = new Map<IsoDate, DayEntry>([
+      ['2026-01-05', { code: 'M' }],
+      ['2026-01-06', { code: 'M' }],
+      ['2026-01-07', { code: 'P1' }],
+      ['2026-01-08', { code: 'L' }],
+      ['2026-02-02', { code: 'M1' }],
     ]);
     const months = yearSummary(2026, shifts);
     expect(months[0]!.perCode.M).toBe(2);
@@ -109,9 +110,9 @@ describe('year summary', () => {
   });
 
   it('ignores days belonging to another year', () => {
-    const shifts = new Map<IsoDate, ShiftCode>([
-      ['2026-01-05', 'M'],
-      ['2025-01-05', 'M'],
+    const shifts = new Map<IsoDate, DayEntry>([
+      ['2026-01-05', { code: 'M' }],
+      ['2025-01-05', { code: 'M' }],
     ]);
     expect(summaryTotals(yearSummary(2026, shifts)).workedDays).toBe(1);
   });
@@ -123,11 +124,31 @@ describe('year summary', () => {
     expect(summaryTotals(months).totalHours).toBe(0);
   });
 
+  it('counts the override, not the shift hours', () => {
+    const shifts = new Map<IsoDate, DayEntry>([
+      ['2026-01-05', { code: 'P1', hoursOverride: 2 }],
+    ]);
+    const t = summaryTotals(yearSummary(2026, shifts));
+    expect(t.totalHours).toBe(2);
+    expect(t.workedDays).toBe(1);
+    // The code counted is still P1: only the hours differ.
+    expect(t.perCode.P1).toBe(1);
+  });
+
+  it('a zero override stops the day counting as worked', () => {
+    const shifts = new Map<IsoDate, DayEntry>([
+      ['2026-01-05', { code: 'M', hoursOverride: 0 }],
+    ]);
+    const t = summaryTotals(yearSummary(2026, shifts));
+    expect(t.workedDays).toBe(0);
+    expect(t.totalHours).toBe(0);
+  });
+
   it('totals add the twelve months up', () => {
-    const shifts = new Map<IsoDate, ShiftCode>([
-      ['2026-01-05', 'M'],
-      ['2026-06-05', 'P1'],
-      ['2026-12-05', 'M1'],
+    const shifts = new Map<IsoDate, DayEntry>([
+      ['2026-01-05', { code: 'M' }],
+      ['2026-06-05', { code: 'P1' }],
+      ['2026-12-05', { code: 'M1' }],
     ]);
     const t = summaryTotals(yearSummary(2026, shifts));
     expect(t.workedDays).toBe(3);

@@ -9,7 +9,14 @@
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 
 import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
-import { daysBetween, isIsoDate, isShiftCode, isSwapKind } from '@vanessa/core';
+import {
+  MAX_DAY_HOURS,
+  daysBetween,
+  isIsoDate,
+  isShiftCode,
+  isSwapKind,
+  isValidHours,
+} from '@vanessa/core';
 
 export const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? 'https://vanessa.matteo.cool';
 
@@ -97,6 +104,14 @@ export function requirePaySettings(b: Record<string, unknown>): PaySettings {
     thirteenthAccrual: percentage(b.thirteenthAccrual, 'thirteenthAccrual'),
     netRatio: percentage(b.netRatio, 'netRatio'),
   };
+}
+
+export function requireHoursOverride(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  if (!isValidHours(v)) {
+    throw new InvalidInput(`hoursOverride: ore non valide, attese fra 0 e ${MAX_DAY_HOURS}`);
+  }
+  return v;
 }
 
 export function requireSwapKind(v: unknown): string | null {

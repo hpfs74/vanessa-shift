@@ -226,6 +226,7 @@ export function App({
             onMonthChange={setMonth}
             existing={codes}
             onSave={saveBulk}
+            onReadPhoto={api.readPhoto}
           />
         )}
 

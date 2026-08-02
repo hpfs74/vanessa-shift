@@ -35,7 +35,7 @@ cd infra && npx cdk deploy --all --require-approval never
 | Vista | Cosa fa |
 |-------|---------|
 | **Calendario** | griglia mensile, CRUD completo del giorno: turno, turno originale, collega, tipo di scambio, note. Il puntino accanto al codice segnala uno scambio. |
-| **Carica** | scegli il mese, scrivi la sequenza dei codici e riempi tutto in un colpo. Mostra quali giorni sovrascriverebbe **prima** di salvare. |
+| **Carica** | leggi il mese da una foto del foglio, oppure scrivi la sequenza dei codici. In entrambi i casi mostra quali giorni sovrascriverebbe **prima** di salvare. |
 | **Scambi** | saldo favori e saldo ore per collega, come il foglio Scambi. |
 | **Riepilogo** | due grafici ad anello (ore per turno, giorni per codice), ore per mese a barre, tabella per codice. |
 | **Stipendio** | parametri e simulazione mensile. |
@@ -79,6 +79,42 @@ L'app si usa dal telefono. Navigazione in basso dove arriva il pollice, target d
 44px, i pannelli di modifica salgono dal basso, gli input a 16px perché Safari iOS non
 faccia lo zoom quando prendono il fuoco, e le tabelle scorrono da sole invece di far
 scorrere la pagina in orizzontale.
+
+## Import da foto
+
+Vanessa fotografa il foglio affisso in reparto e l'app ne legge la sua riga.
+La foto viene ridimensionata sul telefono a 2576px di lato lungo — il massimo
+che il modello usa comunque — e spedita a una Lambda che chiede a Claude Opus 5
+su Bedrock quali sigle ci sono nella riga intestata a Vanessa.
+
+L'endpoint di lettura **non scrive nessun turno**: restituisce una griglia, che
+si corregge a schermo e si salva con la stessa rotta della sequenza scritta a
+mano, revisione compresa. I giorni senza codice — le `x` di un mese iniziato a
+metà — non si salvano e non cancellano niente.
+
+Sta dietro una **Lambda Function URL** e non dietro API Gateway, che tronca
+l'integrazione a 30 secondi: una lettura ne può prendere di più. L'indirizzo è
+l'output `PhotoUrl` dello stack e va in `web/.env.production` come
+`VITE_PHOTO_URL` prima di ricompilare il frontend. Finché è vuoto il pulsante lo
+dice — «la lettura da foto non è configurata su questa installazione» — invece di
+chiamare un indirizzo che non esiste e mostrare l'errore del browser.
+
+Ogni lettura costa circa 0,09 €, su un'API che resta aperta. Le difese sono un
+**tetto di 10 letture al giorno** (contatore su DynamoDB, condizione e
+incremento nella stessa operazione), la concorrenza riservata a 2, e il rifiuto
+dei corpi oltre 2 MB. Il contatore si consuma **prima** della chiamata e non si
+restituisce se la chiamata fallisce: altrimenti basta far fallire la lettura per
+avere tentativi gratis.
+
+Le foto di prova non stanno nel repository — è pubblico, e riportano nome e
+cognome di quattordici colleghe accanto ai loro turni. Il test che le usa si
+salta da solo:
+
+```bash
+PROVA_BEDROCK=1 FOTO_LUGLIO=~/vanessa-foto/luglio.jpeg \
+  FOTO_AGOSTO=~/vanessa-foto/agosto.jpeg \
+  npx vitest run --root api api/test/vision.integration.test.ts
+```
 
 ## Risorse AWS
 

@@ -33,6 +33,9 @@ function fakeApi(initial: RemoteShift[] = [], settings: PaySettings = EMPTY_PAY_
     savePaySettings: async (p) => {
       current = p;
     },
+    readPhoto: async () => {
+      throw new Error('not used in these tests');
+    },
   };
   return { api, saved, deleted, bulk, settings: () => current };
 }
@@ -541,6 +544,7 @@ describe('while the data is still loading', () => {
       saveShifts: never,
       paySettings: never,
       savePaySettings: never,
+      readPhoto: never,
     };
   }
 

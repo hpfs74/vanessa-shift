@@ -2,21 +2,34 @@
 
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 
+import {
+  InvalidReading,
+  MAX_READINGS_PER_DAY,
+  RowNotFound,
+  romeToday,
+  validateReading,
+} from '@vanessa/core';
+import type { IsoDate } from '@vanessa/core';
+
 import type { Repo } from './repo.js';
 import { createRepo } from './repo.js';
 import {
+  failure,
   handle,
   ok,
   optionalText,
   parseJson,
   requireDate,
   requireHoursOverride,
+  requireImage,
   requirePaySettings,
   requireRange,
   requireShiftCode,
   requireShiftList,
   requireSwapKind,
 } from './http.js';
+import type { Vision } from './vision.js';
+import { VisionFailed, createVision } from './vision.js';
 
 function repoFromEnvironment(): Repo {
   const table = process.env.TABLE_NAME;
@@ -87,9 +100,79 @@ export function putConfigWith(repo: Repo) {
     });
 }
 
+/** Two causes, one way out: the photo could not be read, or what came back
+ *  did not respect the schema. Neither is fixed by waiting a minute. */
+const UNREADABLE =
+  'Non sono riuscito a leggere questo foglio. Prova con piu luce, o scrivi i codici a mano.';
+
+/** Reads a photo of the sheet and returns what's written on it.
+ *
+ * The order of the three steps is the defense: the huge is rejected before
+ * spending anything, the quota is consumed before calling the model, and the
+ * quota is NOT refunded if the model fails — otherwise anyone abusing it gets
+ * free attempts by making the reading fail on purpose.
+ *
+ * It writes no shift: saving stays on PUT /shifts, which already has the
+ * review of what would be overwritten.
+ */
+export function readPhotoWith(
+  repo: Repo,
+  vision: Vision,
+  today: () => IsoDate = romeToday,
+  year: () => number = () => new Date().getFullYear(),
+) {
+  return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
+    handle(async () => {
+      const image = requireImage(parseJson(event.body).image);
+
+      if (!(await repo.consumePhotoQuota(today(), MAX_READINGS_PER_DAY))) {
+        return failure(
+          429,
+          `Hai gia' usato le ${MAX_READINGS_PER_DAY} letture di oggi. Riprova domani, oppure scrivi i codici a mano.`,
+        );
+      }
+
+      let raw: unknown;
+      try {
+        raw = await vision(image);
+      } catch (e) {
+        // A VisionFailed means the model answered, and the answer is unusable:
+        // a refusal, a truncation, no text, or text that is not JSON. Retrying
+        // reproduces it exactly, at the cost of another reading — so the way
+        // out is the one that doesn't need the service.
+        if (e instanceof VisionFailed) {
+          console.error('photo reading failed', e.reason, e.message);
+          return failure(422, UNREADABLE);
+        }
+        // Anything else came from Bedrock itself: an outage, a throttle, a
+        // timeout. That is the failure "try again in a minute" was written for.
+        console.error('the model call failed', e);
+        return failure(502, 'Il servizio non risponde. Riprova fra un minuto.');
+      }
+
+      try {
+        return ok({ reading: validateReading(raw, year()) });
+      } catch (e) {
+        if (e instanceof RowNotFound) {
+          return failure(
+            422,
+            'Non ho trovato la riga di Vanessa in questa foto. Controlla che si veda tutta la riga, dal nome fino all ultimo giorno.',
+          );
+        }
+        if (e instanceof InvalidReading) {
+          console.error('invalid reading', e.message);
+          return failure(422, UNREADABLE);
+        }
+        throw e;
+      }
+    });
+}
+
 // Production Lambda entry points.
 export const getShifts = (e: APIGatewayProxyEventV2) => getShiftsWith(repoFromEnvironment())(e);
 export const putShift = (e: APIGatewayProxyEventV2) => putShiftWith(repoFromEnvironment())(e);
 export const putShifts = (e: APIGatewayProxyEventV2) => putShiftsWith(repoFromEnvironment())(e);
 export const getConfig = (e: APIGatewayProxyEventV2) => getConfigWith(repoFromEnvironment())(e);
 export const putConfig = (e: APIGatewayProxyEventV2) => putConfigWith(repoFromEnvironment())(e);
+export const readPhoto = (e: APIGatewayProxyEventV2) =>
+  readPhotoWith(repoFromEnvironment(), createVision())(e);

@@ -24,7 +24,7 @@ const HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-origin': ALLOWED_ORIGIN,
   'access-control-allow-headers': 'content-type',
-  'access-control-allow-methods': 'GET,PUT,OPTIONS',
+  'access-control-allow-methods': 'GET,POST,PUT,OPTIONS',
   'cache-control': 'no-store',
 };
 
@@ -157,11 +157,29 @@ export function optionalText(v: unknown, field: string, max = 200): string | nul
   return v;
 }
 
+/** Two megabytes. A properly resized image weighs less than one: past this
+ *  threshold there's nothing to read, only money to spend. */
+export const MAX_BODY_BYTES = 2 * 1024 * 1024;
+
+/** The body is too large: 413, and the request stops before it costs anything. */
+export class TooLarge extends Error {}
+
+export function requireImage(v: unknown): string {
+  if (typeof v !== 'string' || v.length === 0) {
+    throw new InvalidInput('image: attesa l immagine in base64');
+  }
+  // The base64 length is an over-estimate of the bytes: that's fine, the
+  // check is meant to stop the huge, not to measure the exact.
+  if (v.length > MAX_BODY_BYTES) throw new TooLarge('image: immagine troppo grande');
+  return v;
+}
+
 /** Wraps a handler: InvalidInput becomes 400, everything else a bare 500. */
 export function handle(
   fn: () => Promise<APIGatewayProxyResultV2>,
 ): Promise<APIGatewayProxyResultV2> {
   return fn().catch((e: unknown) => {
+    if (e instanceof TooLarge) return failure(413, e.message);
     if (e instanceof InvalidInput) return failure(400, e.message);
     console.error('unhandled error', e);
     return failure(500, 'errore interno');

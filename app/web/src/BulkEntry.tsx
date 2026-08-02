@@ -1,13 +1,17 @@
 /** Bulk entry: pick a month, paste a sequence of codes, review, save.
  *
  * The review step is not decoration. Pasting a sequence overwrites a whole
- * month in one action, and there is no undo.
+ * month in one action, and there is no undo — so it lives in
+ * SavePlan, shared with the photo import.
  */
 
 import { useMemo, useState } from 'react';
 
 import type { IsoDate, ShiftCode } from '@vanessa/core';
-import { MONTH_NAMES, parseSequence, planChanges } from '@vanessa/core';
+import { MONTH_NAMES, parseSequence } from '@vanessa/core';
+
+import { PhotoImport } from './PhotoImport.js';
+import { SavePlan } from './SavePlan.js';
 
 export interface BulkEntryProps {
   year: number;
@@ -15,6 +19,7 @@ export interface BulkEntryProps {
   onMonthChange: (m: number) => void;
   existing: ReadonlyMap<IsoDate, ShiftCode>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
+  onReadPhoto: (image: string) => Promise<import('@vanessa/core').PhotoReading>;
 }
 
 export function BulkEntry({
@@ -23,33 +28,21 @@ export function BulkEntry({
   onMonthChange,
   existing,
   onSave,
+  onReadPhoto,
 }: BulkEntryProps) {
   const [text, setText] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [done, setDone] = useState<number | null>(null);
+  const [savedCount, setSavedCount] = useState<number | null>(null);
 
   const parsed = useMemo(() => parseSequence(year, month, text), [year, month, text]);
-  const plan = useMemo(() => planChanges(parsed.entries, existing), [parsed, existing]);
-
-  const changed = plan.filter((c) => c.kind === 'changed');
-  const created = plan.filter((c) => c.kind === 'new');
   const blocked = parsed.unknown.length > 0 || parsed.tooMany;
-
-  const save = async () => {
-    setSaving(true);
-    setDone(null);
-    try {
-      await onSave(parsed.entries.map(({ date, code }) => ({ date, code })));
-      setDone(parsed.entries.length);
-      setText('');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   return (
     <section className="bulk">
       <h2>Caricamento rapido</h2>
+
+      <PhotoImport year={year} existing={existing} onRead={onReadPhoto} onSave={onSave} />
+
+      <p className="note">oppure scrivi i codici a mano:</p>
       <p className="note">
         Scegli il mese e scrivi i codici in fila, uno per giorno a partire dal primo.
         Vanno bene virgole, spazi o a capo. Maiuscole e minuscole sono uguali.
@@ -57,7 +50,13 @@ export function BulkEntry({
 
       <label>
         <span>Mese</span>
-        <select value={month} onChange={(e) => onMonthChange(Number(e.target.value))}>
+        <select
+          value={month}
+          onChange={(e) => {
+            onMonthChange(Number(e.target.value));
+            setSavedCount(null);
+          }}
+        >
           {MONTH_NAMES.map((name, i) => (
             <option key={name} value={i + 1}>
               {name} {year}
@@ -77,7 +76,7 @@ export function BulkEntry({
           spellCheck={false}
           onChange={(e) => {
             setText(e.target.value);
-            setDone(null);
+            setSavedCount(null);
           }}
         />
       </label>
@@ -97,49 +96,18 @@ export function BulkEntry({
         </p>
       )}
 
-      {done !== null && (
-        <p className="ok" role="status">
-          Salvati {done} giorni di {MONTH_NAMES[month - 1]}.
-        </p>
-      )}
-
-      {plan.length > 0 && !blocked && (
-        <>
-          <p className="summary-line">
-            <strong>{created.length}</strong> giorni nuovi ·{' '}
-            <strong>{changed.length}</strong> da sovrascrivere ·{' '}
-            {plan.length - created.length - changed.length} già così
-          </p>
-
-          {changed.length > 0 && (
-            <div className="scroll-wrap">
-              <table>
-                <caption>Giorni che verrebbero sovrascritti</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Giorno</th>
-                    <th scope="col">Ora</th>
-                    <th scope="col">Diventa</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {changed.map((c) => (
-                    <tr key={c.date}>
-                      <th scope="row">{c.day}</th>
-                      <td>{c.previous}</td>
-                      <td>{c.code}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <button type="button" className="primary wide" disabled={saving} onClick={() => void save()}>
-            {saving ? 'Salvo…' : `Salva ${plan.length} giorni`}
-          </button>
-        </>
-      )}
+      <SavePlan
+        entries={parsed.entries}
+        existing={existing}
+        month={month}
+        blocked={blocked}
+        savedCount={savedCount}
+        onSave={onSave}
+        onSaved={(count) => {
+          setText('');
+          setSavedCount(count);
+        }}
+      />
     </section>
   );
 }

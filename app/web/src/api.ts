@@ -1,6 +1,6 @@
 /** The only place that talks to the network. */
 
-import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import type { PhotoReading, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
 
 export interface RemoteShift {
   date: IsoDate;
@@ -13,6 +13,15 @@ export interface RemoteShift {
 }
 
 export const API_URL: string = import.meta.env.VITE_API_URL ?? '';
+
+/** Photo reading lives on its own Function URL: API Gateway truncates the
+ *  integration at 30 seconds, and a reading can take longer than that. */
+export const PHOTO_URL: string = import.meta.env.VITE_PHOTO_URL ?? '';
+
+/** The reading never left, or never came back whole. Every message on this
+ *  path ends with a way out: the textarea is always one tap away. */
+const UNREACHABLE =
+  'Non sono riuscito a contattare il servizio. Controlla la connessione, oppure scrivi i codici a mano.';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${API_URL}${path}`, {
@@ -41,6 +50,7 @@ export interface Api {
   saveShifts(shifts: readonly { date: IsoDate; code: ShiftCode }[]): Promise<void>;
   paySettings(): Promise<PaySettings>;
   savePaySettings(p: PaySettings): Promise<void>;
+  readPhoto(image: string): Promise<PhotoReading>;
 }
 
 export const api: Api = {
@@ -79,5 +89,49 @@ export const api: Api = {
   },
   async savePaySettings(p) {
     await request('/config', { method: 'PUT', body: JSON.stringify(p) });
+  },
+  async readPhoto(image) {
+    // The address is filled in after the stack is deployed. Left empty, `fetch`
+    // would call the page itself and fail with something meaningless.
+    if (!PHOTO_URL) {
+      throw new Error(
+        'La lettura da foto non è configurata su questa installazione. Scrivi i codici a mano.',
+      );
+    }
+
+    let r: Response;
+    try {
+      r = await fetch(PHOTO_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ image }),
+      });
+    } catch {
+      // The reading takes up to two minutes, from a phone: a timeout or a lost
+      // connection is not the rare case. `fetch` rejects with the browser's own
+      // message — English, and with no way out.
+      throw new Error(UNREACHABLE);
+    }
+
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      let message = `lettura fallita (${r.status})`;
+      try {
+        const j = JSON.parse(text) as { errore?: string };
+        if (j.errore) message = j.errore;
+      } catch {
+        /* the body wasn't JSON: the generic message stays */
+      }
+      throw new Error(message);
+    }
+
+    try {
+      const j = (await r.json()) as { reading: PhotoReading };
+      return j.reading;
+    } catch {
+      // A body that stops halfway, or that isn't the JSON expected: from here
+      // it's the same failure as never having arrived.
+      throw new Error(UNREACHABLE);
+    }
   },
 };

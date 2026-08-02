@@ -5,3 +5,4 @@ export * from './pay.js';
 export * from './swaps.js';
 export * from './summary.js';
 export * from './bulk.js';
+export * from './photo.js';

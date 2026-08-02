@@ -16,6 +16,7 @@ import type { Repo, ShiftRecord } from '../src/repo.js';
 /** In-memory repo: the tests never touch the network. */
 function fakeRepo() {
   const shifts = new Map<string, ShiftRecord>();
+  const quota = new Map<string, number>();
   let pay = EMPTY_PAY_SETTINGS;
   const calls: string[] = [];
 
@@ -46,8 +47,15 @@ function fakeRepo() {
       calls.push('savePaySettings');
       pay = p;
     },
+    async consumePhotoQuota(date, max) {
+      calls.push(`consumePhotoQuota(${date},${max})`);
+      const used = (quota.get(date) ?? 0) + 1;
+      if (used > max) return false;
+      quota.set(date, used);
+      return true;
+    },
   };
-  return { repo, shifts, calls, pay: () => pay };
+  return { repo, shifts, quota, calls, pay: () => pay };
 }
 
 function event(p: Partial<APIGatewayProxyEventV2>): APIGatewayProxyEventV2 {
@@ -407,5 +415,199 @@ describe('responses', () => {
     const r: any = await getConfigWith(broken)();
     expect(r.statusCode).toBe(500);
     expect(String(r.body)).not.toMatch(/arn:aws/);
+  });
+});
+
+import { readPhotoWith } from '../src/handlers.js';
+import { VisionFailed } from '../src/vision.js';
+
+/** A valid August reading, with a single shift on the first of the month. */
+function augustReading() {
+  return {
+    month: 8,
+    year: 2026,
+    found: true,
+    foundName: 'Vanessa',
+    foundRow: 12,
+    days: Array.from({ length: 31 }, (_, i) => ({
+      day: i + 1,
+      code: i === 0 ? 'L' : null,
+      confident: true,
+    })),
+  };
+}
+
+function photoEvent(image: string) {
+  return event({ body: JSON.stringify({ image }) });
+}
+
+describe('readPhoto', () => {
+  const today = () => '2026-08-02';
+  const year = () => 2026;
+
+  it('reads the photo and returns the reading', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(repo, async () => augustReading(), today, year);
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(200);
+    expect(body(r).reading.days).toHaveLength(31);
+    expect(body(r).reading.month).toBe(8);
+  });
+
+  it('writes no shift', async () => {
+    const { repo, shifts } = fakeRepo();
+    const h = readPhotoWith(repo, async () => augustReading(), today, year);
+
+    await h(photoEvent('AAAA'));
+    expect(shifts.size).toBe(0);
+  });
+
+  it('past the cap it responds 429 without calling the model', async () => {
+    const { repo } = fakeRepo();
+    let calls = 0;
+    const h = readPhotoWith(
+      repo,
+      async () => {
+        calls += 1;
+        return augustReading();
+      },
+      today,
+      year,
+    );
+
+    for (let i = 0; i < 10; i++) {
+      const allowed: any = await h(photoEvent('AAAA'));
+      expect(allowed.statusCode).toBe(200);
+    }
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(429);
+    expect(calls).toBe(10);
+  });
+
+  it('an oversized body is 413, touching neither quota nor model', async () => {
+    const { repo, calls } = fakeRepo();
+    let readCalls = 0;
+    const h = readPhotoWith(
+      repo,
+      async () => {
+        readCalls += 1;
+        return augustReading();
+      },
+      today,
+      year,
+    );
+
+    const r: any = await h(photoEvent('A'.repeat(2 * 1024 * 1024 + 1)));
+    expect(r.statusCode).toBe(413);
+    expect(readCalls).toBe(0);
+    expect(calls.filter((c) => c.startsWith('consumePhotoQuota'))).toEqual([]);
+  });
+
+  it('when the model fails the quota stays spent', async () => {
+    const { repo, quota } = fakeRepo();
+    const h = readPhotoWith(
+      repo,
+      async () => {
+        throw new VisionFailed('boom', 'not-json');
+      },
+      today,
+      year,
+    );
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(422);
+    // Otherwise anyone abusing it gets free attempts by making the reading fail.
+    expect(quota.get('2026-08-02')).toBe(1);
+  });
+
+  // The model answered, and the answer is unusable. "Try again in a minute"
+  // would be a lie that costs another reading: all four causes reproduce.
+  it.each(['refusal', 'truncated', 'no-text', 'not-json'] as const)(
+    'an unusable answer (%s) is 422 with the way out, not 502',
+    async (reason) => {
+      const { repo } = fakeRepo();
+      const h = readPhotoWith(
+        repo,
+        async () => {
+          throw new VisionFailed('boom', reason);
+        },
+        today,
+        year,
+      );
+
+      const r: any = await h(photoEvent('AAAA'));
+      expect(r.statusCode).toBe(422);
+      expect(body(r).errore).toContain('leggere questo foglio');
+      expect(body(r).errore).toContain('a mano');
+    },
+  );
+
+  // A Bedrock outage or throttle raises an SDK error, not a VisionFailed. That
+  // is the one failure "Il servizio non risponde" was written for; it used to
+  // fall through to a bare 500.
+  it('a failure of the service itself is 502, not an internal error', async () => {
+    const { repo, quota } = fakeRepo();
+    const h = readPhotoWith(
+      repo,
+      async () => {
+        const e = new Error('ThrottlingException: Too many requests');
+        e.name = 'ThrottlingException';
+        throw e;
+      },
+      today,
+      year,
+    );
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(502);
+    expect(body(r).errore).toContain('Riprova fra un minuto');
+    expect(quota.get('2026-08-02')).toBe(1);
+  });
+
+  it('does not leak the service failure to the screen', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(
+      repo,
+      async () => {
+        throw new Error('AccessDeniedException on arn:aws:bedrock:eu-south-1::foundation-model');
+      },
+      today,
+      year,
+    );
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(String(r.body)).not.toMatch(/arn:aws/);
+  });
+
+  it('a reading that fails validation is 422, not 500', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(repo, async () => ({ found: true, month: 99 }), today, year);
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(422);
+    expect(body(r).errore).toContain('leggere');
+  });
+
+  it('row not found has its own message', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(
+      repo,
+      async () => ({ ...augustReading(), found: false, foundName: null, foundRow: null }),
+      today,
+      year,
+    );
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(422);
+    expect(body(r).errore).toContain('Vanessa');
+  });
+
+  it('without an image it is 400', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(repo, async () => augustReading(), today, year);
+
+    const r: any = await h(event({ body: JSON.stringify({}) }));
+    expect(r.statusCode).toBe(400);
   });
 });

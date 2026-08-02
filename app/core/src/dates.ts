@@ -90,6 +90,15 @@ export function today(now: Date = new Date()): IsoDate {
   return toIso(now.getFullYear(), now.getMonth() + 1, now.getDate());
 }
 
+/** The Italian civil date.
+ *
+ * The Lambda runs in UTC, where the day changes at one or two in the morning
+ * Italian time: a daily counter hung on UTC would reset while here it is
+ * still yesterday. 'sv-SE' is the shortcut for getting YYYY-MM-DD. */
+export function romeToday(now: Date = new Date()): IsoDate {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(now);
+}
+
 /** Displayed to the user, hence Italian. */
 export const MONTH_NAMES = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',

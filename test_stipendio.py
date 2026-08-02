@@ -1,10 +1,18 @@
 """Test del foglio Stipendio."""
 
 import re
+import shutil
+import subprocess
+import sys
 from datetime import date, timedelta
 
+import pytest
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+
 import comune
-from conftest import ANNO
+import stipendio
+from conftest import ANNO, RADICE
 
 MESI_RIGHE = {m: 16 + i for i, m in enumerate(comune.MESI)}
 
@@ -129,20 +137,35 @@ def test_gli_importi_restano_vuoti_finche_manca_la_tariffa(wb):
     r = MESI_RIGHE["Gennaio"]
     assert ws.cell(row=r, column=6).value == (
         f'=IF($B$5="","",(B{r}+C{r}+D{r}+E{r})*$B$5)')
-    assert ws.cell(row=r, column=7).value == f'=IF($B$5="","",C{r}*$B$5*$B$6)'
-    assert ws.cell(row=r, column=8).value == f'=IF($B$5="","",D{r}*$B$5*$B$7)'
-    assert ws.cell(row=r, column=9).value == f'=IF($B$5="","",E{r}*$B$5*$B$8)'
+    assert ws.cell(row=r, column=7).value == (
+        f'=IF(OR($B$5="",$B$6=""),"",C{r}*$B$5*$B$6)')
+    assert ws.cell(row=r, column=8).value == (
+        f'=IF(OR($B$5="",$B$7=""),"",D{r}*$B$5*$B$7)')
+    assert ws.cell(row=r, column=9).value == (
+        f'=IF(OR($B$5="",$B$8=""),"",E{r}*$B$5*$B$8)')
     assert ws.cell(row=r, column=10).value == (
-        f'=IF($B$5="","",(F{r}+G{r}+H{r}+I{r})*$B$9)')
+        f'=IF(OR(G{r}="",H{r}="",I{r}="",$B$9=""),"",(F{r}+G{r}+H{r}+I{r})*$B$9)')
     assert ws.cell(row=r, column=11).value == (
-        f'=IF($B$5="","",F{r}+G{r}+H{r}+I{r}+J{r})')
+        f'=IF(J{r}="","",F{r}+G{r}+H{r}+I{r}+J{r})')
 
 
 def test_il_netto_richiede_anche_il_coefficiente(wb):
     ws = wb["Stipendio"]
     r = MESI_RIGHE["Gennaio"]
     assert ws.cell(row=r, column=12).value == (
-        f'=IF(OR($B$5="",$B$10=""),"",K{r}*$B$10)')
+        f'=IF(OR(K{r}="",$B$10=""),"",K{r}*$B$10)')
+
+
+def test_il_totale_anno_resta_vuoto_finche_manca_la_tariffa(wb):
+    # Trovato in revisione: SUM() ignora le celle di testo "" e restituirebbe
+    # 0 sull'intera riga TOTALE ANNO quando il foglio non e' ancora
+    # configurato, cioe' la stessa cifra fuorviante che il design vuole
+    # evitare, spostata dalla singola cella al totale annuo.
+    ws = wb["Stipendio"]
+    for col in range(6, 13):
+        L = get_column_letter(col)
+        assert ws.cell(row=28, column=col).value == (
+            f'=IF({L}16="","",SUM({L}16:{L}27))'), col
 
 
 def test_formato_euro_sugli_importi(wb):
@@ -163,6 +186,122 @@ def test_nota_sui_limiti(wb):
     testi = [ws.cell(row=r, column=1).value for r in range(1, 15)]
     assert any(isinstance(t, str) and "straordinari" in t for t in testi)
     assert any(isinstance(t, str) and "busta paga" in t for t in testi)
+
+
+# --- Ricalcolo vero con LibreOffice --------------------------------------
+# I test sopra confrontano solo le stringhe delle formule: e' cosi' che il
+# difetto del totale annuo (SUM ignora il testo vuoto e restituisce 0) e'
+# passato inosservato in revisione. Qui si aprono davvero i numeri.
+SOFFICE = shutil.which("soffice")
+
+
+def _genera_stipendio_per_ricalcolo(tmp_path, nome, parametri, ore_uniformi=None):
+    """Genera un workbook fresco e vi scrive valori letterali nelle celle
+    verdi dei parametri e, se richiesto, nelle ore di ogni mese.
+
+    Le ore di ogni riga mensile vengono sovrascritte con lo stesso quartetto
+    di numeri letterali (non piu' formule) apposta: isola l'aritmetica delle
+    colonne in euro, oggetto di questo test, da un problema distinto e
+    preesistente non toccato in questo giro di correzioni, per cui a foglio
+    Presenze vuoto la colonna "Ore festive" (somma diretta di celle
+    Presenze!$E$n che sono ancora testo vuoto) produce #VALUE!.
+    """
+    out = tmp_path / f"{nome}.xlsx"
+    subprocess.run(
+        [sys.executable, "genera_presenze.py", str(ANNO), str(out)],
+        cwd=RADICE, check=True, capture_output=True, timeout=60,
+    )
+    wb = load_workbook(out)
+    ws = wb["Stipendio"]
+    for cella, valore in parametri.items():
+        ws[cella] = valore
+    if ore_uniformi is not None:
+        ordinarie, sab, dom, fest = ore_uniformi
+        for r in range(stipendio.RIGA_PRIMO_MESE, stipendio.RIGA_TOTALE):
+            ws.cell(row=r, column=2, value=ordinarie)
+            ws.cell(row=r, column=3, value=sab)
+            ws.cell(row=r, column=4, value=dom)
+            ws.cell(row=r, column=5, value=fest)
+    wb.save(out)
+    return out
+
+
+def _ricalcola_con_soffice(path, tmp_path):
+    """Converte con LibreOffice headless (che ricalcola le formule) e
+    ricarica il risultato con data_only=True: le celle hanno il valore
+    calcolato, non piu' la formula."""
+    convertiti = tmp_path / "convertiti"
+    convertiti.mkdir(exist_ok=True)
+    subprocess.run(
+        ["soffice", "--headless", "--convert-to", "xlsx",
+         "--outdir", str(convertiti), str(path)],
+        check=True, capture_output=True, timeout=120,
+    )
+    return load_workbook(convertiti / path.name, data_only=True)
+
+
+@pytest.mark.skipif(
+    SOFFICE is None,
+    reason="LibreOffice (soffice) non e' sul PATH: serve a ricalcolare le formule.")
+def test_i_valori_in_euro_sono_corretti_dopo_il_ricalcolo(tmp_path):
+    ws_col = list(range(6, 13))  # F..L
+
+    # (a) Foglio del tutto non configurato: mesi e totale annuo restano
+    # vuoti in ogni colonna in euro, non zero.
+    p_vuoto = _genera_stipendio_per_ricalcolo(tmp_path, "vuoto", {})
+    wb_vuoto = _ricalcola_con_soffice(p_vuoto, tmp_path)
+    ws = wb_vuoto["Stipendio"]
+    for col in ws_col:
+        assert ws.cell(row=16, column=col).value is None, (
+            "mese", col, ws.cell(row=16, column=col).value)
+        assert ws.cell(row=28, column=col).value is None, (
+            "totale", col, ws.cell(row=28, column=col).value)
+
+    # (b) Foglio del tutto configurato, con numeri tondi: ogni colonna in
+    # euro deve corrispondere a un calcolo scritto qui a mano, non preso da
+    # stipendio.py. Le ore sono le stesse per ogni mese, cosi' il totale
+    # annuo e' semplicemente dodici volte il valore mensile.
+    ordinarie, sab, dom, fest = 100, 10, 5, 2
+    tariffa, magg_sab, magg_dom, magg_fest, rateo, coeff = 10, 0.2, 0.3, 0.5, 0.1, 0.75
+    p_pieno = _genera_stipendio_per_ricalcolo(
+        tmp_path, "pieno",
+        {"B5": tariffa, "B6": magg_sab, "B7": magg_dom, "B8": magg_fest,
+         "B9": rateo, "B10": coeff},
+        ore_uniformi=(ordinarie, sab, dom, fest))
+    wb_pieno = _ricalcola_con_soffice(p_pieno, tmp_path)
+    ws = wb_pieno["Stipendio"]
+
+    base_attesa = (ordinarie + sab + dom + fest) * tariffa
+    sab_attesa = sab * tariffa * magg_sab
+    dom_attesa = dom * tariffa * magg_dom
+    fest_attesa = fest * tariffa * magg_fest
+    rateo_atteso = (base_attesa + sab_attesa + dom_attesa + fest_attesa) * rateo
+    lordo_atteso = base_attesa + sab_attesa + dom_attesa + fest_attesa + rateo_atteso
+    netto_atteso = lordo_atteso * coeff
+    attesi_mese = [base_attesa, sab_attesa, dom_attesa, fest_attesa,
+                   rateo_atteso, lordo_atteso, netto_atteso]
+
+    for col, atteso in zip(ws_col, attesi_mese):
+        assert ws.cell(row=16, column=col).value == pytest.approx(atteso), (
+            "mese", col)
+    for col, atteso in zip(ws_col, attesi_mese):
+        assert ws.cell(row=28, column=col).value == pytest.approx(atteso * 12), (
+            "totale", col)
+
+    # (c) Tariffa impostata ma maggiorazioni non ancora compilate: quelle
+    # colonne restano vuote, non zero - ne' nella riga del mese ne' nel
+    # totale annuo.
+    p_parziale = _genera_stipendio_per_ricalcolo(
+        tmp_path, "parziale", {"B5": tariffa},
+        ore_uniformi=(ordinarie, sab, dom, fest))
+    wb_parziale = _ricalcola_con_soffice(p_parziale, tmp_path)
+    ws = wb_parziale["Stipendio"]
+
+    assert ws.cell(row=16, column=6).value == pytest.approx(base_attesa)
+    assert ws.cell(row=28, column=6).value == pytest.approx(base_attesa * 12)
+    for col in range(7, 13):  # G..L: maggiorazioni, rateo, lordo totale, netto
+        assert ws.cell(row=16, column=col).value is None, ("mese", col)
+        assert ws.cell(row=28, column=col).value is None, ("totale", col)
 
 
 def test_ogni_giorno_dell_anno_sta_in_esattamente_un_secchio(wb):

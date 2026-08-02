@@ -101,13 +101,22 @@ def foglio_stipendio(wb, anno, p_r1, p_r2):
             f'=SUMIFS({ore},{mesi},$A{r})-C{r}-D{r}-E{r}'))
 
         # Tutte le ore al lordo base, poi le maggiorazioni solo su sab/dom/fest.
+        # Ogni maggiorazione resta vuota finche' non e' impostata la sua percentuale,
+        # non solo la tariffa: altrimenti "vuoto * numero" da' 0, un'altra cifra
+        # che sembra un risultato e invece e' solo un parametro mancante.
         ws.cell(row=r, column=6, value=f'=IF($B$5="","",(B{r}+C{r}+D{r}+E{r})*$B$5)')
-        ws.cell(row=r, column=7, value=f'=IF($B$5="","",C{r}*$B$5*$B$6)')
-        ws.cell(row=r, column=8, value=f'=IF($B$5="","",D{r}*$B$5*$B$7)')
-        ws.cell(row=r, column=9, value=f'=IF($B$5="","",E{r}*$B$5*$B$8)')
-        ws.cell(row=r, column=10, value=f'=IF($B$5="","",(F{r}+G{r}+H{r}+I{r})*$B$9)')
-        ws.cell(row=r, column=11, value=f'=IF($B$5="","",F{r}+G{r}+H{r}+I{r}+J{r})')
-        ws.cell(row=r, column=12, value=f'=IF(OR($B$5="",$B$10=""),"",K{r}*$B$10)')
+        ws.cell(row=r, column=7, value=f'=IF(OR($B$5="",$B$6=""),"",C{r}*$B$5*$B$6)')
+        ws.cell(row=r, column=8, value=f'=IF(OR($B$5="",$B$7=""),"",D{r}*$B$5*$B$7)')
+        ws.cell(row=r, column=9, value=f'=IF(OR($B$5="",$B$8=""),"",E{r}*$B$5*$B$8)')
+        # Il rateo e il lordo totale sommano colonne che possono essere vuote
+        # (testo ""), non zero: "vuoto"+numero darebbe #VALUE!, quindi ciascuno
+        # controlla che gli addendi a monte siano gia' risolti prima di sommarli.
+        # G/H/I vuote significano gia' "manca B5, B6, B7 o B8": basta controllare
+        # loro, non serve ripetere i parametri.
+        ws.cell(row=r, column=10, value=(
+            f'=IF(OR(G{r}="",H{r}="",I{r}="",$B$9=""),"",(F{r}+G{r}+H{r}+I{r})*$B$9)'))
+        ws.cell(row=r, column=11, value=f'=IF(J{r}="","",F{r}+G{r}+H{r}+I{r}+J{r})')
+        ws.cell(row=r, column=12, value=f'=IF(OR(K{r}="",$B$10=""),"",K{r}*$B$10)')
         for col in range(6, 13):
             ws.cell(row=r, column=col).number_format = '€ #,##0.00'
 
@@ -123,8 +132,16 @@ def foglio_stipendio(wb, anno, p_r1, p_r2):
     ws.cell(row=RIGA_TOTALE, column=1, value="TOTALE ANNO")
     for col in range(2, len(COLONNE) + 1):
         L = get_column_letter(col)
-        ws.cell(row=RIGA_TOTALE, column=col,
-                value=f"=SUM({L}{RIGA_PRIMO_MESE}:{L}{RIGA_TOTALE - 1})")
+        intervallo = f"{L}{RIGA_PRIMO_MESE}:{L}{RIGA_TOTALE - 1}"
+        if col >= 6:
+            # SUM ignora le celle di testo "" e darebbe 0 su un anno non
+            # ancora configurato: un totale di zero euro che sembra un
+            # risultato vero. Il mese di gennaio fa da sentinella: se e'
+            # vuoto lo sono anche gli altri undici, stesso interruttore.
+            value = f'=IF({L}{RIGA_PRIMO_MESE}="","",SUM({intervallo}))'
+        else:
+            value = f"=SUM({intervallo})"
+        ws.cell(row=RIGA_TOTALE, column=col, value=value)
     for col in range(1, len(COLONNE) + 1):
         c = ws.cell(row=RIGA_TOTALE, column=col)
         c.font = Font(bold=True, color="FFFFFF")

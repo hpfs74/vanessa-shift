@@ -90,12 +90,12 @@ export function today(now: Date = new Date()): IsoDate {
   return toIso(now.getFullYear(), now.getMonth() + 1, now.getDate());
 }
 
-/** La data civile italiana.
+/** The Italian civil date.
  *
- * La Lambda gira in UTC, dove il giorno cambia all'una o alle due di notte
- * ora italiana: un contatore giornaliero appeso a UTC si azzererebbe mentre
- * qui e ancora ieri. 'sv-SE' e la scorciatoia per avere YYYY-MM-DD. */
-export function giornoRoma(now: Date = new Date()): IsoDate {
+ * The Lambda runs in UTC, where the day changes at one or two in the morning
+ * Italian time: a daily counter hung on UTC would reset while here it is
+ * still yesterday. 'sv-SE' is the shortcut for getting YYYY-MM-DD. */
+export function romeToday(now: Date = new Date()): IsoDate {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(now);
 }
 

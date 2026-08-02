@@ -2,7 +2,7 @@
 
 import type { PhotoReading, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
 
-import { esci, sessioneValida } from './auth.js';
+import { sessioneConfermata, sessioneRifiutata, sessioneValida } from './auth.js';
 
 export interface RemoteShift {
   date: IsoDate;
@@ -43,20 +43,17 @@ function requireJson(r: Response): void {
   if (!(r.headers.get('content-type') ?? '').includes('json')) throw new Error(UNREACHABLE);
 }
 
-/** Every call carries the token. A 401 means the session died despite the
- *  margin — forget it and reload: main.tsx's gate then sends her straight to
- *  a fresh login. Without the reload she is left staring at "richiesta
- *  fallita (401)" with every subsequent tap repeating it, because requests
- *  now go out with no token at all — every write here is single and
- *  repeatable, so nothing is lost by starting over. */
+/** Every call carries the token. A 401 means the ID token died despite the
+ *  margin — most likely a device that slept through it, not a revoked
+ *  session — so `sessioneRifiutata()` keeps the refresh token and reloads:
+ *  main.tsx's gate tries a silent renewal before falling back to a login.
+ *  Without the reload she is left staring at "richiesta fallita (401)" with
+ *  every subsequent tap repeating it, because requests now go out with no
+ *  token at all — every write here is single and repeatable, so nothing is
+ *  lost by starting over. */
 function autorizzazione(): Record<string, string> {
   const s = sessioneValida();
   return s ? { authorization: `Bearer ${s.idToken}` } : {};
-}
-
-function sessioneScaduta(): void {
-  esci();
-  location.reload();
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -69,7 +66,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!r.ok) {
-    if (r.status === 401) sessioneScaduta();
+    if (r.status === 401) sessioneRifiutata();
     const text = await r.text().catch(() => '');
     // The fallback stays in Italian: it reaches the screen.
     let message = `richiesta fallita (${r.status})`;
@@ -81,6 +78,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(message);
   }
+  // A call that succeeds is proof the session is good: the 401 circuit
+  // breaker above must not fire on some unrelated failure later as though
+  // it were still the same loop.
+  sessioneConfermata();
   requireJson(r);
   return (await r.json()) as T;
 }
@@ -150,7 +151,7 @@ export const api: Api = {
     }
 
     if (!r.ok) {
-      if (r.status === 401) sessioneScaduta();
+      if (r.status === 401) sessioneRifiutata();
       const text = await r.text().catch(() => '');
       let message = `lettura fallita (${r.status})`;
       try {
@@ -161,6 +162,10 @@ export const api: Api = {
       }
       throw new Error(message);
     }
+
+    // A call that succeeds is proof the session is good: see the matching
+    // comment in `request()`.
+    sessioneConfermata();
 
     try {
       requireJson(r);

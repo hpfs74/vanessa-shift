@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { completaAccesso, esci, rinnovaAccesso, sessioneValida, verifierEsfida } from '../src/auth.js';
+import {
+  completaAccesso,
+  esci,
+  rinnovaAccesso,
+  sessioneConfermata,
+  sessioneRifiutata,
+  sessioneValida,
+  verifierEsfida,
+} from '../src/auth.js';
 
 beforeEach(() => {
   localStorage.clear();
@@ -125,5 +133,59 @@ describe('rinnovaAccesso', () => {
     expect(s).toBeNull();
     expect(sessioneValida()).toBeNull();
     expect(localStorage.getItem('refresh')).toBeNull();
+  });
+});
+
+describe('sessioneRifiutata', () => {
+  // jsdom's `Location.prototype.reload` is read-only, so neither `vi.spyOn`
+  // nor a plain reassignment can wrap it in place. Stubbing the whole global
+  // stands in for it instead — this module only ever calls `.reload()`, so a
+  // bare object with that one method is a faithful enough double.
+  const reload = () => {
+    const spy = vi.fn();
+    vi.stubGlobal('location', { reload: spy });
+    return spy;
+  };
+
+  it('on the first 401 keeps the refresh token and clears only the ID token', () => {
+    const ricarica = reload();
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
+    localStorage.setItem('refresh', 'un-refresh-token');
+
+    sessioneRifiutata();
+
+    expect(localStorage.getItem('sessione')).toBeNull();
+    expect(localStorage.getItem('refresh')).toBe('un-refresh-token');
+    expect(ricarica).toHaveBeenCalledOnce();
+  });
+
+  // The circuit breaker: a renewed token that *also* comes back 401 means
+  // the refresh token itself is no good, not just the ID token — so the
+  // second consecutive call clears everything instead of reloading forever.
+  it('on a second consecutive 401 clears everything, breaking the loop', () => {
+    const ricarica = reload();
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
+    localStorage.setItem('refresh', 'un-refresh-token');
+
+    sessioneRifiutata();
+    sessioneRifiutata();
+
+    expect(localStorage.getItem('sessione')).toBeNull();
+    expect(localStorage.getItem('refresh')).toBeNull();
+    expect(ricarica).toHaveBeenCalledTimes(2);
+  });
+
+  it('a confirmed session resets the breaker, so the next 401 is treated as a first one again', () => {
+    const ricarica = reload();
+    localStorage.setItem('refresh', 'un-refresh-token');
+
+    sessioneRifiutata(); // first 401: marker set, refresh token kept
+    sessioneConfermata(); // a call succeeded in between: marker cleared
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'nuovo', scade: 9e12 }));
+    sessioneRifiutata(); // an unrelated, later 401: treated as first again
+
+    expect(localStorage.getItem('sessione')).toBeNull();
+    expect(localStorage.getItem('refresh')).toBe('un-refresh-token');
+    expect(ricarica).toHaveBeenCalledTimes(2);
   });
 });

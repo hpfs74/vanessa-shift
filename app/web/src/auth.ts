@@ -9,6 +9,7 @@
 const CHIAVE_SESSIONE = 'sessione';
 const CHIAVE_VERIFIER = 'pkce';
 const CHIAVE_REFRESH = 'refresh';
+const CHIAVE_RIPROVATO = 'riprovaSessione';
 
 /** Config baked in at build time: none of it is secret. */
 const POOL_DOMAIN = import.meta.env.VITE_LOGIN_DOMAIN ?? '';
@@ -40,7 +41,46 @@ export function esci(): void {
   localStorage.removeItem(CHIAVE_SESSIONE);
   localStorage.removeItem(CHIAVE_REFRESH);
   sessionStorage.removeItem(CHIAVE_VERIFIER);
+  sessionStorage.removeItem(CHIAVE_RIPROVATO);
 }
+
+/** A request came back 401 despite a session that looked good a moment ago.
+ *  That is far more often a device that slept through the one-minute
+ *  margin, or a little clock skew, than an actually revoked session — and
+ *  the refresh token, good for the day, still works in that ordinary case.
+ *  Throwing it away here would trade a silent renewal for a Face ID prompt
+ *  that shouldn't have been needed, which is the exact promise the session
+ *  design rests on. So: drop only the ID token, keep the refresh token, and
+ *  reload — the gate in main.tsx tries the refresh before concluding there
+ *  is no session.
+ *
+ *  The `sessionStorage` marker is the circuit breaker. If the *renewed*
+ *  token also comes back 401, this function runs again with the marker
+ *  already set: that is the signal that the refresh token itself is no
+ *  good, not the ID token alone, so this time everything is cleared before
+ *  reloading, landing on a real login instead of reloading forever. */
+export function sessioneRifiutata(): void {
+  if (sessionStorage.getItem(CHIAVE_RIPROVATO)) {
+    esci();
+  } else {
+    sessionStorage.setItem(CHIAVE_RIPROVATO, '1');
+    localStorage.removeItem(CHIAVE_SESSIONE);
+  }
+  location.reload();
+}
+
+/** Any call that actually succeeds means the session is good again: the
+ *  circuit breaker above must not carry over and fire on some unrelated
+ *  401 much later as though it were still the same loop. */
+export function sessioneConfermata(): void {
+  sessionStorage.removeItem(CHIAVE_RIPROVATO);
+}
+
+/** Thrown only by the configuration guard below, so `main.tsx` can show its
+ *  message verbatim — it already names the cause — while anything else
+ *  unexpected gets a generic message instead of an English stack trace on
+ *  her screen. */
+export class ConfigurazioneMancante extends Error {}
 
 function base64url(bytes: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)))
@@ -63,7 +103,9 @@ export async function verifierEsfida(): Promise<{ verifier: string; challenge: s
  *  page. */
 function assicuraConfigurata(): void {
   if (!POOL_DOMAIN || !CLIENT_ID) {
-    throw new Error('Configurazione di accesso mancante (VITE_LOGIN_DOMAIN o VITE_CLIENT_ID).');
+    throw new ConfigurazioneMancante(
+      'Configurazione di accesso mancante (VITE_LOGIN_DOMAIN o VITE_CLIENT_ID).',
+    );
   }
 }
 

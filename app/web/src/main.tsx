@@ -2,7 +2,13 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './App.js';
-import { completaAccesso, iniziaAccesso, rinnovaAccesso, sessioneValida } from './auth.js';
+import {
+  ConfigurazioneMancante,
+  completaAccesso,
+  iniziaAccesso,
+  rinnovaAccesso,
+  sessioneValida,
+} from './auth.js';
 import './styles.css';
 
 const radice = document.getElementById('root');
@@ -37,11 +43,20 @@ const avvia = async () => {
     }
     await iniziaAccesso();
   } catch (e) {
-    // Only the belt-and-braces guard in auth.ts reaches here (a build that
-    // shipped without the pool configured) — the network-drop case above is
-    // already handled. #root must not stay blank either way: a blank screen
-    // gives her nothing to act on.
-    radice.textContent = e instanceof Error ? e.message : 'Accesso non riuscito.';
+    // The belt-and-braces guard in auth.ts is expected here (a build that
+    // shipped without the pool configured) and its message already names the
+    // cause, safe to show as-is. Anything else reaching this catch is
+    // unexpected — a `TypeError`, say — and its `.message` is an internal,
+    // English detail, not something to put on her screen wholesale: log it
+    // for whoever debugs this, and show a fixed Italian sentence instead.
+    // Either way #root must not stay blank: a blank screen gives her nothing
+    // to act on.
+    if (e instanceof ConfigurazioneMancante) {
+      radice.textContent = e.message;
+    } else {
+      console.error(e);
+      radice.textContent = "Qualcosa e' andato storto all'avvio. Ricarica la pagina.";
+    }
   }
 };
 void avvia();

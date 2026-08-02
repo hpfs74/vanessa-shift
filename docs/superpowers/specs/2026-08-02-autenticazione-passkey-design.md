@@ -149,12 +149,9 @@ tutte singole e ripetibili.
 
 ## Costo
 
-Il piano Essentials di Cognito si paga a utente attivo mensile, con una fascia gratuita. Con
-una o due persone la spesa è nulla o trascurabile.
-
-**Da verificare in console prima del deploy**, non asserito qui: la fascia gratuita esatta del
-piano Essentials. Oggi ho sbagliato tre volte una disponibilità AWS dandola per verificata
-leggendo la fonte sbagliata, e non ho intenzione di scriverne una quarta senza guardare.
+**0,015 $ per utente attivo al mese**, piano Essentials in `eu-south-1`, letto dalla API dei
+prezzi di AWS e non stimato. In due fa tre centesimi al mese, e la fascia gratuita — qualunque
+sia — non cambia niente a questa scala.
 
 ## Fuori perimetro
 

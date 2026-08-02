@@ -25,8 +25,8 @@ CODICI = [
     ("L",  "Libero",            "",      "",      0),
     ("M",  "Mattina",           "07:00", "13:00", 6),
     ("M1", "Mattina lunga",     "07:00", "14:00", 7),
-    ("P",  "Pomeriggio",        "13:00", "19:00", 6),
-    ("P1", "Pomeriggio lungo",  "13:00", "20:00", 7),
+    ("P",  "Pomeriggio",        "13:00", "20:00", 7),
+    ("P1", "Pomeriggio lungo",  "13:00", "21:00", 8),
 ]
 # Fette della torta: solo i turni lavorati (Libero vale 0 ore, non comparirebbe)
 TURNI_LAVORATI = [c for c in CODICI if c[4] > 0]
@@ -76,17 +76,21 @@ def foglio_codici(wb):
     ws["A2"] = "Modifica le ore qui: tutto l'anno si ricalcola da solo."
     ws["A2"].font = Font(italic=True, size=10, color="5A6B7D")
 
-    intesta(ws, 4, ["Cod", "Descrizione", "Inizio", "Fine", "Ore"],
-            larghezze=[10, 22, 12, 12, 10])
+    intesta(ws, 4, ["Cod", "Descrizione", "Inizio", "Fine", "Ore", "Orario"],
+            larghezze=[10, 22, 12, 12, 10, 16])
     for i, (cod, desc, ini, fin, ore) in enumerate(CODICI):
         r = 5 + i
         for col, val in enumerate([cod, desc, ini, fin, ore], start=1):
             c = ws.cell(row=r, column=col, value=val)
             c.border = BOX
             c.alignment = Alignment(horizontal="center" if col != 2 else "left")
+        # Orario leggibile, usato dal foglio Calendario: si aggiorna se cambio Inizio/Fine.
+        c = ws.cell(row=r, column=6, value=f'=IF(C{r}="","–",C{r}&"-"&D{r})')
+        c.border = BOX
+        c.alignment = Alignment(horizontal="center")
         ws.cell(row=r, column=1).font = Font(bold=True)
         if ore == 0:
-            for col in range(1, 6):
+            for col in range(1, 7):
                 ws.cell(row=r, column=col).fill = PatternFill("solid", fgColor=GRIGIO_INT)
     return ws, 5, 4 + len(CODICI)  # foglio, prima riga dati, ultima riga dati
 

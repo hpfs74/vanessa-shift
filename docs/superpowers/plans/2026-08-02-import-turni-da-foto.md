@@ -24,335 +24,334 @@ Spec: `docs/superpowers/specs/2026-08-02-import-turni-da-foto-design.md`.
 
 | File | Responsabilità |
 |------|----------------|
-| `app/core/src/foto.ts` (nuovo) | Tipi dell'estrazione, schema JSON per il modello, validazione, conversione in `ParsedEntry[]`. Puro. |
-| `app/core/src/dates.ts` (modificato) | `giornoRoma()`: la data civile italiana, per la chiave della quota. |
-| `app/core/src/index.ts` (modificato) | Riesporta `foto.js`. |
-| `app/api/src/repo.ts` (modificato) | `consumaQuotaFoto()`: contatore atomico giornaliero. |
-| `app/api/src/visione.ts` (nuovo) | La chiamata a Bedrock: prompt, immagine, schema, lettura della risposta. |
-| `app/api/src/http.ts` (modificato) | `requireImmagine()` e la costante del corpo massimo. |
-| `app/api/src/handlers.ts` (modificato) | `leggiFoto`: dimensione → quota → visione → validazione. |
-| `app/infra/lib/app-stack.ts` (modificato) | Lambda `LeggiFoto`, Function URL, permesso Bedrock, TTL sulla tabella. |
-| `app/web/src/immagine.ts` (nuovo) | Ridimensionamento su canvas. |
-| `app/web/src/api.ts` (modificato) | `leggiFoto()` verso la Function URL. |
-| `app/web/src/PianoSalvataggio.tsx` (nuovo) | Estratto da `BulkEntry`: riepilogo, tabella delle sovrascritture, pulsante. Condiviso fra testo e foto. |
+| `app/core/src/photo.ts` (nuovo) | Tipi dell'estrazione, schema JSON per il modello, validazione, conversione in `ParsedEntry[]`. Puro. |
+| `app/core/src/dates.ts` (modificato) | `romeToday()`: la data civile italiana, per la chiave della quota. |
+| `app/core/src/index.ts` (modificato) | Riesporta `photo.js`. |
+| `app/api/src/repo.ts` (modificato) | `consumePhotoQuota()`: contatore atomico giornaliero. |
+| `app/api/src/vision.ts` (nuovo) | La chiamata a Bedrock: prompt, immagine, schema, lettura della risposta. |
+| `app/api/src/http.ts` (modificato) | `requireImage()` e la costante del corpo massimo. |
+| `app/api/src/handlers.ts` (modificato) | `readPhoto`: dimensione → quota → visione → validazione. |
+| `app/infra/lib/app-stack.ts` (modificato) | Lambda `ReadPhoto`, Function URL, permesso Bedrock, TTL sulla tabella. |
+| `app/web/src/image.ts` (nuovo) | Ridimensionamento su canvas. |
+| `app/web/src/api.ts` (modificato) | `readPhoto()` verso la Function URL. |
+| `app/web/src/SavePlan.tsx` (nuovo) | Estratto da `BulkEntry`: riepilogo, tabella delle sovrascritture, pulsante. Condiviso fra testo e foto. |
 | `app/web/src/BulkEntry.tsx` (modificato) | Tiene la textarea, delega il resto, ospita il percorso foto. |
 | `app/web/src/PhotoImport.tsx` (nuovo) | Scelta della foto, stato della lettura, griglia modificabile. |
-| `app/web/src/App.tsx` (modificato) | Passa `api.leggiFoto` a `BulkEntry`. |
+| `app/web/src/App.tsx` (modificato) | Passa `api.readPhoto` a `BulkEntry`. |
 
 ---
 
-### Task 1: `core/src/foto.ts` — il contratto e il suo giudice
+### Task 1: `core/src/photo.ts` — il contratto e il suo giudice
 
 Il pezzo che decide se quello che il modello ha detto è utilizzabile. Puro, senza rete: è il posto dove si testano tutti i modi in cui un'estrazione può essere sbagliata.
 
 **Files:**
-- Create: `app/core/src/foto.ts`
-- Create: `app/core/test/foto.test.ts`
+- Create: `app/core/src/photo.ts`
+- Create: `app/core/test/photo.test.ts`
 - Modify: `app/core/src/index.ts`
-- Modify: `app/core/src/dates.ts` (aggiunta di `giornoRoma`)
+- Modify: `app/core/src/dates.ts` (aggiunta di `romeToday`)
 
 **Interfaces:**
 - Consumes: `ShiftCode`, `isShiftCode` da `./shifts.js`; `IsoDate`, `daysInMonth`, `toIso` da `./dates.js`; `ParsedEntry` da `./bulk.js`.
 - Produces:
-  - `NOME_RIGA: string` (`'Vanessa'`), `MAX_LETTURE_AL_GIORNO: number` (`10`)
-  - `interface GiornoLetto { giorno: number; codice: ShiftCode | null; sicuro: boolean }`
-  - `interface EstrazioneFoto { mese: number; anno: number; trovata: boolean; nomeTrovato: string | null; rigaTrovata: number | null; giorni: GiornoLetto[] }`
-  - `SCHEMA_ESTRAZIONE: Record<string, unknown>`
-  - `class FotoNonValida extends Error`, `class RigaNonTrovata extends Error`
-  - `validaEstrazione(v: unknown, annoAtteso: number): EstrazioneFoto`
-  - `vociDaEstrazione(e: EstrazioneFoto): ParsedEntry[]`
-  - `giornoRoma(now?: Date): IsoDate` (da `dates.js`)
+  - `ROW_NAME: string` (`'Vanessa'`), `MAX_READINGS_PER_DAY: number` (`10`)
+  - `interface ReadDay { day: number; code: ShiftCode | null; confident: boolean }`
+  - `interface PhotoReading { month: number; year: number; found: boolean; foundName: string | null; foundRow: number | null; days: ReadDay[] }`
+  - `READING_SCHEMA: Record<string, unknown>`
+  - `class InvalidReading extends Error`, `class RowNotFound extends Error`
+  - `validateReading(v: unknown, expectedYear: number): PhotoReading`
+  - `entriesFromReading(e: PhotoReading): ParsedEntry[]`
+  - `romeToday(now?: Date): IsoDate` (da `dates.js`)
 
 - [ ] **Step 1: Scrivi i test che falliscono**
 
-Crea `app/core/test/foto.test.ts`:
+Crea `app/core/test/photo.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
 
 import {
-  FotoNonValida,
-  RigaNonTrovata,
-  giornoRoma,
-  validaEstrazione,
-  vociDaEstrazione,
+  InvalidReading,
+  RowNotFound,
+  romeToday,
+  validateReading,
+  entriesFromReading,
 } from '../src/index.js';
 
-/** Un'estrazione ben formata di `giorni` giorni, tutti senza turno. */
-function vuota(mese: number, anno: number, giorni: number) {
+/** A well-formed reading of `days` days, all without a shift. */
+function emptyReading(month: number, year: number, days: number) {
   return {
-    mese,
-    anno,
-    trovata: true,
-    nomeTrovato: 'Vanessa',
-    rigaTrovata: 14,
-    giorni: Array.from({ length: giorni }, (_, i) => ({
-      giorno: i + 1,
-      codice: null,
-      sicuro: true,
+    month,
+    year,
+    found: true,
+    foundName: 'Vanessa',
+    foundRow: 14,
+    days: Array.from({ length: days }, (_, i) => ({
+      day: i + 1,
+      code: null,
+      confident: true,
     })),
   };
 }
 
-/** Luglio come sta sulla foto: x fino al 16, poi quindici turni. */
-const LUGLIO_CODICI = ['M','M','P','L','P','M','M','M','L','P','M','M','M','L','P'] as const;
+/** July as it stands on the photo: x until the 16th, then fifteen shifts. */
+const JULY_CODES = ['M','M','P','L','P','M','M','M','L','P','M','M','M','L','P'] as const;
 
-function luglio() {
-  const e = vuota(7, 2026, 31);
-  LUGLIO_CODICI.forEach((codice, i) => {
-    e.giorni[16 + i] = { giorno: 17 + i, codice, sicuro: true } as never;
+function julyReading() {
+  const e = emptyReading(7, 2026, 31);
+  JULY_CODES.forEach((code, i) => {
+    e.days[16 + i] = { day: 17 + i, code, confident: true } as never;
   });
   return e;
 }
 
-describe('validaEstrazione', () => {
-  it('accetta un mese intero ben formato', () => {
-    const e = validaEstrazione(vuota(8, 2026, 31), 2026);
-    expect(e.mese).toBe(8);
-    expect(e.giorni).toHaveLength(31);
+describe('validateReading', () => {
+  it('accepts a well-formed whole month', () => {
+    const e = validateReading(emptyReading(8, 2026, 31), 2026);
+    expect(e.month).toBe(8);
+    expect(e.days).toHaveLength(31);
   });
 
-  it('accetta l anno prima e quello dopo, non uno lontano', () => {
-    expect(() => validaEstrazione(vuota(8, 2025, 31), 2026)).not.toThrow();
-    expect(() => validaEstrazione(vuota(8, 2027, 31), 2026)).not.toThrow();
-    expect(() => validaEstrazione(vuota(8, 2019, 31), 2026)).toThrow(FotoNonValida);
+  it('accepts the year before and after, not a far one', () => {
+    expect(() => validateReading(emptyReading(8, 2025, 31), 2026)).not.toThrow();
+    expect(() => validateReading(emptyReading(8, 2027, 31), 2026)).not.toThrow();
+    expect(() => validateReading(emptyReading(8, 2019, 31), 2026)).toThrow(InvalidReading);
   });
 
-  it('rifiuta un mese fuori scala', () => {
-    expect(() => validaEstrazione({ ...vuota(1, 2026, 31), mese: 13 }, 2026)).toThrow(
-      FotoNonValida,
+  it('rejects a month out of range', () => {
+    expect(() => validateReading({ ...emptyReading(1, 2026, 31), month: 13 }, 2026)).toThrow(
+      InvalidReading,
     );
   });
 
-  it('vuole esattamente i giorni del mese: febbraio 2026 ne ha 28', () => {
-    expect(() => validaEstrazione(vuota(2, 2026, 28), 2026)).not.toThrow();
-    expect(() => validaEstrazione(vuota(2, 2026, 29), 2026)).toThrow(FotoNonValida);
+  it('wants exactly the days of the month: February 2026 has 28', () => {
+    expect(() => validateReading(emptyReading(2, 2026, 28), 2026)).not.toThrow();
+    expect(() => validateReading(emptyReading(2, 2026, 29), 2026)).toThrow(InvalidReading);
   });
 
-  it('rifiuta un giorno mancante', () => {
-    const e = vuota(8, 2026, 31);
-    e.giorni.splice(10, 1);
-    expect(() => validaEstrazione(e, 2026)).toThrow(FotoNonValida);
+  it('rejects a missing day', () => {
+    const e = emptyReading(8, 2026, 31);
+    e.days.splice(10, 1);
+    expect(() => validateReading(e, 2026)).toThrow(InvalidReading);
   });
 
-  it('rifiuta un giorno duplicato', () => {
-    const e = vuota(8, 2026, 31);
-    e.giorni[11] = { giorno: 11, codice: null, sicuro: true };
-    expect(() => validaEstrazione(e, 2026)).toThrow(FotoNonValida);
+  it('rejects a duplicate day', () => {
+    const e = emptyReading(8, 2026, 31);
+    e.days[11] = { day: 11, code: null, confident: true };
+    expect(() => validateReading(e, 2026)).toThrow(InvalidReading);
   });
 
-  it('rifiuta un giorno fuori dal mese', () => {
-    const e = vuota(8, 2026, 31);
-    e.giorni[30] = { giorno: 32, codice: null, sicuro: true };
-    expect(() => validaEstrazione(e, 2026)).toThrow(FotoNonValida);
+  it('rejects a day outside the month', () => {
+    const e = emptyReading(8, 2026, 31);
+    e.days[30] = { day: 32, code: null, confident: true };
+    expect(() => validateReading(e, 2026)).toThrow(InvalidReading);
   });
 
-  it('rifiuta un codice che non esiste', () => {
-    const e = vuota(8, 2026, 31);
-    e.giorni[0] = { giorno: 1, codice: 'P2' as never, sicuro: true };
-    expect(() => validaEstrazione(e, 2026)).toThrow(FotoNonValida);
+  it('rejects a code that does not exist', () => {
+    const e = emptyReading(8, 2026, 31);
+    e.days[0] = { day: 1, code: 'P2' as never, confident: true };
+    expect(() => validateReading(e, 2026)).toThrow(InvalidReading);
   });
 
-  it('rifiuta qualcosa che non e nemmeno un oggetto', () => {
-    expect(() => validaEstrazione('ciao', 2026)).toThrow(FotoNonValida);
-    expect(() => validaEstrazione(null, 2026)).toThrow(FotoNonValida);
-    expect(() => validaEstrazione([], 2026)).toThrow(FotoNonValida);
+  it('rejects something that is not even an object', () => {
+    expect(() => validateReading('ciao', 2026)).toThrow(InvalidReading);
+    expect(() => validateReading(null, 2026)).toThrow(InvalidReading);
+    expect(() => validateReading([], 2026)).toThrow(InvalidReading);
   });
 
-  it('quando la riga non c e lo dice con un errore suo', () => {
-    const e = { ...vuota(8, 2026, 31), trovata: false, nomeTrovato: null, rigaTrovata: null };
-    expect(() => validaEstrazione(e, 2026)).toThrow(RigaNonTrovata);
-  });
-});
-
-describe('vociDaEstrazione', () => {
-  it('salta i giorni senza codice: luglio comincia il 17', () => {
-    const voci = vociDaEstrazione(validaEstrazione(luglio(), 2026));
-    expect(voci).toHaveLength(15);
-    expect(voci[0]).toEqual({ date: '2026-07-17', day: 17, code: 'M' });
-    expect(voci[14]).toEqual({ date: '2026-07-31', day: 31, code: 'P' });
-  });
-
-  it('un mese senza nulla non produce voci', () => {
-    expect(vociDaEstrazione(validaEstrazione(vuota(8, 2026, 31), 2026))).toEqual([]);
+  it('when the row is not there it says so with its own error', () => {
+    const e = { ...emptyReading(8, 2026, 31), found: false, foundName: null, foundRow: null };
+    expect(() => validateReading(e, 2026)).toThrow(RowNotFound);
   });
 });
 
-describe('giornoRoma', () => {
-  it('e la data italiana, non quella UTC', () => {
-    // Mezzanotte e mezza a Roma d'estate: a Greenwich e ancora il giorno prima.
-    expect(giornoRoma(new Date('2026-08-02T22:30:00Z'))).toBe('2026-08-03');
-    expect(giornoRoma(new Date('2026-08-02T12:00:00Z'))).toBe('2026-08-02');
+describe('entriesFromReading', () => {
+  it('skips days without a code: July starts on the 17th', () => {
+    const entries = entriesFromReading(validateReading(julyReading(), 2026));
+    expect(entries).toHaveLength(15);
+    expect(entries[0]).toEqual({ date: '2026-07-17', day: 17, code: 'M' });
+    expect(entries[14]).toEqual({ date: '2026-07-31', day: 31, code: 'P' });
+  });
+
+  it('a month with nothing produces no entries', () => {
+    expect(entriesFromReading(validateReading(emptyReading(8, 2026, 31), 2026))).toEqual([]);
+  });
+});
+
+describe('romeToday', () => {
+  it('is the Italian civil date, not the UTC one', () => {
+    // Half past midnight in Rome in summer: in Greenwich it's still the day before.
+    expect(romeToday(new Date('2026-08-02T22:30:00Z'))).toBe('2026-08-03');
+    expect(romeToday(new Date('2026-08-02T12:00:00Z'))).toBe('2026-08-02');
   });
 });
 ```
 
 - [ ] **Step 2: Esegui i test e verifica che falliscano**
 
-Run: `cd app && npx vitest run --root core core/test/foto.test.ts`
-Expected: FAIL — `validaEstrazione` non è esportata da `../src/index.js`.
+Run: `cd app && npx vitest run --root core core/test/photo.test.ts`
+Expected: FAIL — `validateReading` non è esportata da `../src/index.js`.
 
-- [ ] **Step 3: Aggiungi `giornoRoma` a `core/src/dates.ts`**
+- [ ] **Step 3: Aggiungi `romeToday` a `core/src/dates.ts`**
 
 In fondo a `app/core/src/dates.ts`, subito dopo `today()`:
 
 ```ts
-/** La data civile italiana.
+/** The Italian civil date.
  *
- * La Lambda gira in UTC, dove il giorno cambia all'una o alle due di notte
- * ora italiana: un contatore giornaliero appeso a UTC si azzererebbe mentre
- * qui e ancora ieri. 'sv-SE' e la scorciatoia per avere YYYY-MM-DD. */
-export function giornoRoma(now: Date = new Date()): IsoDate {
+ * The Lambda runs in UTC, where the day changes at one or two in the morning
+ * Italian time: a daily counter hung on UTC would reset while here it is
+ * still yesterday. 'sv-SE' is the shortcut for getting YYYY-MM-DD. */
+export function romeToday(now: Date = new Date()): IsoDate {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(now);
 }
 ```
 
-- [ ] **Step 4: Scrivi `core/src/foto.ts`**
+- [ ] **Step 4: Scrivi `core/src/photo.ts`**
 
 ```ts
 /** Import da una foto del foglio dei turni.
  *
- * Qui non si legge nessuna immagine: qui si decide se quello che il modello
- * ha detto di aver letto e utilizzabile. Mezza griglia plausibile e peggio di
- * un errore, perche si salva senza accorgersene: la validazione e quindi tutto
- * o niente.
+ * Here no image is read: here it is decided whether what the model said it
+ * read is usable. A half-plausible grid is worse than an error, because it
+ * gets saved without anyone noticing: validation is therefore all-or-nothing.
  */
 
 import { type IsoDate, daysInMonth, toIso } from './dates.js';
 import type { ParsedEntry } from './bulk.js';
 import { type ShiftCode, SHIFTS, isShiftCode } from './shifts.js';
 
-/** La riga da cercare sul foglio. */
-export const NOME_RIGA = 'Vanessa';
+/** The row to look for on the sheet. */
+export const ROW_NAME = 'Vanessa';
 
-/** L'API e aperta e ogni lettura costa: il tetto e la difesa principale. */
-export const MAX_LETTURE_AL_GIORNO = 10;
+/** The API is open and every reading costs money: the cap is the main defense. */
+export const MAX_READINGS_PER_DAY = 10;
 
-export interface GiornoLetto {
-  readonly giorno: number;
-  /** null vuol dire "sul foglio non c'e un turno": una x, una cella vuota,
-   *  o una cella illeggibile. Ai fini del salvataggio sono la stessa cosa. */
-  readonly codice: ShiftCode | null;
-  /** Suggerimento del modello, non verdetto: serve a sottolineare la cella.
-   *  Tutte le celle restano modificabili. */
-  readonly sicuro: boolean;
+export interface ReadDay {
+  readonly day: number;
+  /** null means "the sheet has no shift here": an x, an empty cell,
+   *  or an unreadable cell. For saving purposes they're the same thing. */
+  readonly code: ShiftCode | null;
+  /** The model's suggestion, not a verdict: it is used to underline the cell.
+   *  Every cell stays editable. */
+  readonly confident: boolean;
 }
 
-export interface EstrazioneFoto {
-  readonly mese: number;
-  readonly anno: number;
-  readonly trovata: boolean;
-  readonly nomeTrovato: string | null;
-  readonly rigaTrovata: number | null;
-  readonly giorni: readonly GiornoLetto[];
+export interface PhotoReading {
+  readonly month: number;
+  readonly year: number;
+  readonly found: boolean;
+  readonly foundName: string | null;
+  readonly foundRow: number | null;
+  readonly days: readonly ReadDay[];
 }
 
-/** La forma che il modello e obbligato a restituire.
+/** The shape the model is required to return.
  *
- * Niente minimi e massimi numerici: gli output strutturati non li applicano,
- * e comunque il giudice e validaEstrazione, non lo schema. */
-export const SCHEMA_ESTRAZIONE: Record<string, unknown> = {
+ * No numeric min/max: structured outputs don't enforce them, and the judge is
+ * validateReading anyway, not the schema. */
+export const READING_SCHEMA: Record<string, unknown> = {
   type: 'object',
   properties: {
-    mese: { type: 'integer' },
-    anno: { type: 'integer' },
-    trovata: { type: 'boolean' },
-    nomeTrovato: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    rigaTrovata: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    giorni: {
+    month: { type: 'integer' },
+    year: { type: 'integer' },
+    found: { type: 'boolean' },
+    foundName: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    foundRow: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+    days: {
       type: 'array',
       items: {
         type: 'object',
         properties: {
-          giorno: { type: 'integer' },
-          codice: {
+          day: { type: 'integer' },
+          code: {
             anyOf: [{ type: 'string', enum: SHIFTS.map((s) => s.code) }, { type: 'null' }],
           },
-          sicuro: { type: 'boolean' },
+          confident: { type: 'boolean' },
         },
-        required: ['giorno', 'codice', 'sicuro'],
+        required: ['day', 'code', 'confident'],
         additionalProperties: false,
       },
     },
   },
-  required: ['mese', 'anno', 'trovata', 'nomeTrovato', 'rigaTrovata', 'giorni'],
+  required: ['month', 'year', 'found', 'foundName', 'foundRow', 'days'],
   additionalProperties: false,
 };
 
-/** L'estrazione non si puo usare. */
-export class FotoNonValida extends Error {}
+/** The reading cannot be used. */
+export class InvalidReading extends Error {}
 
-/** La riga cercata non c'e nella foto: e un caso a parte, perche il rimedio
- *  che si suggerisce e diverso (rifotografare, non riscrivere). */
-export class RigaNonTrovata extends Error {}
+/** The row being looked for is not in the photo: it's a separate case, because
+ *  the remedy suggested is different (take the photo again, not rewrite). */
+export class RowNotFound extends Error {}
 
-function intero(v: unknown, campo: string): number {
+function integer(v: unknown, field: string): number {
   if (typeof v !== 'number' || !Number.isInteger(v)) {
-    throw new FotoNonValida(`${campo}: atteso un intero`);
+    throw new InvalidReading(`${field}: atteso un intero`);
   }
   return v;
 }
 
-export function validaEstrazione(v: unknown, annoAtteso: number): EstrazioneFoto {
+export function validateReading(v: unknown, expectedYear: number): PhotoReading {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) {
-    throw new FotoNonValida('estrazione: atteso un oggetto');
+    throw new InvalidReading('estrazione: atteso un oggetto');
   }
   const e = v as Record<string, unknown>;
 
-  if (e.trovata !== true) throw new RigaNonTrovata(`riga di ${NOME_RIGA} non trovata`);
+  if (e.found !== true) throw new RowNotFound(`riga di ${ROW_NAME} non trovata`);
 
-  const mese = intero(e.mese, 'mese');
-  if (mese < 1 || mese > 12) throw new FotoNonValida('mese: fuori da 1-12');
+  const month = integer(e.month, 'mese');
+  if (month < 1 || month > 12) throw new InvalidReading('mese: fuori da 1-12');
 
-  const anno = intero(e.anno, 'anno');
-  if (Math.abs(anno - annoAtteso) > 1) throw new FotoNonValida('anno: troppo lontano');
+  const year = integer(e.year, 'anno');
+  if (Math.abs(year - expectedYear) > 1) throw new InvalidReading('anno: troppo lontano');
 
-  if (typeof e.nomeTrovato !== 'string' || e.nomeTrovato.length === 0) {
-    throw new FotoNonValida('nomeTrovato: atteso un nome');
+  if (typeof e.foundName !== 'string' || e.foundName.length === 0) {
+    throw new InvalidReading('nomeTrovato: atteso un nome');
   }
-  const rigaTrovata = intero(e.rigaTrovata, 'rigaTrovata');
+  const foundRow = integer(e.foundRow, 'rigaTrovata');
 
-  if (!Array.isArray(e.giorni)) throw new FotoNonValida('giorni: atteso un elenco');
-  const attesi = daysInMonth(anno, mese);
-  if (e.giorni.length !== attesi) {
-    throw new FotoNonValida(`giorni: attesi ${attesi}, ricevuti ${e.giorni.length}`);
+  if (!Array.isArray(e.days)) throw new InvalidReading('giorni: atteso un elenco');
+  const expected = daysInMonth(year, month);
+  if (e.days.length !== expected) {
+    throw new InvalidReading(`giorni: attesi ${expected}, ricevuti ${e.days.length}`);
   }
 
-  const visti = new Set<number>();
-  const giorni: GiornoLetto[] = e.giorni.map((raw, i) => {
+  const seen = new Set<number>();
+  const days: ReadDay[] = e.days.map((raw, i) => {
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-      throw new FotoNonValida(`giorni[${i}]: atteso un oggetto`);
+      throw new InvalidReading(`giorni[${i}]: atteso un oggetto`);
     }
     const g = raw as Record<string, unknown>;
-    const giorno = intero(g.giorno, `giorni[${i}].giorno`);
-    if (giorno < 1 || giorno > attesi) {
-      throw new FotoNonValida(`giorni[${i}].giorno: ${giorno} non e nel mese`);
+    const day = integer(g.day, `giorni[${i}].giorno`);
+    if (day < 1 || day > expected) {
+      throw new InvalidReading(`giorni[${i}].giorno: ${day} non e nel mese`);
     }
-    // Lo stesso giorno due volte vorrebbe dire che una colonna e stata letta
-    // due volte e un'altra mai: la griglia non e allineata.
-    if (visti.has(giorno)) throw new FotoNonValida(`giorno ${giorno} compare due volte`);
-    visti.add(giorno);
+    // The same day twice would mean that one column was read twice and
+    // another never: the grid is not aligned.
+    if (seen.has(day)) throw new InvalidReading(`giorno ${day} compare due volte`);
+    seen.add(day);
 
-    const codice = g.codice;
-    if (codice !== null && !isShiftCode(codice)) {
-      throw new FotoNonValida(`giorni[${i}].codice: codice turno sconosciuto`);
+    const code = g.code;
+    if (code !== null && !isShiftCode(code)) {
+      throw new InvalidReading(`giorni[${i}].codice: codice turno sconosciuto`);
     }
-    if (typeof g.sicuro !== 'boolean') {
-      throw new FotoNonValida(`giorni[${i}].sicuro: atteso un booleano`);
+    if (typeof g.confident !== 'boolean') {
+      throw new InvalidReading(`giorni[${i}].sicuro: atteso un booleano`);
     }
-    return { giorno, codice: codice as ShiftCode | null, sicuro: g.sicuro };
+    return { day, code: code as ShiftCode | null, confident: g.confident };
   });
 
-  return { mese, anno, trovata: true, nomeTrovato: e.nomeTrovato, rigaTrovata, giorni };
+  return { month, year, found: true, foundName: e.foundName, foundRow, days };
 }
 
-/** Solo i giorni con un turno. Gli altri non si salvano e non cancellano
- *  nulla: una foto puo essere tagliata, e cancellare non ha ritorno. */
-export function vociDaEstrazione(e: EstrazioneFoto): ParsedEntry[] {
+/** Only the days with a shift. The others are not saved and don't delete
+ *  anything: a photo can be cropped, and deleting has no undo. */
+export function entriesFromReading(e: PhotoReading): ParsedEntry[] {
   const out: ParsedEntry[] = [];
-  for (const g of e.giorni) {
-    if (g.codice === null) continue;
-    out.push({ date: toIso(e.anno, e.mese, g.giorno), day: g.giorno, code: g.codice });
+  for (const g of e.days) {
+    if (g.code === null) continue;
+    out.push({ date: toIso(e.year, e.month, g.day), day: g.day, code: g.code });
   }
   return out;
 }
@@ -365,7 +364,7 @@ export type { IsoDate };
 Aggiungi in fondo:
 
 ```ts
-export * from './foto.js';
+export * from './photo.js';
 ```
 
 - [ ] **Step 6: Esegui i test e verifica che passino**
@@ -376,7 +375,7 @@ Expected: PASS, compresi i test già esistenti di `core`.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add app/core/src/foto.ts app/core/src/dates.ts app/core/src/index.ts app/core/test/foto.test.ts
+git add app/core/src/photo.ts app/core/src/dates.ts app/core/src/index.ts app/core/test/photo.test.ts
 git commit -m "feat: il contratto dell'estrazione da foto, e il suo giudice"
 ```
 
@@ -391,8 +390,8 @@ Un contatore atomico. Il punto delicato è che due richieste simultanee al confi
 - Create: `app/api/test/repo.test.ts`
 
 **Interfaces:**
-- Consumes: `MAX_LETTURE_AL_GIORNO` da `@vanessa/core`.
-- Produces: sull'interfaccia `Repo`, `consumaQuotaFoto(giorno: IsoDate, max: number): Promise<boolean>` — `true` se la lettura è concessa, `false` se il tetto è già stato raggiunto. Costante esportata `QUOTA_PK = 'QUOTA#FOTO'`.
+- Consumes: `MAX_READINGS_PER_DAY` da `@vanessa/core`.
+- Produces: sull'interfaccia `Repo`, `consumePhotoQuota(giorno: IsoDate, max: number): Promise<boolean>` — `true` se la lettura è concessa, `false` se il tetto è già stato raggiunto. Costante esportata `QUOTA_PK = 'QUOTA#FOTO'`.
 
 - [ ] **Step 1: Scrivi i test che falliscono**
 
@@ -405,69 +404,69 @@ import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 
 import { QUOTA_PK, createRepo } from '../src/repo.js';
 
-/** DynamoDB finto, con la sola semantica che ci interessa: ADD su un numero,
- *  e una condizione valutata sull'item com'era prima dell'aggiornamento. */
+/** Fake DynamoDB, with only the semantics we care about: ADD on a number,
+ *  and a condition evaluated on the item as it was before the update. */
 function fakeDoc(max: number) {
-  const conteggi = new Map<string, number>();
+  const counts = new Map<string, number>();
   const doc = {
     async send(cmd: { input: Record<string, any> }) {
       const key = String(cmd.input.Key.sk);
-      const attuale = conteggi.get(key) ?? 0;
-      const limite = Number(cmd.input.ExpressionAttributeValues[':max']);
-      if (conteggi.has(key) && attuale >= limite) {
+      const current = counts.get(key) ?? 0;
+      const limit = Number(cmd.input.ExpressionAttributeValues[':max']);
+      if (counts.has(key) && current >= limit) {
         const e = new Error('condizione fallita');
         e.name = 'ConditionalCheckFailedException';
         throw e;
       }
-      conteggi.set(key, attuale + 1);
+      counts.set(key, current + 1);
       return {};
     },
   };
-  return { doc: doc as unknown as DynamoDBDocumentClient, conteggi, max };
+  return { doc: doc as unknown as DynamoDBDocumentClient, counts, max };
 }
 
-describe('consumaQuotaFoto', () => {
-  it('concede le letture fino al tetto e non oltre', async () => {
-    const { doc, conteggi } = fakeDoc(3);
+describe('consumePhotoQuota', () => {
+  it('grants readings up to the cap and no further', async () => {
+    const { doc, counts } = fakeDoc(3);
     const repo = createRepo('tabella', doc);
 
-    expect(await repo.consumaQuotaFoto('2026-08-02', 3)).toBe(true);
-    expect(await repo.consumaQuotaFoto('2026-08-02', 3)).toBe(true);
-    expect(await repo.consumaQuotaFoto('2026-08-02', 3)).toBe(true);
-    expect(await repo.consumaQuotaFoto('2026-08-02', 3)).toBe(false);
-    expect(conteggi.get('2026-08-02')).toBe(3);
+    expect(await repo.consumePhotoQuota('2026-08-02', 3)).toBe(true);
+    expect(await repo.consumePhotoQuota('2026-08-02', 3)).toBe(true);
+    expect(await repo.consumePhotoQuota('2026-08-02', 3)).toBe(true);
+    expect(await repo.consumePhotoQuota('2026-08-02', 3)).toBe(false);
+    expect(counts.get('2026-08-02')).toBe(3);
   });
 
-  it('il giorno dopo riparte da zero', async () => {
+  it('starts over at zero the next day', async () => {
     const { doc } = fakeDoc(1);
     const repo = createRepo('tabella', doc);
 
-    expect(await repo.consumaQuotaFoto('2026-08-02', 1)).toBe(true);
-    expect(await repo.consumaQuotaFoto('2026-08-02', 1)).toBe(false);
-    expect(await repo.consumaQuotaFoto('2026-08-03', 1)).toBe(true);
+    expect(await repo.consumePhotoQuota('2026-08-02', 1)).toBe(true);
+    expect(await repo.consumePhotoQuota('2026-08-02', 1)).toBe(false);
+    expect(await repo.consumePhotoQuota('2026-08-03', 1)).toBe(true);
   });
 
-  it('scrive sotto la chiave della quota, non fra i turni', async () => {
-    const chiavi: Record<string, unknown>[] = [];
+  it('writes under the quota key, not among the shifts', async () => {
+    const keys: Record<string, unknown>[] = [];
     const doc = {
       async send(cmd: { input: Record<string, any> }) {
-        chiavi.push(cmd.input.Key);
+        keys.push(cmd.input.Key);
         return {};
       },
     } as unknown as DynamoDBDocumentClient;
 
-    await createRepo('tabella', doc).consumaQuotaFoto('2026-08-02', 10);
-    expect(chiavi[0]).toEqual({ pk: QUOTA_PK, sk: '2026-08-02' });
+    await createRepo('tabella', doc).consumePhotoQuota('2026-08-02', 10);
+    expect(keys[0]).toEqual({ pk: QUOTA_PK, sk: '2026-08-02' });
   });
 
-  it('un errore che non sia la condizione risale, non diventa un no silenzioso', async () => {
+  it('an error that is not the condition propagates, it does not become a silent no', async () => {
     const doc = {
       async send() {
         throw new Error('rete');
       },
     } as unknown as DynamoDBDocumentClient;
 
-    await expect(createRepo('tabella', doc).consumaQuotaFoto('2026-08-02', 10)).rejects.toThrow(
+    await expect(createRepo('tabella', doc).consumePhotoQuota('2026-08-02', 10)).rejects.toThrow(
       'rete',
     );
   });
@@ -477,7 +476,7 @@ describe('consumaQuotaFoto', () => {
 - [ ] **Step 2: Esegui i test e verifica che falliscano**
 
 Run: `cd app && npx vitest run --root api api/test/repo.test.ts`
-Expected: FAIL — `QUOTA_PK` non esiste e `consumaQuotaFoto` non è sul `Repo`.
+Expected: FAIL — `QUOTA_PK` non esiste e `consumePhotoQuota` non è sul `Repo`.
 
 - [ ] **Step 3: Implementa in `api/src/repo.ts`**
 
@@ -498,43 +497,43 @@ import {
 Sotto `CONFIG_SK`, aggiungi:
 
 ```ts
-/** Il contatore delle letture da foto, una riga per giorno. */
+/** The counter of photo readings, one row per day. */
 export const QUOTA_PK = 'QUOTA#FOTO';
 
-/** Quanto sopravvive una riga di conteggio dopo il suo giorno. Due giorni
- *  bastano a coprire qualsiasi fuso e lasciano la tabella pulita. */
-const QUOTA_TTL_GIORNI = 2;
+/** How long a count row survives past its day. Two days are enough to cover
+ *  any timezone and keep the table clean. */
+const QUOTA_TTL_DAYS = 2;
 ```
 
 Nell'interfaccia `Repo`, dopo `savePaySettings`:
 
 ```ts
-  /** Consuma una lettura da foto per quel giorno. `false` se il tetto e gia
-   *  stato raggiunto. Condizione e incremento sono la stessa operazione:
-   *  due richieste simultanee al confine non devono passare entrambe. */
-  consumaQuotaFoto(giorno: IsoDate, max: number): Promise<boolean>;
+  /** Consumes a photo reading for that day. `false` if the cap has already
+   *  been reached. The condition and the increment are the same operation:
+   *  two simultaneous requests at the boundary must not both go through. */
+  consumePhotoQuota(giorno: IsoDate, max: number): Promise<boolean>;
 ```
 
 E nell'oggetto restituito da `createRepo`, dopo `savePaySettings`:
 
 ```ts
-    async consumaQuotaFoto(giorno, max) {
+    async consumePhotoQuota(giorno, max) {
       const { year, month, day } = parseIso(giorno);
-      const scade = Math.floor(Date.UTC(year, month - 1, day + QUOTA_TTL_GIORNI) / 1000);
+      const expires = Math.floor(Date.UTC(year, month - 1, day + QUOTA_TTL_DAYS) / 1000);
       try {
         await doc.send(
           new UpdateCommand({
             TableName: table,
             Key: { pk: QUOTA_PK, sk: giorno },
-            UpdateExpression: 'SET scade = :scade ADD conteggio :uno',
-            ConditionExpression: 'attribute_not_exists(conteggio) OR conteggio < :max',
-            ExpressionAttributeValues: { ':uno': 1, ':max': max, ':scade': scade },
+            UpdateExpression: 'SET expires = :expires ADD count :one',
+            ConditionExpression: 'attribute_not_exists(count) OR count < :max',
+            ExpressionAttributeValues: { ':one': 1, ':max': max, ':expires': expires },
           }),
         );
         return true;
       } catch (e) {
-        // La condizione fallita e una risposta, non un guasto: il tetto e
-        // stato raggiunto. Qualsiasi altro errore deve risalire.
+        // The failed condition is a response, not a fault: the cap has been
+        // reached. Any other error must propagate.
         if ((e as { name?: string }).name === 'ConditionalCheckFailedException') return false;
         throw e;
       }
@@ -551,11 +550,11 @@ Expected: PASS (4 test).
 In `app/api/test/handlers.test.ts`, dentro `fakeRepo()`, aggiungi al `Repo` — subito dopo `savePaySettings` — il metodo mancante, altrimenti non compila:
 
 ```ts
-    async consumaQuotaFoto(giorno, max) {
-      calls.push(`consumaQuotaFoto(${giorno},${max})`);
-      const usate = (quota.get(giorno) ?? 0) + 1;
-      if (usate > max) return false;
-      quota.set(giorno, usate);
+    async consumePhotoQuota(giorno, max) {
+      calls.push(`consumePhotoQuota(${giorno},${max})`);
+      const used = (quota.get(giorno) ?? 0) + 1;
+      if (used > max) return false;
+      quota.set(giorno, used);
       return true;
     },
 ```
@@ -576,24 +575,24 @@ git commit -m "feat: tetto giornaliero alle letture da foto, atomico"
 
 ---
 
-### Task 3: `api/src/visione.ts` — la chiamata a Bedrock
+### Task 3: `api/src/vision.ts` — la chiamata a Bedrock
 
 L'unico pezzo che parla col modello. Non giudica niente: restituisce quello che ha ricevuto, e lascia giudicare a `core`.
 
 **Files:**
-- Create: `app/api/src/visione.ts`
-- Create: `app/api/test/visione.test.ts`
+- Create: `app/api/src/vision.ts`
+- Create: `app/api/test/vision.test.ts`
 - Modify: `app/api/package.json`
 
 **Interfaces:**
-- Consumes: `NOME_RIGA`, `SCHEMA_ESTRAZIONE` da `@vanessa/core`.
+- Consumes: `ROW_NAME`, `READING_SCHEMA` da `@vanessa/core`.
 - Produces:
-  - `type Visione = (immagineBase64: string) => Promise<unknown>`
-  - `MODELLO = 'anthropic.claude-opus-5'`
-  - `class VisioneFallita extends Error`
-  - `creaVisione(client?: ClienteMessaggi): Visione`
-  - `interface ClienteMessaggi { messages: { create(body: unknown): Promise<RispostaMessaggi> } }` — il minimo che serve, così i test non montano l'SDK
-  - `interface RispostaMessaggi { stop_reason?: string | null; content: { type: string; text?: string }[] }`
+  - `type Vision = (immagineBase64: string) => Promise<unknown>`
+  - `MODEL = 'anthropic.claude-opus-5'`
+  - `class VisionFailed extends Error`
+  - `createVision(client?: MessagesClient): Vision`
+  - `interface MessagesClient { messages: { create(body: unknown): Promise<MessagesResponse> } }` — il minimo che serve, così i test non montano l'SDK
+  - `interface MessagesResponse { stop_reason?: string | null; content: { type: string; text?: string }[] }`
 
 - [ ] **Step 1: Aggiungi la dipendenza**
 
@@ -603,29 +602,29 @@ cd app && npm install --workspace @vanessa/api @anthropic-ai/bedrock-sdk
 
 - [ ] **Step 2: Scrivi i test che falliscono**
 
-Crea `app/api/test/visione.test.ts`:
+Crea `app/api/test/vision.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
 
-import { NOME_RIGA } from '@vanessa/core';
+import { ROW_NAME } from '@vanessa/core';
 
-import { MODELLO, VisioneFallita, creaVisione } from '../src/visione.js';
+import { MODEL, VisionFailed, createVision } from '../src/vision.js';
 
-function clienteChe(risposta: unknown) {
-  const inviati: any[] = [];
+function clientReturning(risposta: unknown) {
+  const sent: any[] = [];
   const client = {
     messages: {
       async create(body: unknown) {
-        inviati.push(body);
+        sent.push(body);
         return risposta as never;
       },
     },
   };
-  return { client, inviati };
+  return { client, sent };
 }
 
-const RISPOSTA_BUONA = {
+const GOOD_RESPONSE = {
   stop_reason: 'end_turn',
   content: [
     { type: 'thinking', thinking: '' },
@@ -633,108 +632,108 @@ const RISPOSTA_BUONA = {
   ],
 };
 
-describe('creaVisione', () => {
-  it('restituisce il JSON del blocco di testo, gia deserializzato', async () => {
-    const { client } = clienteChe(RISPOSTA_BUONA);
-    const out = await creaVisione(client)('AAAA');
+describe('createVision', () => {
+  it('returns the JSON of the text block, already deserialized', async () => {
+    const { client } = clientReturning(GOOD_RESPONSE);
+    const out = await createVision(client)('AAAA');
     expect(out).toEqual({ mese: 8, anno: 2026, trovata: true });
   });
 
-  it('manda immagine, modello, schema e il nome della riga', async () => {
-    const { client, inviati } = clienteChe(RISPOSTA_BUONA);
-    await creaVisione(client)('AAAA');
+  it('sends image, model, schema and the row name', async () => {
+    const { client, sent } = clientReturning(GOOD_RESPONSE);
+    await createVision(client)('AAAA');
 
-    const b = inviati[0];
-    expect(b.model).toBe(MODELLO);
+    const b = sent[0];
+    expect(b.model).toBe(MODEL);
     expect(b.output_config.format.type).toBe('json_schema');
 
-    const blocchi = b.messages[0].content;
-    const immagine = blocchi.find((c: any) => c.type === 'image');
-    expect(immagine.source).toEqual({
+    const blocks = b.messages[0].content;
+    const image = blocks.find((c: any) => c.type === 'image');
+    expect(image.source).toEqual({
       type: 'base64',
       media_type: 'image/jpeg',
       data: 'AAAA',
     });
-    const testo = blocchi.find((c: any) => c.type === 'text').text;
-    expect(testo).toContain(NOME_RIGA);
+    const text = blocks.find((c: any) => c.type === 'text').text;
+    expect(text).toContain(ROW_NAME);
   });
 
-  it('salta i blocchi di ragionamento e prende il testo', async () => {
-    const { client } = clienteChe({
+  it('skips the reasoning blocks and takes the text', async () => {
+    const { client } = clientReturning({
       stop_reason: 'end_turn',
       content: [{ type: 'thinking', thinking: '' }, { type: 'text', text: '{"a":1}' }],
     });
-    expect(await creaVisione(client)('AAAA')).toEqual({ a: 1 });
+    expect(await createVision(client)('AAAA')).toEqual({ a: 1 });
   });
 
-  it('un rifiuto del modello non e un JSON da leggere', async () => {
-    const { client } = clienteChe({ stop_reason: 'refusal', content: [] });
-    await expect(creaVisione(client)('AAAA')).rejects.toThrow(VisioneFallita);
+  it('a refusal from the model is not JSON to read', async () => {
+    const { client } = clientReturning({ stop_reason: 'refusal', content: [] });
+    await expect(createVision(client)('AAAA')).rejects.toThrow(VisionFailed);
   });
 
-  it('una risposta troncata non e un JSON da leggere', async () => {
-    const { client } = clienteChe({
+  it('a truncated response is not JSON to read', async () => {
+    const { client } = clientReturning({
       stop_reason: 'max_tokens',
       content: [{ type: 'text', text: '{"mese":8' }],
     });
-    await expect(creaVisione(client)('AAAA')).rejects.toThrow(VisioneFallita);
+    await expect(createVision(client)('AAAA')).rejects.toThrow(VisionFailed);
   });
 
-  it('nessun blocco di testo e un errore, non un undefined che viaggia', async () => {
-    const { client } = clienteChe({ stop_reason: 'end_turn', content: [] });
-    await expect(creaVisione(client)('AAAA')).rejects.toThrow(VisioneFallita);
+  it('no text block is an error, not an undefined that travels on', async () => {
+    const { client } = clientReturning({ stop_reason: 'end_turn', content: [] });
+    await expect(createVision(client)('AAAA')).rejects.toThrow(VisionFailed);
   });
 
-  it('testo che non e JSON e un errore', async () => {
-    const { client } = clienteChe({
+  it('text that is not JSON is an error', async () => {
+    const { client } = clientReturning({
       stop_reason: 'end_turn',
       content: [{ type: 'text', text: 'mi dispiace' }],
     });
-    await expect(creaVisione(client)('AAAA')).rejects.toThrow(VisioneFallita);
+    await expect(createVision(client)('AAAA')).rejects.toThrow(VisionFailed);
   });
 });
 ```
 
 - [ ] **Step 3: Esegui i test e verifica che falliscano**
 
-Run: `cd app && npx vitest run --root api api/test/visione.test.ts`
-Expected: FAIL — `../src/visione.js` non esiste.
+Run: `cd app && npx vitest run --root api api/test/vision.test.ts`
+Expected: FAIL — `../src/vision.js` non esiste.
 
-- [ ] **Step 4: Scrivi `api/src/visione.ts`**
+- [ ] **Step 4: Scrivi `api/src/vision.ts`**
 
 ```ts
-/** La lettura della foto: l'unico punto che parla con il modello.
+/** The photo reading: the only point that talks to the model.
  *
- * Non giudica niente. Restituisce quello che ha ricevuto, gia deserializzato,
- * e lascia a `core` il compito di dire se e utilizzabile: il giudizio e logica
- * di dominio, e deve poter essere testato senza rete.
+ * It doesn't judge anything. It returns what it received, already
+ * deserialized, and leaves it to `core` to say whether it's usable: the
+ * judgment is domain logic, and must be testable without a network.
  *
- * Il prompt e in italiano come il foglio che descrive: le sigle, i nomi dei
- * mesi e la parola "turno" sono il vocabolario del documento.
+ * The prompt is in Italian like the sheet it describes: the codes, the month
+ * names and the word "turno" (shift) are the document's own vocabulary.
  */
 
 import { AnthropicBedrockMantle } from '@anthropic-ai/bedrock-sdk';
 
-import { NOME_RIGA, SCHEMA_ESTRAZIONE, SHIFTS } from '@vanessa/core';
+import { ROW_NAME, READING_SCHEMA, SHIFTS } from '@vanessa/core';
 
-export const MODELLO = 'anthropic.claude-opus-5';
-export const REGIONE = process.env.AWS_REGION ?? 'eu-south-1';
+export const MODEL = 'anthropic.claude-opus-5';
+export const REGION = process.env.AWS_REGION ?? 'eu-south-1';
 
-/** Il minimo che serve del client, cosi i test non montano l'SDK. */
-export interface RispostaMessaggi {
+/** The minimum the client needs, so the tests don't pull in the SDK. */
+export interface MessagesResponse {
   stop_reason?: string | null;
   content: { type: string; text?: string }[];
 }
-export interface ClienteMessaggi {
-  messages: { create(body: unknown): Promise<RispostaMessaggi> };
+export interface MessagesClient {
+  messages: { create(body: unknown): Promise<MessagesResponse> };
 }
 
-export type Visione = (immagineBase64: string) => Promise<unknown>;
+export type Vision = (immagineBase64: string) => Promise<unknown>;
 
-/** La lettura non e riuscita. Il chiamante la traduce in un messaggio. */
-export class VisioneFallita extends Error {}
+/** The reading didn't succeed. The caller translates it into a message. */
+export class VisionFailed extends Error {}
 
-const CODICI = SHIFTS.map((s) => s.code).join(', ');
+const CODES = SHIFTS.map((s) => s.code).join(', ');
 
 const PROMPT = `Questa foto e' il foglio dei turni mensile di una struttura sanitaria.
 
@@ -743,12 +742,12 @@ Sopra le colonne c'e' una riga con i numeri dei giorni, da 1 fino alla fine del
 mese: usala per allineare le colonne, non contarle a occhio. In alto c'e' il
 titolo con il mese e l'anno.
 
-Devi leggere UNA SOLA riga: quella della persona di nome ${NOME_RIGA}.
+Devi leggere UNA SOLA riga: quella della persona di nome ${ROW_NAME}.
 I nomi stanno a sinistra, su due righe (cognome sopra, nome sotto): la riga dei
 turni e' quella del nome.
 
 Per ogni giorno del mese riporta la sigla che sta nella cella di quella riga.
-Le sigle valide sono soltanto: ${CODICI}.
+Le sigle valide sono soltanto: ${CODES}.
 Se la cella contiene una x, e' vuota, oppure non riesci a leggerla con
 ragionevole certezza, metti codice null.
 
@@ -759,24 +758,24 @@ Riporta un elemento per OGNI giorno del mese, dal primo all'ultimo, anche per i
 giorni con codice null. Metti sicuro a false quando la cella e' sbiadita,
 corretta a mano, ambigua o coperta.
 
-Se nella foto non c'e' nessuna riga intestata a ${NOME_RIGA}, metti trovata a
+Se nella foto non c'e' nessuna riga intestata a ${ROW_NAME}, metti trovata a
 false e giorni a un elenco vuoto.`;
 
-/** Il ragionamento su Claude Opus 5 e attivo per impostazione predefinita, ed
- *  e' quello che serve: contare trentuno colonne storte e scritte a mano non e'
- *  un colpo d'occhio. Il tetto dei token vale per ragionamento piu' risposta
- *  insieme, quindi sta largo: stretto, tronca a meta'. */
+/** Reasoning on Claude Opus 5 is on by default, and that's what's needed:
+ *  counting thirty-one crooked, handwritten columns isn't a glance. The token
+ *  cap covers reasoning plus response together, so it's set generous: too
+ *  tight, and it truncates halfway. */
 const MAX_TOKENS = 8000;
 
-export function creaVisione(client?: ClienteMessaggi): Visione {
-  const c: ClienteMessaggi =
-    client ?? (new AnthropicBedrockMantle({ awsRegion: REGIONE }) as unknown as ClienteMessaggi);
+export function createVision(client?: MessagesClient): Vision {
+  const c: MessagesClient =
+    client ?? (new AnthropicBedrockMantle({ awsRegion: REGION }) as unknown as MessagesClient);
 
   return async (immagineBase64: string) => {
-    const risposta = await c.messages.create({
-      model: MODELLO,
+    const response = await c.messages.create({
+      model: MODEL,
       max_tokens: MAX_TOKENS,
-      output_config: { format: { type: 'json_schema', schema: SCHEMA_ESTRAZIONE } },
+      output_config: { format: { type: 'json_schema', schema: READING_SCHEMA } },
       messages: [
         {
           role: 'user',
@@ -791,22 +790,22 @@ export function creaVisione(client?: ClienteMessaggi): Visione {
       ],
     });
 
-    // I classificatori possono rifiutare: e un 200 con content vuoto, non un
-    // errore HTTP. Leggere content[0] qui darebbe un undefined che viaggia.
-    if (risposta.stop_reason === 'refusal') {
-      throw new VisioneFallita('il modello ha rifiutato la richiesta');
+    // Classifiers can refuse: that's a 200 with empty content, not an HTTP
+    // error. Reading content[0] here would give an undefined that travels on.
+    if (response.stop_reason === 'refusal') {
+      throw new VisionFailed('il modello ha rifiutato la richiesta');
     }
-    if (risposta.stop_reason === 'max_tokens') {
-      throw new VisioneFallita('risposta troncata');
+    if (response.stop_reason === 'max_tokens') {
+      throw new VisionFailed('risposta troncata');
     }
 
-    const testo = risposta.content.find((b) => b.type === 'text')?.text;
-    if (!testo) throw new VisioneFallita('nessun blocco di testo nella risposta');
+    const text = response.content.find((b) => b.type === 'text')?.text;
+    if (!text) throw new VisionFailed('nessun blocco di testo nella risposta');
 
     try {
-      return JSON.parse(testo);
+      return JSON.parse(text);
     } catch {
-      throw new VisioneFallita('la risposta non e JSON');
+      throw new VisionFailed('la risposta non e JSON');
     }
   };
 }
@@ -814,19 +813,19 @@ export function creaVisione(client?: ClienteMessaggi): Visione {
 
 - [ ] **Step 5: Esegui i test e verifica che passino**
 
-Run: `cd app && npx vitest run --root api api/test/visione.test.ts`
+Run: `cd app && npx vitest run --root api api/test/vision.test.ts`
 Expected: PASS (7 test).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add app/api/src/visione.ts app/api/test/visione.test.ts app/api/package.json app/package-lock.json
+git add app/api/src/vision.ts app/api/test/vision.test.ts app/api/package.json app/package-lock.json
 git commit -m "feat: la lettura della foto con Claude Opus 5 su Bedrock"
 ```
 
 ---
 
-### Task 4: l'handler `leggiFoto`
+### Task 4: l'handler `readPhoto`
 
 Cuce insieme i tre pezzi nell'ordine che conta: prima si rifiuta quello che è troppo grande (senza spendere), poi si consuma la quota, poi si spende.
 
@@ -836,143 +835,143 @@ Cuce insieme i tre pezzi nell'ordine che conta: prima si rifiuta quello che è t
 - Modify: `app/api/test/handlers.test.ts`
 
 **Interfaces:**
-- Consumes: `Repo.consumaQuotaFoto` (Task 2), `Visione` e `VisioneFallita` (Task 3), `validaEstrazione`, `FotoNonValida`, `RigaNonTrovata`, `MAX_LETTURE_AL_GIORNO`, `giornoRoma` (Task 1).
-- Produces: `MAX_CORPO_BYTE` e `requireImmagine(v: unknown): string` da `http.js`; `leggiFotoWith(repo: Repo, visione: Visione, oggi?: () => IsoDate, anno?: () => number)` e l'entry point `leggiFoto` da `handlers.js`.
+- Consumes: `Repo.consumePhotoQuota` (Task 2), `Vision` e `VisionFailed` (Task 3), `validateReading`, `InvalidReading`, `RowNotFound`, `MAX_READINGS_PER_DAY`, `romeToday` (Task 1).
+- Produces: `MAX_BODY_BYTES` e `requireImage(v: unknown): string` da `http.js`; `readPhotoWith(repo: Repo, vision: Vision, today?: () => IsoDate, year?: () => number)` e l'entry point `readPhoto` da `handlers.js`.
 
 - [ ] **Step 1: Scrivi i test che falliscono**
 
 In fondo a `app/api/test/handlers.test.ts` aggiungi:
 
 ```ts
-import { leggiFotoWith } from '../src/handlers.js';
-import { VisioneFallita } from '../src/visione.js';
+import { readPhotoWith } from '../src/handlers.js';
+import { VisionFailed } from '../src/vision.js';
 
-/** Un'estrazione valida di agosto, con un solo turno il primo del mese. */
-function estrazioneAgosto() {
+/** A valid August reading, with a single shift on the first of the month. */
+function augustReading() {
   return {
-    mese: 8,
-    anno: 2026,
-    trovata: true,
-    nomeTrovato: 'Vanessa',
-    rigaTrovata: 12,
-    giorni: Array.from({ length: 31 }, (_, i) => ({
-      giorno: i + 1,
-      codice: i === 0 ? 'L' : null,
-      sicuro: true,
+    month: 8,
+    year: 2026,
+    found: true,
+    foundName: 'Vanessa',
+    foundRow: 12,
+    days: Array.from({ length: 31 }, (_, i) => ({
+      day: i + 1,
+      code: i === 0 ? 'L' : null,
+      confident: true,
     })),
   };
 }
 
-function eventoFoto(immagine: string) {
-  return event({ body: JSON.stringify({ immagine }) });
+function photoEvent(image: string) {
+  return event({ body: JSON.stringify({ image }) });
 }
 
-describe('leggiFoto', () => {
-  const oggi = () => '2026-08-02';
-  const anno = () => 2026;
+describe('readPhoto', () => {
+  const today = () => '2026-08-02';
+  const year = () => 2026;
 
-  it('legge la foto e restituisce l estrazione', async () => {
+  it('reads the photo and returns the reading', async () => {
     const { repo } = fakeRepo();
-    const h = leggiFotoWith(repo, async () => estrazioneAgosto(), oggi, anno);
+    const h = readPhotoWith(repo, async () => augustReading(), today, year);
 
-    const r: any = await h(eventoFoto('AAAA'));
+    const r: any = await h(photoEvent('AAAA'));
     expect(r.statusCode).toBe(200);
-    expect(body(r).estrazione.giorni).toHaveLength(31);
-    expect(body(r).estrazione.mese).toBe(8);
+    expect(body(r).reading.days).toHaveLength(31);
+    expect(body(r).reading.month).toBe(8);
   });
 
-  it('non scrive nessun turno', async () => {
+  it('writes no shift', async () => {
     const { repo, shifts } = fakeRepo();
-    const h = leggiFotoWith(repo, async () => estrazioneAgosto(), oggi, anno);
+    const h = readPhotoWith(repo, async () => augustReading(), today, year);
 
-    await h(eventoFoto('AAAA'));
+    await h(photoEvent('AAAA'));
     expect(shifts.size).toBe(0);
   });
 
-  it('oltre il tetto risponde 429 senza chiamare il modello', async () => {
+  it('past the cap it responds 429 without calling the model', async () => {
     const { repo } = fakeRepo();
-    let chiamate = 0;
-    const h = leggiFotoWith(
+    let calls = 0;
+    const h = readPhotoWith(
       repo,
       async () => {
-        chiamate += 1;
-        return estrazioneAgosto();
+        calls += 1;
+        return augustReading();
       },
-      oggi,
-      anno,
+      today,
+      year,
     );
 
     for (let i = 0; i < 10; i++) {
-      const consentita: any = await h(eventoFoto('AAAA'));
-      expect(consentita.statusCode).toBe(200);
+      const allowed: any = await h(photoEvent('AAAA'));
+      expect(allowed.statusCode).toBe(200);
     }
-    const r: any = await h(eventoFoto('AAAA'));
+    const r: any = await h(photoEvent('AAAA'));
     expect(r.statusCode).toBe(429);
-    expect(chiamate).toBe(10);
+    expect(calls).toBe(10);
   });
 
-  it('un corpo troppo grande e 413, senza toccare quota ne modello', async () => {
+  it('an oversized body is 413, touching neither quota nor model', async () => {
     const { repo, calls } = fakeRepo();
-    let chiamate = 0;
-    const h = leggiFotoWith(
+    let readCalls = 0;
+    const h = readPhotoWith(
       repo,
       async () => {
-        chiamate += 1;
-        return estrazioneAgosto();
+        readCalls += 1;
+        return augustReading();
       },
-      oggi,
-      anno,
+      today,
+      year,
     );
 
-    const r: any = await h(eventoFoto('A'.repeat(2 * 1024 * 1024 + 1)));
+    const r: any = await h(photoEvent('A'.repeat(2 * 1024 * 1024 + 1)));
     expect(r.statusCode).toBe(413);
-    expect(chiamate).toBe(0);
-    expect(calls.filter((c) => c.startsWith('consumaQuotaFoto'))).toEqual([]);
+    expect(readCalls).toBe(0);
+    expect(calls.filter((c) => c.startsWith('consumePhotoQuota'))).toEqual([]);
   });
 
-  it('quando il modello fallisce la quota resta consumata', async () => {
+  it('when the model fails the quota stays spent', async () => {
     const { repo, quota } = fakeRepo();
-    const h = leggiFotoWith(
+    const h = readPhotoWith(
       repo,
       async () => {
-        throw new VisioneFallita('boom');
+        throw new VisionFailed('boom');
       },
-      oggi,
-      anno,
+      today,
+      year,
     );
 
-    const r: any = await h(eventoFoto('AAAA'));
+    const r: any = await h(photoEvent('AAAA'));
     expect(r.statusCode).toBe(502);
-    // Altrimenti chi abusa ottiene tentativi gratis facendo fallire la lettura.
+    // Otherwise anyone abusing it gets free attempts by making the reading fail.
     expect(quota.get('2026-08-02')).toBe(1);
   });
 
-  it('un estrazione che non supera la validazione e 422, non 500', async () => {
+  it('a reading that fails validation is 422, not 500', async () => {
     const { repo } = fakeRepo();
-    const h = leggiFotoWith(repo, async () => ({ mese: 99 }), oggi, anno);
+    const h = readPhotoWith(repo, async () => ({ month: 99 }), today, year);
 
-    const r: any = await h(eventoFoto('AAAA'));
+    const r: any = await h(photoEvent('AAAA'));
     expect(r.statusCode).toBe(422);
     expect(body(r).errore).toContain('leggere');
   });
 
-  it('riga non trovata ha un messaggio suo', async () => {
+  it('row not found has its own message', async () => {
     const { repo } = fakeRepo();
-    const h = leggiFotoWith(
+    const h = readPhotoWith(
       repo,
-      async () => ({ ...estrazioneAgosto(), trovata: false, nomeTrovato: null, rigaTrovata: null }),
-      oggi,
-      anno,
+      async () => ({ ...augustReading(), found: false, foundName: null, foundRow: null }),
+      today,
+      year,
     );
 
-    const r: any = await h(eventoFoto('AAAA'));
+    const r: any = await h(photoEvent('AAAA'));
     expect(r.statusCode).toBe(422);
     expect(body(r).errore).toContain('Vanessa');
   });
 
-  it('senza immagine e 400', async () => {
+  it('without an image it is 400', async () => {
     const { repo } = fakeRepo();
-    const h = leggiFotoWith(repo, async () => estrazioneAgosto(), oggi, anno);
+    const h = readPhotoWith(repo, async () => augustReading(), today, year);
 
     const r: any = await h(event({ body: JSON.stringify({}) }));
     expect(r.statusCode).toBe(400);
@@ -983,27 +982,27 @@ describe('leggiFoto', () => {
 - [ ] **Step 2: Esegui i test e verifica che falliscano**
 
 Run: `cd app && npx vitest run --root api api/test/handlers.test.ts`
-Expected: FAIL — `leggiFotoWith` non è esportata.
+Expected: FAIL — `readPhotoWith` non è esportata.
 
-- [ ] **Step 3: Aggiungi `requireImmagine` a `api/src/http.ts`**
+- [ ] **Step 3: Aggiungi `requireImage` a `api/src/http.ts`**
 
 In fondo, prima di `handle`:
 
 ```ts
-/** Due megabyte. Un'immagine ridimensionata come si deve ne pesa meno di uno:
- *  oltre questa soglia non c'e' niente da leggere, c'e' solo da spendere. */
-export const MAX_CORPO_BYTE = 2 * 1024 * 1024;
+/** Two megabytes. A properly resized image weighs less than one: past this
+ *  threshold there's nothing to read, only money to spend. */
+export const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
-/** Il corpo e' troppo grande: 413, e la richiesta si ferma prima di costare. */
-export class TroppoGrande extends Error {}
+/** The body is too large: 413, and the request stops before it costs anything. */
+export class TooLarge extends Error {}
 
-export function requireImmagine(v: unknown): string {
+export function requireImage(v: unknown): string {
   if (typeof v !== 'string' || v.length === 0) {
     throw new InvalidInput('immagine: attesa l immagine in base64');
   }
-  // La lunghezza in base64 e' una stima per eccesso dei byte: va benissimo,
-  // il controllo serve a fermare l'enorme, non a misurare il giusto.
-  if (v.length > MAX_CORPO_BYTE) throw new TroppoGrande('immagine troppo grande');
+  // The base64 length is an over-estimate of the bytes: that's fine, the
+  // check is meant to stop the huge, not to measure the exact.
+  if (v.length > MAX_BODY_BYTES) throw new TooLarge('immagine troppo grande');
   return v;
 }
 ```
@@ -1015,7 +1014,7 @@ export function handle(
   fn: () => Promise<APIGatewayProxyResultV2>,
 ): Promise<APIGatewayProxyResultV2> {
   return fn().catch((e: unknown) => {
-    if (e instanceof TroppoGrande) return failure(413, e.message);
+    if (e instanceof TooLarge) return failure(413, e.message);
     if (e instanceof InvalidInput) return failure(400, e.message);
     console.error('unhandled error', e);
     return failure(500, 'errore interno');
@@ -1035,55 +1034,55 @@ Aggiungi agli import:
 
 ```ts
 import {
-  FotoNonValida,
-  MAX_LETTURE_AL_GIORNO,
-  RigaNonTrovata,
-  giornoRoma,
-  validaEstrazione,
+  InvalidReading,
+  MAX_READINGS_PER_DAY,
+  RowNotFound,
+  romeToday,
+  validateReading,
 } from '@vanessa/core';
 import type { IsoDate } from '@vanessa/core';
 
-import type { Visione } from './visione.js';
-import { VisioneFallita, creaVisione } from './visione.js';
+import type { Vision } from './vision.js';
+import { VisionFailed, createVision } from './vision.js';
 ```
 
-e a quelli da `./http.js`: `failure`, `requireImmagine`.
+e a quelli da `./http.js`: `failure`, `requireImage`.
 
 Poi, dopo `putConfigWith`:
 
 ```ts
-/** Legge una foto del foglio e restituisce quello che c'e' scritto.
+/** Reads a photo of the sheet and returns what's written on it.
  *
- * L'ordine dei tre passi e' la difesa: si rifiuta l'enorme prima di spendere,
- * si consuma la quota prima di chiamare il modello, e la quota NON si
- * restituisce se il modello fallisce — altrimenti chi abusa ottiene tentativi
- * gratis proprio facendo fallire la lettura.
+ * The order of the three steps is the defense: the huge is rejected before
+ * spending anything, the quota is consumed before calling the model, and the
+ * quota is NOT refunded if the model fails — otherwise anyone abusing it gets
+ * free attempts by making the reading fail on purpose.
  *
- * Non scrive nessun turno: il salvataggio resta su PUT /shifts, che ha gia'
- * la revisione di cosa verrebbe sovrascritto.
+ * It writes no shift: saving stays on PUT /shifts, which already has the
+ * review of what would be overwritten.
  */
-export function leggiFotoWith(
+export function readPhotoWith(
   repo: Repo,
-  visione: Visione,
-  oggi: () => IsoDate = giornoRoma,
-  anno: () => number = () => new Date().getFullYear(),
+  vision: Vision,
+  today: () => IsoDate = romeToday,
+  year: () => number = () => new Date().getFullYear(),
 ) {
   return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
     handle(async () => {
-      const immagine = requireImmagine(parseJson(event.body).immagine);
+      const image = requireImage(parseJson(event.body).image);
 
-      if (!(await repo.consumaQuotaFoto(oggi(), MAX_LETTURE_AL_GIORNO))) {
+      if (!(await repo.consumePhotoQuota(today(), MAX_READINGS_PER_DAY))) {
         return failure(
           429,
-          `Hai gia' usato le ${MAX_LETTURE_AL_GIORNO} letture di oggi. Riprova domani, oppure scrivi i codici a mano.`,
+          `Hai gia' usato le ${MAX_READINGS_PER_DAY} letture di oggi. Riprova domani, oppure scrivi i codici a mano.`,
         );
       }
 
-      let grezzo: unknown;
+      let raw: unknown;
       try {
-        grezzo = await visione(immagine);
+        raw = await vision(image);
       } catch (e) {
-        if (e instanceof VisioneFallita) {
+        if (e instanceof VisionFailed) {
           console.error('lettura fallita', e.message);
           return failure(502, 'Il servizio non risponde. Riprova fra un minuto.');
         }
@@ -1091,15 +1090,15 @@ export function leggiFotoWith(
       }
 
       try {
-        return ok({ estrazione: validaEstrazione(grezzo, anno()) });
+        return ok({ reading: validateReading(raw, year()) });
       } catch (e) {
-        if (e instanceof RigaNonTrovata) {
+        if (e instanceof RowNotFound) {
           return failure(
             422,
             'Non ho trovato la riga di Vanessa in questa foto. Controlla che si veda tutta la riga, dal nome fino all ultimo giorno.',
           );
         }
-        if (e instanceof FotoNonValida) {
+        if (e instanceof InvalidReading) {
           console.error('estrazione non valida', e.message);
           return failure(
             422,
@@ -1115,8 +1114,8 @@ export function leggiFotoWith(
 E in fondo, fra gli entry point:
 
 ```ts
-export const leggiFoto = (e: APIGatewayProxyEventV2) =>
-  leggiFotoWith(repoFromEnvironment(), creaVisione())(e);
+export const readPhoto = (e: APIGatewayProxyEventV2) =>
+  readPhotoWith(repoFromEnvironment(), createVision())(e);
 ```
 
 - [ ] **Step 5: Esegui i test e verifica che passino**
@@ -1142,30 +1141,30 @@ La Lambda dietro una Function URL, perché API Gateway tronca a 30 secondi e una
 - Modify: `app/infra/test/stacks.test.ts`
 
 **Interfaces:**
-- Produces: `AppStack.fotoUrl: string`, output CloudFormation `UrlFoto`.
+- Produces: `AppStack.photoUrl: string`, output CloudFormation `PhotoUrl`.
 
 - [ ] **Step 1: Scrivi i test che falliscono**
 
 In `app/infra/test/stacks.test.ts`, dentro il file, aggiungi una `describe` nuova:
 
 ```ts
-describe('lettura delle foto', () => {
-  it('ha una Lambda con abbastanza tempo per una lettura', () => {
+describe('reading photos', () => {
+  it('has a Lambda with enough time for a reading', () => {
     app.hasResourceProperties('AWS::Lambda::Function', {
-      Handler: 'index.leggiFoto',
+      Handler: 'index.readPhoto',
       Timeout: 120,
       ReservedConcurrentExecutions: 2,
     });
   });
 
-  it('sta dietro una Function URL, non dietro API Gateway', () => {
+  it('sits behind a Function URL, not behind API Gateway', () => {
     app.hasResourceProperties('AWS::Lambda::Url', {
       AuthType: 'NONE',
       Cors: Match.objectLike({ AllowOrigins: ['https://vanessa.matteo.cool'] }),
     });
   });
 
-  it('puo invocare il modello, e nient altro di Bedrock', () => {
+  it('can invoke the model, and nothing else of Bedrock', () => {
     app.hasResourceProperties('AWS::IAM::Policy', {
       PolicyDocument: Match.objectLike({
         Statement: Match.arrayWith([
@@ -1178,9 +1177,9 @@ describe('lettura delle foto', () => {
     });
   });
 
-  it('la tabella scade le righe del contatore', () => {
+  it('the table expires the counter rows', () => {
     app.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
-      TimeToLiveSpecification: { AttributeName: 'scade', Enabled: true },
+      TimeToLiveSpecification: { AttributeName: 'expires', Enabled: true },
     });
   });
 });
@@ -1208,9 +1207,9 @@ Nel `TableV2`, aggiungi il TTL — è un aggiornamento in loco, non ricrea la ta
       sortKey: { name: 'sk', type: AttributeType.STRING },
       billing: Billing.onDemand(),
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      // Solo le righe del contatore delle foto portano `scade`: i turni no,
-      // e restano dove sono.
-      timeToLiveAttribute: 'scade',
+      // Only the photo counter rows carry `expires`: shifts don't,
+      // and they stay where they are.
+      timeToLiveAttribute: 'expires',
       removalPolicy: RemovalPolicy.RETAIN,
     });
 ```
@@ -1219,27 +1218,28 @@ Dichiara il campo pubblico accanto a `apiUrl`:
 
 ```ts
   readonly apiUrl: string;
-  readonly fotoUrl: string;
+  readonly photoUrl: string;
 ```
 
 Dopo `const putConfigFn = lambda('PutConfig', 'putConfig');`, aggiungi la Lambda della lettura. Non usa l'helper `lambda()` perché ha tempi, memoria e concorrenza tutti suoi:
 
 ```ts
-    // Una lettura mette insieme ragionamento e visione: puo' prendere piu' dei
-    // 30 secondi a cui API Gateway tronca l'integrazione. Da qui la Function
-    // URL, che quel limite non ce l'ha. Le altre cinque rotte non si toccano.
-    const leggiFotoFn = new NodejsFunction(this, 'LeggiFoto', {
+    // A reading combines reasoning and vision: it can take more than the 30
+    // seconds to which API Gateway truncates the integration. Hence the
+    // Function URL, which doesn't have that limit. The other five routes are
+    // untouched.
+    const readPhotoFn = new NodejsFunction(this, 'ReadPhoto', {
       entry: HANDLERS,
-      handler: 'leggiFoto',
+      handler: 'readPhoto',
       projectRoot: APP_ROOT,
       depsLockFilePath: API_LOCKFILE,
       runtime: Runtime.NODEJS_22_X,
       architecture: Architecture.ARM_64,
       memorySize: 512,
       timeout: Duration.seconds(120),
-      // Senza il throttling di API Gateway, il freno al parallelismo e' questo.
+      // Without API Gateway's throttling, this is the brake on parallelism.
       reservedConcurrentExecutions: 2,
-      logGroup: new LogGroup(this, 'LeggiFotoLog', {
+      logGroup: new LogGroup(this, 'ReadPhotoLog', {
         retention: RetentionDays.ONE_MONTH,
         removalPolicy: RemovalPolicy.DESTROY,
       }),
@@ -1250,10 +1250,10 @@ Dopo `const putConfigFn = lambda('PutConfig', 'putConfig');`, aggiungi la Lambda
       bundling: { format: undefined, minify: true, sourceMap: true },
     });
 
-    // Scrive soltanto il contatore della quota, ma la tabella e' una sola.
-    table.grantReadWriteData(leggiFotoFn);
+    // Writes only the quota counter, but there's only one table.
+    table.grantReadWriteData(readPhotoFn);
 
-    leggiFotoFn.addToRolePolicy(
+    readPhotoFn.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['bedrock:InvokeModel'],
@@ -1261,7 +1261,7 @@ Dopo `const putConfigFn = lambda('PutConfig', 'putConfig');`, aggiungi la Lambda
       }),
     );
 
-    const fotoFunctionUrl = leggiFotoFn.addFunctionUrl({
+    const photoFunctionUrl = readPhotoFn.addFunctionUrl({
       authType: FunctionUrlAuthType.NONE,
       cors: {
         allowedOrigins: [`https://${props.domain}`],
@@ -1270,13 +1270,13 @@ Dopo `const putConfigFn = lambda('PutConfig', 'putConfig');`, aggiungi la Lambda
         maxAge: Duration.hours(1),
       },
     });
-    this.fotoUrl = fotoFunctionUrl.url;
+    this.photoUrl = photoFunctionUrl.url;
 ```
 
 E fra gli output, accanto a `UrlApi`:
 
 ```ts
-    new CfnOutput(this, 'UrlFoto', { value: fotoFunctionUrl.url });
+    new CfnOutput(this, 'PhotoUrl', { value: photoFunctionUrl.url });
 ```
 
 - [ ] **Step 4: Esegui i test e verifica che passino**
@@ -1305,73 +1305,73 @@ Il client Mantle chiama l'endpoint Messages di Bedrock, che potrebbe volere un'a
 ### Task 6: il ridimensionamento e la chiamata dal browser
 
 **Files:**
-- Create: `app/web/src/immagine.ts`
-- Create: `app/web/test/immagine.test.ts`
+- Create: `app/web/src/image.ts`
+- Create: `app/web/test/image.test.ts`
 - Modify: `app/web/src/api.ts`
 - Modify: `app/web/.env.production`
 
 **Interfaces:**
 - Produces:
-  - `LATO_MASSIMO = 2576`, `scalaPer(larghezza: number, altezza: number): number`, `ridimensiona(file: File): Promise<string>` da `immagine.js`
-  - `FOTO_URL: string` e `Api.leggiFoto(immagine: string): Promise<EstrazioneFoto>` da `api.js`
+  - `MAX_EDGE = 2576`, `scaleFor(larghezza: number, altezza: number): number`, `resize(file: File): Promise<string>` da `image.js`
+  - `PHOTO_URL: string` e `Api.readPhoto(immagine: string): Promise<PhotoReading>` da `api.js`
 
 - [ ] **Step 1: Scrivi il test che fallisce**
 
-Crea `app/web/test/immagine.test.ts`:
+Crea `app/web/test/image.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
 
-import { LATO_MASSIMO, scalaPer } from '../src/immagine.js';
+import { MAX_EDGE, scaleFor } from '../src/image.js';
 
-describe('scalaPer', () => {
-  it('non ingrandisce mai una foto gia piccola', () => {
-    expect(scalaPer(800, 600)).toBe(1);
+describe('scaleFor', () => {
+  it('never enlarges a photo that is already small', () => {
+    expect(scaleFor(800, 600)).toBe(1);
   });
 
-  it('porta il lato lungo al massimo, orizzontale o verticale che sia', () => {
-    expect(scalaPer(4032, 3024) * 4032).toBeCloseTo(LATO_MASSIMO);
-    expect(scalaPer(3024, 4032) * 4032).toBeCloseTo(LATO_MASSIMO);
+  it('brings the long edge to the max, whether horizontal or vertical', () => {
+    expect(scaleFor(4032, 3024) * 4032).toBeCloseTo(MAX_EDGE);
+    expect(scaleFor(3024, 4032) * 4032).toBeCloseTo(MAX_EDGE);
   });
 
-  it('e esattamente il massimo quando la foto e gia di quella misura', () => {
-    expect(scalaPer(LATO_MASSIMO, 1000)).toBe(1);
+  it('is exactly the max when the photo is already that size', () => {
+    expect(scaleFor(MAX_EDGE, 1000)).toBe(1);
   });
 });
 ```
 
 - [ ] **Step 2: Esegui e verifica che fallisca**
 
-Run: `cd app && npx vitest run --root web web/test/immagine.test.ts`
-Expected: FAIL — `../src/immagine.js` non esiste.
+Run: `cd app && npx vitest run --root web web/test/image.test.ts`
+Expected: FAIL — `../src/image.js` non esiste.
 
-- [ ] **Step 3: Scrivi `web/src/immagine.ts`**
+- [ ] **Step 3: Scrivi `web/src/image.ts`**
 
 ```ts
-/** Ridimensionamento della foto, prima di spedirla.
+/** Resizing the photo, before sending it.
  *
- * 2576 px sul lato lungo e' il massimo che il modello usa comunque: mandare
- * una foto da dodici megapixel non aggiunge un solo dettaglio letto, aggiunge
- * solo byte da caricare con la rete del telefono.
+ * 2576 px on the long edge is the max the model uses anyway: sending a twelve
+ * megapixel photo doesn't add a single detail read, it only adds bytes to
+ * upload over the phone's network.
  *
- * Il calcolo della scala sta separato dal disegno su canvas perche' e' l'unica
- * parte che si puo' provare senza un browser vero: jsdom non ha ne canvas ne
- * createImageBitmap.
+ * The scale calculation is kept separate from the canvas drawing because it's
+ * the only part that can be tested without a real browser: jsdom has neither
+ * canvas nor createImageBitmap.
  */
 
-export const LATO_MASSIMO = 2576;
+export const MAX_EDGE = 2576;
 
-export function scalaPer(larghezza: number, altezza: number): number {
-  return Math.min(1, LATO_MASSIMO / Math.max(larghezza, altezza));
+export function scaleFor(larghezza: number, altezza: number): number {
+  return Math.min(1, MAX_EDGE / Math.max(larghezza, altezza));
 }
 
-/** La foto come base64, senza il prefisso data:. */
-export async function ridimensiona(file: File): Promise<string> {
+/** The photo as base64, without the data: prefix. */
+export async function resize(file: File): Promise<string> {
   const bitmap = await createImageBitmap(file);
   try {
-    const scala = scalaPer(bitmap.width, bitmap.height);
-    const w = Math.round(bitmap.width * scala);
-    const h = Math.round(bitmap.height * scala);
+    const scale = scaleFor(bitmap.width, bitmap.height);
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
 
     const canvas = document.createElement('canvas');
     canvas.width = w;
@@ -1390,39 +1390,39 @@ export async function ridimensiona(file: File): Promise<string> {
 
 - [ ] **Step 4: Esegui e verifica che passi**
 
-Run: `cd app && npx vitest run --root web web/test/immagine.test.ts`
+Run: `cd app && npx vitest run --root web web/test/image.test.ts`
 Expected: PASS (3 test).
 
-- [ ] **Step 5: Aggiungi `leggiFoto` a `web/src/api.ts`**
+- [ ] **Step 5: Aggiungi `readPhoto` a `web/src/api.ts`**
 
-Agli import di tipo aggiungi `EstrazioneFoto`:
+Agli import di tipo aggiungi `PhotoReading`:
 
 ```ts
-import type { EstrazioneFoto, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import type { PhotoReading, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
 ```
 
 Sotto `API_URL`:
 
 ```ts
-/** La lettura delle foto sta su una Function URL a se': API Gateway tronca
- *  l'integrazione a 30 secondi e una lettura ne puo' prendere di piu'. */
-export const FOTO_URL: string = import.meta.env.VITE_FOTO_URL ?? '';
+/** Photo reading lives on its own Function URL: API Gateway truncates the
+ *  integration at 30 seconds, and a reading can take longer than that. */
+export const PHOTO_URL: string = import.meta.env.VITE_PHOTO_URL ?? '';
 ```
 
 Aggiungi alla `interface Api`:
 
 ```ts
-  leggiFoto(immagine: string): Promise<EstrazioneFoto>;
+  readPhoto(immagine: string): Promise<PhotoReading>;
 ```
 
 E all'oggetto `api`:
 
 ```ts
-  async leggiFoto(immagine) {
-    const r = await fetch(FOTO_URL, {
+  async readPhoto(immagine) {
+    const r = await fetch(PHOTO_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ immagine }),
+      body: JSON.stringify({ image: immagine }),
     });
     if (!r.ok) {
       const text = await r.text().catch(() => '');
@@ -1431,23 +1431,23 @@ E all'oggetto `api`:
         const j = JSON.parse(text) as { errore?: string };
         if (j.errore) message = j.errore;
       } catch {
-        /* il corpo non era JSON: resta il messaggio generico */
+        /* the body wasn't JSON: the generic message stays */
       }
       throw new Error(message);
     }
-    const j = (await r.json()) as { estrazione: EstrazioneFoto };
-    return j.estrazione;
+    const j = (await r.json()) as { reading: PhotoReading };
+    return j.reading;
   },
 ```
 
 - [ ] **Step 6: Aggiungi la variabile a `web/.env.production`**
 
 ```
-VITE_FOTO_URL=https://DA-COMPILARE.lambda-url.eu-south-1.on.aws/
+VITE_PHOTO_URL=https://DA-COMPILARE.lambda-url.eu-south-1.on.aws/
 ```
 
-Il valore vero è l'output `UrlFoto` dello stack: si legge dopo il primo deploy con
-`aws cloudformation describe-stacks --stack-name VanessaApp --query "Stacks[0].Outputs[?OutputKey=='UrlFoto'].OutputValue" --output text --region eu-south-1`
+Il valore vero è l'output `PhotoUrl` dello stack: si legge dopo il primo deploy con
+`aws cloudformation describe-stacks --stack-name VanessaApp --query "Stacks[0].Outputs[?OutputKey=='PhotoUrl'].OutputValue" --output text --region eu-south-1`
 e si incolla qui **prima** di ricompilare il frontend.
 
 - [ ] **Step 7: Esegui tutti i test**
@@ -1458,18 +1458,18 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add app/web/src/immagine.ts app/web/test/immagine.test.ts app/web/src/api.ts app/web/.env.production
+git add app/web/src/image.ts app/web/test/image.test.ts app/web/src/api.ts app/web/.env.production
 git commit -m "feat: ridimensionamento della foto e chiamata alla Function URL"
 ```
 
 ---
 
-### Task 7: estrai `PianoSalvataggio` da `BulkEntry`
+### Task 7: estrai `SavePlan` da `BulkEntry`
 
 Rifattorizzazione pura: nessun comportamento nuovo. I test esistenti di `BulkEntry` devono passare senza essere toccati — è quello che dimostra che la rifattorizzazione è tale.
 
 **Files:**
-- Create: `app/web/src/PianoSalvataggio.tsx`
+- Create: `app/web/src/SavePlan.tsx`
 - Modify: `app/web/src/BulkEntry.tsx`
 
 **Interfaces:**
@@ -1477,14 +1477,14 @@ Rifattorizzazione pura: nessun comportamento nuovo. I test esistenti di `BulkEnt
 - Produces:
 
 ```ts
-export interface PianoSalvataggioProps {
+export interface SavePlanProps {
   entries: readonly ParsedEntry[];
   existing: ReadonlyMap<IsoDate, ShiftCode>;
   month: number;
   /** Giorni del mese senza turno: mostrati nel riepilogo, non salvati. */
-  senzaTurno?: number;
+  withoutShift?: number;
   /** Blocca il salvataggio quando l'input a monte non e' valido. */
-  bloccato?: boolean;
+  blocked?: boolean;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
   /** Chiamato dopo un salvataggio riuscito, per ripulire la sorgente. */
   onSaved?: () => void;
@@ -1496,14 +1496,14 @@ export interface PianoSalvataggioProps {
 Run: `cd app && npx vitest run --root web`
 Expected: PASS. Prendi nota di quanti test sono: alla fine devono essere gli stessi, tutti verdi.
 
-- [ ] **Step 2: Crea `web/src/PianoSalvataggio.tsx`**
+- [ ] **Step 2: Crea `web/src/SavePlan.tsx`**
 
 ```tsx
-/** Cosa succederebbe salvando, e il pulsante per farlo.
+/** What saving would do, and the button to do it.
  *
- * Sta in un componente suo perche' due strade portano qui — la sequenza
- * scritta a mano e la foto — e la revisione prima di sovrascrivere e'
- * esattamente la parte che non deve dipendere da come si e' arrivati.
+ * It lives in its own component because two paths lead here — the hand-typed
+ * sequence and the photo — and the review before overwriting is exactly the
+ * part that must not depend on how you got there.
  */
 
 import { useMemo, useState } from 'react';
@@ -1511,25 +1511,25 @@ import { useMemo, useState } from 'react';
 import type { IsoDate, ParsedEntry, ShiftCode } from '@vanessa/core';
 import { MONTH_NAMES, planChanges } from '@vanessa/core';
 
-export interface PianoSalvataggioProps {
+export interface SavePlanProps {
   entries: readonly ParsedEntry[];
   existing: ReadonlyMap<IsoDate, ShiftCode>;
   month: number;
-  senzaTurno?: number;
-  bloccato?: boolean;
+  withoutShift?: number;
+  blocked?: boolean;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
   onSaved?: () => void;
 }
 
-export function PianoSalvataggio({
+export function SavePlan({
   entries,
   existing,
   month,
-  senzaTurno = 0,
-  bloccato = false,
+  withoutShift = 0,
+  blocked = false,
   onSave,
   onSaved,
-}: PianoSalvataggioProps) {
+}: SavePlanProps) {
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<number | null>(null);
 
@@ -1557,13 +1557,13 @@ export function PianoSalvataggio({
         </p>
       )}
 
-      {plan.length > 0 && !bloccato && (
+      {plan.length > 0 && !blocked && (
         <>
           <p className="summary-line">
             <strong>{created.length}</strong> giorni nuovi ·{' '}
             <strong>{changed.length}</strong> da sovrascrivere ·{' '}
             {plan.length - created.length - changed.length} già così
-            {senzaTurno > 0 && <> · {senzaTurno} senza turno</>}
+            {withoutShift > 0 && <> · {withoutShift} senza turno</>}
           </p>
 
           {changed.length > 0 && (
@@ -1614,7 +1614,7 @@ Sostituisci il corpo del file mantenendo `BulkEntryProps` invariato:
  *
  * The review step is not decoration. Pasting a sequence overwrites a whole
  * month in one action, and there is no undo — so it lives in
- * PianoSalvataggio, shared with the photo import.
+ * SavePlan, shared with the photo import.
  */
 
 import { useMemo, useState } from 'react';
@@ -1622,7 +1622,7 @@ import { useMemo, useState } from 'react';
 import type { IsoDate, ShiftCode } from '@vanessa/core';
 import { MONTH_NAMES, parseSequence } from '@vanessa/core';
 
-import { PianoSalvataggio } from './PianoSalvataggio.js';
+import { SavePlan } from './SavePlan.js';
 
 export interface BulkEntryProps {
   year: number;
@@ -1685,11 +1685,11 @@ export function BulkEntry({ year, month, onMonthChange, existing, onSave }: Bulk
         </p>
       )}
 
-      <PianoSalvataggio
+      <SavePlan
         entries={parsed.entries}
         existing={existing}
         month={month}
-        bloccato={blocked}
+        blocked={blocked}
         onSave={onSave}
         onSaved={() => setText('')}
       />
@@ -1706,7 +1706,7 @@ Expected: PASS — stesso numero di test di Step 1, nessuno modificato.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/web/src/PianoSalvataggio.tsx app/web/src/BulkEntry.tsx
+git add app/web/src/SavePlan.tsx app/web/src/BulkEntry.tsx
 git commit -m "refactor: la revisione prima di salvare diventa un componente suo"
 ```
 
@@ -1724,14 +1724,14 @@ Il pezzo che Vanessa tocca. Il vincolo forte: dopo la lettura, ogni cella deve e
 - Modify: `app/web/src/styles.css`
 
 **Interfaces:**
-- Consumes: `EstrazioneFoto`, `GiornoLetto`, `vociDaEstrazione`, `SHIFTS`, `MONTH_NAMES`, `toIso`, `weekday` da `@vanessa/core`; `ridimensiona` da `./immagine.js`; `PianoSalvataggio` da `./PianoSalvataggio.js`.
+- Consumes: `PhotoReading`, `ReadDay`, `entriesFromReading`, `SHIFTS`, `MONTH_NAMES`, `toIso`, `weekday` da `@vanessa/core`; `resize` da `./image.js`; `SavePlan` da `./SavePlan.js`.
 - Produces:
 
 ```ts
 export interface PhotoImportProps {
   year: number;
   existing: ReadonlyMap<IsoDate, ShiftCode>;
-  onLeggi: (immagine: string) => Promise<EstrazioneFoto>;
+  onRead: (immagine: string) => Promise<PhotoReading>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
 }
 ```
@@ -1745,129 +1745,130 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { EstrazioneFoto, IsoDate, ShiftCode } from '@vanessa/core';
+import type { PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
 
 import { PhotoImport } from '../src/PhotoImport.js';
 
-/** Luglio come sta sulla foto: niente fino al 16, poi quindici turni. */
-const LUGLIO: readonly (ShiftCode | null)[] = [
+/** July as it stands on the photo: nothing until the 16th, then fifteen shifts. */
+const JULY: readonly (ShiftCode | null)[] = [
   ...Array<null>(16).fill(null),
   'M','M','P','L','P','M','M','M','L','P','M','M','M','L','P',
 ];
 
-function estrazioneLuglio(incerti: readonly number[] = []): EstrazioneFoto {
+function julyReading(unsure: readonly number[] = []): PhotoReading {
   return {
-    mese: 7,
-    anno: 2026,
-    trovata: true,
-    nomeTrovato: 'Vanessa',
-    rigaTrovata: 14,
-    giorni: LUGLIO.map((codice, i) => ({
-      giorno: i + 1,
-      codice,
-      sicuro: !incerti.includes(i + 1),
+    month: 7,
+    year: 2026,
+    found: true,
+    foundName: 'Vanessa',
+    foundRow: 14,
+    days: JULY.map((code, i) => ({
+      day: i + 1,
+      code,
+      confident: !unsure.includes(i + 1),
     })),
   };
 }
 
-/** jsdom non ha canvas ne createImageBitmap: il ridimensionamento vero si
- *  prova su un browser. Sostituendo il modulo, il test entra dal file input
- *  come ci entra Vanessa, invece di scavalcare il componente da dentro. */
-vi.mock('../src/immagine.js', () => ({
-  LATO_MASSIMO: 2576,
-  scalaPer: () => 1,
-  ridimensiona: () => Promise.resolve('AAAA'),
+/** jsdom has neither canvas nor createImageBitmap: the real resizing is
+ *  tested on a browser. By replacing the module, the test enters through the
+ *  file input the same way Vanessa does, instead of bypassing the component
+ *  from the inside. */
+vi.mock('../src/image.js', () => ({
+  MAX_EDGE: 2576,
+  scaleFor: () => 1,
+  resize: () => Promise.resolve('AAAA'),
 }));
 
-async function renderCon(
-  estrazione: EstrazioneFoto,
+async function renderWith(
+  reading: PhotoReading,
   existing = new Map<IsoDate, ShiftCode>(),
 ) {
   const onSave = vi.fn().mockResolvedValue(undefined);
-  const onLeggi = vi.fn().mockResolvedValue(estrazione);
-  render(<PhotoImport year={2026} existing={existing} onLeggi={onLeggi} onSave={onSave} />);
+  const onRead = vi.fn().mockResolvedValue(reading);
+  render(<PhotoImport year={2026} existing={existing} onRead={onRead} onSave={onSave} />);
 
   await userEvent.upload(
     screen.getByLabelText(/Leggi da una foto/i),
     new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
   );
-  return { onSave, onLeggi };
+  return { onSave, onRead };
 }
 
 describe('PhotoImport', () => {
-  it('mostra il mese e la riga che ha trovato', async () => {
-    await renderCon(estrazioneLuglio());
+  it('shows the month and the row it found', async () => {
+    await renderWith(julyReading());
     expect(await screen.findByText(/Luglio 2026/i)).toBeInTheDocument();
     expect(screen.getByText(/Vanessa/)).toBeInTheDocument();
   });
 
-  it('conta i giorni senza turno invece di salvarli', async () => {
-    await renderCon(estrazioneLuglio());
+  it('counts the days without a shift instead of saving them', async () => {
+    await renderWith(julyReading());
     expect(await screen.findByText(/16 senza turno/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Salva 15 giorni/ })).toBeInTheDocument();
   });
 
-  it('salva solo i giorni con un turno, a partire dal 17', async () => {
-    const { onSave } = await renderCon(estrazioneLuglio());
+  it('saves only the days with a shift, starting on the 17th', async () => {
+    const { onSave } = await renderWith(julyReading());
     await userEvent.click(await screen.findByRole('button', { name: /Salva 15 giorni/ }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    const inviati = onSave.mock.calls[0][0];
-    expect(inviati).toHaveLength(15);
-    expect(inviati[0]).toEqual({ date: '2026-07-17', code: 'M' });
+    const sent = onSave.mock.calls[0][0];
+    expect(sent).toHaveLength(15);
+    expect(sent[0]).toEqual({ date: '2026-07-17', code: 'M' });
   });
 
-  it('segna le celle che il modello non ha letto con sicurezza', async () => {
-    await renderCon(estrazioneLuglio([23]));
-    const cella = await screen.findByRole('button', { name: /^23 / });
-    expect(cella).toHaveClass('incerto');
+  it('marks the cells the model did not read with confidence', async () => {
+    await renderWith(julyReading([23]));
+    const cell = await screen.findByRole('button', { name: /^23 / });
+    expect(cell).toHaveClass('unsure');
   });
 
-  it('correggere una cella cambia quello che verrebbe salvato', async () => {
-    const { onSave } = await renderCon(estrazioneLuglio([23]));
+  it('correcting a cell changes what would be saved', async () => {
+    const { onSave } = await renderWith(julyReading([23]));
 
     await userEvent.click(await screen.findByRole('button', { name: /^23 / }));
     await userEvent.click(screen.getByRole('button', { name: /^P1/ }));
     await userEvent.click(screen.getByRole('button', { name: /Salva 15 giorni/ }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    const inviati = onSave.mock.calls[0][0];
-    expect(inviati.find((s: any) => s.date === '2026-07-23')).toEqual({
+    const sent = onSave.mock.calls[0][0];
+    expect(sent.find((s: any) => s.date === '2026-07-23')).toEqual({
       date: '2026-07-23',
       code: 'P1',
     });
   });
 
-  it('si puo togliere il turno da un giorno, e allora non si salva', async () => {
-    const { onSave } = await renderCon(estrazioneLuglio());
+  it('the shift can be removed from a day, and then it is not saved', async () => {
+    const { onSave } = await renderWith(julyReading());
 
     await userEvent.click(await screen.findByRole('button', { name: /^17 / }));
     await userEvent.click(screen.getByRole('button', { name: /Nessun turno/i }));
     await userEvent.click(screen.getByRole('button', { name: /Salva 14 giorni/ }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    const inviati = onSave.mock.calls[0][0];
-    expect(inviati).toHaveLength(14);
-    expect(inviati.find((s: any) => s.date === '2026-07-17')).toBeUndefined();
+    const sent = onSave.mock.calls[0][0];
+    expect(sent).toHaveLength(14);
+    expect(sent.find((s: any) => s.date === '2026-07-17')).toBeUndefined();
   });
 
-  it('avvisa quando i giorni verrebbero sovrascritti', async () => {
+  it('warns when days would be overwritten', async () => {
     const existing = new Map<IsoDate, ShiftCode>([['2026-07-17', 'L']]);
-    await renderCon(estrazioneLuglio(), existing);
+    await renderWith(julyReading(), existing);
     expect(await screen.findByText(/1 da sovrascrivere/)).toBeInTheDocument();
   });
 
-  it('rifiuta una foto di un altro anno invece di salvare date sbagliate', async () => {
-    await renderCon({ ...estrazioneLuglio(), anno: 2025 });
+  it('rejects a photo from another year instead of saving wrong dates', async () => {
+    await renderWith({ ...julyReading(), year: 2025 });
     expect(await screen.findByRole('alert')).toHaveTextContent(/2025/);
     expect(screen.queryByRole('button', { name: /^Salva/ })).not.toBeInTheDocument();
   });
 
-  it('si puo correggere il mese, e i giorni seguono', async () => {
-    const { onSave } = await renderCon(estrazioneLuglio());
+  it('the month can be corrected, and the days follow', async () => {
+    const { onSave } = await renderWith(julyReading());
 
-    // Se il modello avesse letto il titolo sbagliato, rifotografare non
-    // servirebbe: leggerebbe di nuovo lo stesso. Il mese deve essere correggibile.
+    // If the model had read the wrong title, taking the photo again would
+    // not help: it would read the same title again. The month must be correctable.
     await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '6');
     await userEvent.click(screen.getByRole('button', { name: /Salva 15 giorni/ }));
 
@@ -1875,11 +1876,11 @@ describe('PhotoImport', () => {
     expect(onSave.mock.calls[0][0][0]).toEqual({ date: '2026-06-17', code: 'M' });
   });
 
-  it('passando a un mese piu corto i giorni in eccesso spariscono', async () => {
-    const { onSave } = await renderCon(estrazioneLuglio());
+  it('switching to a shorter month makes the extra days disappear', async () => {
+    const { onSave } = await renderWith(julyReading());
 
-    // Luglio ha 31 giorni, febbraio 28: il 29, 30 e 31 non esistono piu'.
-    // Dei quindici turni di luglio, i tre ultimi cadono li'.
+    // July has 31 days, February 28: the 29th, 30th and 31st no longer exist.
+    // Of July's fifteen shifts, the last three fall there.
     await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '2');
     await userEvent.click(screen.getByRole('button', { name: /Salva 12 giorni/ }));
 
@@ -1899,197 +1900,197 @@ Expected: FAIL — `../src/PhotoImport.js` non esiste.
 ```tsx
 /** Import da una foto del foglio.
  *
- * La griglia e' modificabile per intero, non solo dove il modello si e'
- * dichiarato incerto: l'errore tipico di una lettura e' una cella sola, e
- * chi la vede sbagliata deve poterla correggere anche quando il modello era
- * convinto del contrario.
+ * The grid is editable in full, not only where the model declared itself
+ * unsure: the typical mistake in a reading is a single cell, and whoever
+ * spots it wrong must be able to correct it even when the model was
+ * convinced of the opposite.
  */
 
 import { useMemo, useState } from 'react';
 
-import type { EstrazioneFoto, IsoDate, ShiftCode } from '@vanessa/core';
+import type { PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
 import { MONTH_NAMES, SHIFTS, daysInMonth, toIso, weekday } from '@vanessa/core';
 
-import { PianoSalvataggio } from './PianoSalvataggio.js';
-import { ridimensiona } from './immagine.js';
+import { SavePlan } from './SavePlan.js';
+import { resize } from './image.js';
 
 export interface PhotoImportProps {
   year: number;
   existing: ReadonlyMap<IsoDate, ShiftCode>;
-  onLeggi: (immagine: string) => Promise<EstrazioneFoto>;
+  onRead: (immagine: string) => Promise<PhotoReading>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
 }
 
-interface Letta {
-  mese: number;
-  anno: number;
-  nome: string;
-  riga: number | null;
-  codici: (ShiftCode | null)[];
-  incerti: Set<number>;
+interface Reading {
+  month: number;
+  year: number;
+  name: string;
+  row: number | null;
+  codes: (ShiftCode | null)[];
+  unsure: Set<number>;
 }
 
-function daEstrazione(e: EstrazioneFoto): Letta {
-  const codici: (ShiftCode | null)[] = Array(daysInMonth(e.anno, e.mese)).fill(null);
-  const incerti = new Set<number>();
-  for (const g of e.giorni) {
-    codici[g.giorno - 1] = g.codice;
-    if (!g.sicuro) incerti.add(g.giorno);
+function fromReading(e: PhotoReading): Reading {
+  const codes: (ShiftCode | null)[] = Array(daysInMonth(e.year, e.month)).fill(null);
+  const unsure = new Set<number>();
+  for (const g of e.days) {
+    codes[g.day - 1] = g.code;
+    if (!g.confident) unsure.add(g.day);
   }
-  return { mese: e.mese, anno: e.anno, nome: e.nomeTrovato ?? '', riga: e.rigaTrovata, codici, incerti };
+  return { month: e.month, year: e.year, name: e.foundName ?? '', row: e.foundRow, codes, unsure };
 }
 
-export function PhotoImport({ year, existing, onLeggi, onSave }: PhotoImportProps) {
-  const [letta, setLetta] = useState<Letta | null>(null);
-  const [leggendo, setLeggendo] = useState(false);
-  const [errore, setErrore] = useState<string | null>(null);
-  const [aperto, setAperto] = useState<number | null>(null);
+export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps) {
+  const [reading, setReading] = useState<Reading | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
 
-  const scegli = async (file: File | undefined) => {
+  const pick = async (file: File | undefined) => {
     if (!file) return;
-    setLeggendo(true);
-    setErrore(null);
+    setLoading(true);
+    setError(null);
     try {
-      setLetta(daEstrazione(await onLeggi(await ridimensiona(file))));
+      setReading(fromReading(await onRead(await resize(file))));
     } catch (e) {
-      setErrore((e as Error).message);
+      setError((e as Error).message);
     } finally {
-      setLeggendo(false);
+      setLoading(false);
     }
   };
 
   const entries = useMemo(() => {
-    if (!letta) return [];
+    if (!reading) return [];
     const out: { date: IsoDate; day: number; code: ShiftCode }[] = [];
-    letta.codici.forEach((code, i) => {
-      if (code) out.push({ date: toIso(letta.anno, letta.mese, i + 1), day: i + 1, code });
+    reading.codes.forEach((code, i) => {
+      if (code) out.push({ date: toIso(reading.year, reading.month, i + 1), day: i + 1, code });
     });
     return out;
-  }, [letta]);
+  }, [reading]);
 
-  /** Il mese letto dal titolo puo' essere sbagliato, e rifotografare non
-   *  aiuterebbe: il modello leggerebbe di nuovo lo stesso titolo. Cambiandolo,
-   *  la griglia si accorcia o si allunga — un mese piu' corto perde i giorni
-   *  che non esistono, uno piu' lungo li aggiunge vuoti. */
-  const cambiaMese = (mese: number) => {
-    setLetta((l) => {
+  /** The month read from the title can be wrong, and taking the photo again
+   *  wouldn't help: the model would read the same title again. Changing it,
+   *  the grid shrinks or grows — a shorter month loses the days that no
+   *  longer exist, a longer one adds them empty. */
+  const setMonth = (month: number) => {
+    setReading((l) => {
       if (!l) return l;
-      const quanti = daysInMonth(l.anno, mese);
-      const codici = Array.from({ length: quanti }, (_, i) => l.codici[i] ?? null);
-      const incerti = new Set([...l.incerti].filter((g) => g <= quanti));
-      return { ...l, mese, codici, incerti };
+      const howMany = daysInMonth(l.year, month);
+      const codes = Array.from({ length: howMany }, (_, i) => l.codes[i] ?? null);
+      const unsure = new Set([...l.unsure].filter((g) => g <= howMany));
+      return { ...l, month, codes, unsure };
     });
-    setAperto(null);
+    setOpen(null);
   };
 
-  const cambia = (giorno: number, code: ShiftCode | null) => {
-    setLetta((l) => {
+  const setDay = (day: number, code: ShiftCode | null) => {
+    setReading((l) => {
       if (!l) return l;
-      const codici = [...l.codici];
-      codici[giorno - 1] = code;
-      // Corretta a mano: non e' piu' incerta, comunque vada.
-      const incerti = new Set(l.incerti);
-      incerti.delete(giorno);
-      return { ...l, codici, incerti };
+      const codes = [...l.codes];
+      codes[day - 1] = code;
+      // Corrected by hand: it's no longer unsure, regardless.
+      const unsure = new Set(l.unsure);
+      unsure.delete(day);
+      return { ...l, codes, unsure };
     });
-    setAperto(null);
+    setOpen(null);
   };
 
-  // La app copre un anno solo: date di un altro anno non troverebbero nulla
-  // con cui confrontarsi, e si salverebbero fuori dal calendario che si vede.
-  const annoSbagliato = letta !== null && letta.anno !== year;
+  // The app covers a single year: dates of a different year would find
+  // nothing to compare against, and would be saved outside the visible calendar.
+  const wrongYear = reading !== null && reading.year !== year;
 
   return (
-    <div className="foto">
-      {!letta && (
+    <div className="photo">
+      {!reading && (
         <>
-          <label className="foto-scegli">
+          <label className="photo-pick">
             <span aria-hidden="true">📷</span> Leggi da una foto
             <input
               type="file"
               accept="image/*"
               capture="environment"
-              disabled={leggendo}
-              onChange={(e) => void scegli(e.target.files?.[0])}
+              disabled={loading}
+              onChange={(e) => void pick(e.target.files?.[0])}
             />
           </label>
-          {leggendo && <p className="waiting">Leggo la foto… ci vuole qualche secondo.</p>}
+          {loading && <p className="waiting">Leggo la foto… ci vuole qualche secondo.</p>}
         </>
       )}
 
-      {errore && (
+      {error && (
         <p className="error" role="alert">
-          {errore}
+          {error}
         </p>
       )}
 
-      {letta && (
+      {reading && (
         <>
-          <div className="foto-testa">
+          <div className="photo-head">
             <label>
               <span>Mese</span>
-              <select value={letta.mese} onChange={(e) => cambiaMese(Number(e.target.value))}>
+              <select value={reading.month} onChange={(e) => setMonth(Number(e.target.value))}>
                 {MONTH_NAMES.map((name, i) => (
                   <option key={name} value={i + 1}>
-                    {name} {letta.anno}
+                    {name} {reading.year}
                   </option>
                 ))}
               </select>
             </label>
             <p className="hint">
-              riga trovata: {letta.nome}
-              {letta.riga !== null && ` (${letta.riga})`}
+              riga trovata: {reading.name}
+              {reading.row !== null && ` (${reading.row})`}
             </p>
             <button
               type="button"
               className="toggle"
               onClick={() => {
-                setLetta(null);
-                setErrore(null);
+                setReading(null);
+                setError(null);
               }}
             >
               ripeti con un altra foto
             </button>
           </div>
 
-          {annoSbagliato ? (
+          {wrongYear ? (
             <p className="error" role="alert">
-              Questa foto è del {letta.anno}, ma l&apos;app tiene i turni del {year}. Non la
+              Questa foto è del {reading.year}, ma l&apos;app tiene i turni del {year}. Non la
               posso caricare qui.
             </p>
           ) : (
             <>
-              <div className="foto-grid" role="group" aria-label="Giorni letti dalla foto">
-                {letta.codici.map((code, i) => {
-                  const giorno = i + 1;
-                  const wd = weekday(toIso(letta.anno, letta.mese, giorno));
+              <div className="photo-grid" role="group" aria-label="Giorni letti dalla foto">
+                {reading.codes.map((code, i) => {
+                  const day = i + 1;
+                  const wd = weekday(toIso(reading.year, reading.month, day));
                   return (
                     <button
-                      key={giorno}
+                      key={day}
                       type="button"
-                      style={giorno === 1 ? { gridColumnStart: wd + 1 } : undefined}
+                      style={day === 1 ? { gridColumnStart: wd + 1 } : undefined}
                       className={[
-                        'foto-cella',
-                        code ? `t-${code}` : 'vuota',
-                        letta.incerti.has(giorno) ? 'incerto' : '',
+                        'photo-cell',
+                        code ? `t-${code}` : 'empty',
+                        reading.unsure.has(day) ? 'unsure' : '',
                       ]
                         .filter(Boolean)
                         .join(' ')}
-                      aria-label={`${giorno} ${code ?? 'nessun turno'}`}
-                      onClick={() => setAperto(giorno)}
+                      aria-label={`${day} ${code ?? 'nessun turno'}`}
+                      onClick={() => setOpen(day)}
                     >
-                      <span className="day-number">{giorno}</span>
+                      <span className="day-number">{day}</span>
                       <span className="code">{code ?? '–'}</span>
                     </button>
                   );
                 })}
               </div>
 
-              <PianoSalvataggio
+              <SavePlan
                 entries={entries}
                 existing={existing}
-                month={letta.mese}
-                senzaTurno={letta.codici.filter((c) => c === null).length}
+                month={reading.month}
+                withoutShift={reading.codes.filter((c) => c === null).length}
                 onSave={onSave}
               />
             </>
@@ -2097,13 +2098,13 @@ export function PhotoImport({ year, existing, onLeggi, onSave }: PhotoImportProp
         </>
       )}
 
-      {aperto !== null && letta && (
-        <div className="sheet" role="dialog" aria-label={`Giorno ${aperto}`}>
+      {open !== null && reading && (
+        <div className="sheet" role="dialog" aria-label={`Giorno ${open}`}>
           <div className="sheet-head">
             <strong>
-              {aperto} {MONTH_NAMES[letta.mese - 1]}
+              {open} {MONTH_NAMES[reading.month - 1]}
             </strong>
-            <button type="button" onClick={() => setAperto(null)}>
+            <button type="button" onClick={() => setOpen(null)}>
               Chiudi
             </button>
           </div>
@@ -2116,18 +2117,18 @@ export function PhotoImport({ year, existing, onLeggi, onSave }: PhotoImportProp
                   className={[
                     'code-btn',
                     `t-${s.code}`,
-                    letta.codici[aperto - 1] === s.code ? 'on' : '',
+                    reading.codes[open - 1] === s.code ? 'on' : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
-                  onClick={() => cambia(aperto, s.code)}
+                  onClick={() => setDay(open, s.code)}
                 >
                   {s.code}
                   <span>{s.description}</span>
                 </button>
               ))}
             </div>
-            <button type="button" className="toggle" onClick={() => cambia(aperto, null)}>
+            <button type="button" className="toggle" onClick={() => setDay(open, null)}>
               Nessun turno
             </button>
           </div>
@@ -2144,28 +2145,28 @@ In fondo al file:
 
 ```css
 /* --- Import da foto --- */
-.foto-scegli {
+.photo-pick {
   display: flex; align-items: center; justify-content: center; gap: 0.5rem;
   min-height: var(--tap); border: 1px dashed var(--navy); border-radius: 10px;
   color: var(--navy); font-weight: 700; cursor: pointer; margin: 0.6rem 0;
 }
-.foto-scegli input { display: none; }
-.foto-testa { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
-.foto-testa h3 { margin: 0.4rem 0; }
-.foto-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin: 0.5rem 0; }
-.foto-cella {
+.photo-pick input { display: none; }
+.photo-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.photo-head h3 { margin: 0.4rem 0; }
+.photo-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin: 0.5rem 0; }
+.photo-cell {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   min-height: var(--tap); border: 1px solid var(--border); border-radius: 6px;
   background: #fff; padding: 0;
 }
-.foto-cella.vuota { background: var(--bg); color: var(--muted); }
-.foto-cella.t-M { background: var(--M); }
-.foto-cella.t-M1 { background: var(--M1); }
-.foto-cella.t-P { background: var(--P); }
-.foto-cella.t-P1 { background: var(--P1); }
-.foto-cella.t-L { background: var(--L); }
-/* Il modello non era sicuro: si guarda, non si blocca. */
-.foto-cella.incerto .code { text-decoration: underline dashed; text-underline-offset: 2px; }
+.photo-cell.empty { background: var(--bg); color: var(--muted); }
+.photo-cell.t-M { background: var(--M); }
+.photo-cell.t-M1 { background: var(--M1); }
+.photo-cell.t-P { background: var(--P); }
+.photo-cell.t-P1 { background: var(--P1); }
+.photo-cell.t-L { background: var(--L); }
+/* The model wasn't sure: it's shown, not blocked. */
+.photo-cell.unsure .code { text-decoration: underline dashed; text-underline-offset: 2px; }
 ```
 
 - [ ] **Step 5: Esegui i test e verifica che passino**
@@ -2178,13 +2179,13 @@ Expected: PASS (8 test).
 In `web/src/BulkEntry.tsx`, aggiungi alle props:
 
 ```ts
-  onLeggiFoto: (immagine: string) => Promise<import('@vanessa/core').EstrazioneFoto>;
+  onReadPhoto: (immagine: string) => Promise<import('@vanessa/core').PhotoReading>;
 ```
 
 importa `PhotoImport`, e mettilo subito sotto `<h2>Caricamento rapido</h2>`, prima della nota:
 
 ```tsx
-      <PhotoImport year={year} existing={existing} onLeggi={onLeggiFoto} onSave={onSave} />
+      <PhotoImport year={year} existing={existing} onRead={onReadPhoto} onSave={onSave} />
 
       <p className="note">oppure scrivi i codici a mano:</p>
 ```
@@ -2198,14 +2199,14 @@ In `web/src/App.tsx`, passa la funzione:
             onMonthChange={setMonth}
             existing={codes}
             onSave={saveBulk}
-            onLeggiFoto={api.leggiFoto}
+            onReadPhoto={api.readPhoto}
           />
 ```
 
 Nei test già esistenti che costruiscono un `Api` finto (`web/test/app.test.tsx`), aggiungi il metodo mancante:
 
 ```ts
-  async leggiFoto() {
+  async readPhoto() {
     throw new Error('non usata in questo test');
   },
 ```
@@ -2229,7 +2230,7 @@ git commit -m "feat: la griglia modificabile dell'import da foto"
 Il test che dice se una modifica al prompt ha peggiorato la lettura. Fuori dalla CI, e senza le foto nel repository.
 
 **Files:**
-- Create: `app/api/test/visione.integrazione.test.ts`
+- Create: `app/api/test/vision.integration.test.ts`
 - Modify: `app/README.md`
 
 - [ ] **Step 1: Copia le foto fuori dal repository**
@@ -2249,7 +2250,7 @@ Expected: un errore «not a git repository». Se stampa un percorso, sposta la c
 
 - [ ] **Step 2: Scrivi il test di integrazione**
 
-Crea `app/api/test/visione.integrazione.test.ts`:
+Crea `app/api/test/vision.integration.test.ts`:
 
 ```ts
 /** Le due foto vere contro Bedrock vero.
@@ -2261,22 +2262,22 @@ Crea `app/api/test/visione.integrazione.test.ts`:
  *   PROVA_BEDROCK=1 \
  *   FOTO_LUGLIO=~/vanessa-foto/luglio.jpeg \
  *   FOTO_AGOSTO=~/vanessa-foto/agosto.jpeg \
- *   npx vitest run --root api api/test/visione.integrazione.test.ts
+ *   npx vitest run --root api api/test/vision.integration.test.ts
  */
 
 import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { validaEstrazione, vociDaEstrazione } from '@vanessa/core';
+import { validateReading, entriesFromReading } from '@vanessa/core';
 
-import { creaVisione } from '../src/visione.js';
+import { createVision } from '../src/vision.js';
 
-const attivo =
+const enabled =
   process.env.PROVA_BEDROCK === '1' && !!process.env.FOTO_LUGLIO && !!process.env.FOTO_AGOSTO;
 
-const LUGLIO = ['M','M','P','L','P','M','M','M','L','P','M','M','M','L','P'];
-const AGOSTO = [
+const JULY = ['M','M','P','L','P','M','M','M','L','P','M','M','M','L','P'];
+const AUGUST = [
   'L','M','M','M','P','L','M','L','M','P1','L','M','P','M','P','M1',
   'L','M','P','L','M','P','M','P','L','M','P','M','P','L','M',
 ];
@@ -2285,29 +2286,29 @@ function base64(percorso: string): string {
   return readFileSync(percorso).toString('base64');
 }
 
-describe.runIf(attivo)('lettura delle foto vere', () => {
-  const visione = creaVisione();
+describe.runIf(enabled)('reading the real photos', () => {
+  const vision = createVision();
 
-  it('agosto: il mese intero', { timeout: 180_000 }, async () => {
-    const e = validaEstrazione(await visione(base64(process.env.FOTO_AGOSTO!)), 2026);
-    expect(e.mese).toBe(8);
-    expect(e.anno).toBe(2026);
-    expect(vociDaEstrazione(e).map((v) => v.code)).toEqual(AGOSTO);
+  it('august: the whole month', { timeout: 180_000 }, async () => {
+    const e = validateReading(await vision(base64(process.env.FOTO_AGOSTO!)), 2026);
+    expect(e.month).toBe(8);
+    expect(e.year).toBe(2026);
+    expect(entriesFromReading(e).map((v) => v.code)).toEqual(AUGUST);
   });
 
-  it('luglio: le x fino al 16, poi quindici turni', { timeout: 180_000 }, async () => {
-    const e = validaEstrazione(await visione(base64(process.env.FOTO_LUGLIO!)), 2026);
-    expect(e.mese).toBe(7);
-    const voci = vociDaEstrazione(e);
-    expect(voci[0].day).toBe(17);
-    expect(voci.map((v) => v.code)).toEqual(LUGLIO);
+  it('july: the x cells up to the 16th, then fifteen shifts', { timeout: 180_000 }, async () => {
+    const e = validateReading(await vision(base64(process.env.FOTO_LUGLIO!)), 2026);
+    expect(e.month).toBe(7);
+    const entries = entriesFromReading(e);
+    expect(entries[0].day).toBe(17);
+    expect(entries.map((v) => v.code)).toEqual(JULY);
   });
 });
 ```
 
 - [ ] **Step 3: Esegui il test senza le variabili e verifica che si salti**
 
-Run: `cd app && npx vitest run --root api api/test/visione.integrazione.test.ts`
+Run: `cd app && npx vitest run --root api api/test/vision.integration.test.ts`
 Expected: 0 test eseguiti, nessun fallimento (la suite è saltata).
 
 - [ ] **Step 4: Esegui il test con le foto vere**
@@ -2317,11 +2318,11 @@ Run:
 cd app && PROVA_BEDROCK=1 \
   FOTO_LUGLIO=$HOME/vanessa-foto/luglio.jpeg \
   FOTO_AGOSTO=$HOME/vanessa-foto/agosto.jpeg \
-  npx vitest run --root api api/test/visione.integrazione.test.ts
+  npx vitest run --root api api/test/vision.integration.test.ts
 ```
 Expected: 2 test PASS.
 
-Se un test fallisce, la differenza dice cosa il modello ha sbagliato. Prima di cambiare le attese, controlla la foto: le attese qui sono trascrizioni verificate a mano, e sono loro la verità. Se serve, lavora sul `PROMPT` in `api/src/visione.ts` — non sulle attese.
+Se un test fallisce, la differenza dice cosa il modello ha sbagliato. Prima di cambiare le attese, controlla la foto: le attese qui sono trascrizioni verificate a mano, e sono loro la verità. Se serve, lavora sul `PROMPT` in `api/src/vision.ts` — non sulle attese.
 
 - [ ] **Step 5: Documenta in `app/README.md`**
 
@@ -2348,8 +2349,8 @@ metà — non si salvano e non cancellano niente.
 
 Sta dietro una **Lambda Function URL** e non dietro API Gateway, che tronca
 l'integrazione a 30 secondi: una lettura ne può prendere di più. L'indirizzo è
-l'output `UrlFoto` dello stack e va in `web/.env.production` come
-`VITE_FOTO_URL` prima di ricompilare il frontend.
+l'output `PhotoUrl` dello stack e va in `web/.env.production` come
+`VITE_PHOTO_URL` prima di ricompilare il frontend.
 
 Ogni lettura costa circa 0,09 €, su un'API che resta aperta. Le difese sono un
 **tetto di 10 letture al giorno** (contatore su DynamoDB, condizione e
@@ -2365,7 +2366,7 @@ salta da solo:
 ```bash
 PROVA_BEDROCK=1 FOTO_LUGLIO=~/vanessa-foto/luglio.jpeg \
   FOTO_AGOSTO=~/vanessa-foto/agosto.jpeg \
-  npx vitest run --root api api/test/visione.integrazione.test.ts
+  npx vitest run --root api api/test/vision.integration.test.ts
 ```
 ```
 
@@ -2377,7 +2378,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add app/api/test/visione.integrazione.test.ts app/README.md
+git add app/api/test/vision.integration.test.ts app/README.md
 git commit -m "test: le due foto vere contro Bedrock, e la documentazione"
 ```
 
@@ -2389,8 +2390,8 @@ git commit -m "test: le due foto vere contro Bedrock, e la documentazione"
 2. Leggi l'indirizzo della Function URL:
    ```bash
    aws cloudformation describe-stacks --stack-name VanessaApp --region eu-south-1 \
-     --query "Stacks[0].Outputs[?OutputKey=='UrlFoto'].OutputValue" --output text
+     --query "Stacks[0].Outputs[?OutputKey=='PhotoUrl'].OutputValue" --output text
    ```
-3. Incollalo in `app/web/.env.production` come `VITE_FOTO_URL`, committa, e lascia che la pipeline ricompili il frontend. **Finché questo passo manca, il pulsante della foto chiama una stringa vuota e fallisce.**
-4. Prova una lettura vera dal telefono. Se torna `AccessDeniedException`, il messaggio nomina l'azione IAM che manca: aggiungila al `PolicyStatement` di `LeggiFoto` (Task 5, Step 7) e ridistribuisci.
+3. Incollalo in `app/web/.env.production` come `VITE_PHOTO_URL`, committa, e lascia che la pipeline ricompili il frontend. **Finché questo passo manca, il pulsante della foto chiama una stringa vuota e fallisce.**
+4. Prova una lettura vera dal telefono. Se torna `AccessDeniedException`, il messaggio nomina l'azione IAM che manca: aggiungila al `PolicyStatement` di `ReadPhoto` (Task 5, Step 7) e ridistribuisci.
 5. Metti un allarme di budget sull'account, se non c'è già.

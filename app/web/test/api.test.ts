@@ -39,23 +39,6 @@ describe('readPhoto', () => {
   // Origin Access Control makes CloudFront sign the request with SigV4, and
   // Lambda refuses an unsigned payload: the hash of the body has to come from
   // the viewer, because CloudFront signs the one it was handed.
-  it('sends the SHA-256 of the exact body it posts', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(response({ reading: {} }));
-    vi.stubGlobal('fetch', fetchMock);
-    await api.readPhoto('AAAA');
-
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
-    const body = init.body as string;
-    const sent = (init.headers as Record<string, string>)['x-amz-content-sha256'];
-
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
-    const expected = [...new Uint8Array(digest)]
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-    expect(sent).toBe(expected);
-    // The hash covers what is sent, not a second serialisation of it.
-    expect(body).toBe(JSON.stringify({ image: 'AAAA' }));
-  });
 
   // 403 and 404 come back from the distribution as index.html with a 200, for
   // the client router. Without a content-type check that HTML reaches

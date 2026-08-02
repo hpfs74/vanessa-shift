@@ -22,7 +22,7 @@ import {
   PriceClass,
   ViewerProtocolPolicy,
 } from 'aws-cdk-lib/aws-cloudfront';
-import { FunctionUrlOrigin, HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
+import { HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { AttributeType, Billing, TableV2 } from 'aws-cdk-lib/aws-dynamodb';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Architecture, FunctionUrlAuthType, Runtime } from 'aws-cdk-lib/aws-lambda';
@@ -144,8 +144,19 @@ export class AppStack extends Stack {
       }),
     );
 
+    // NONE, not AWS_IAM. Origin Access Control was tried and taken out again:
+    // with OAC the function is invoked over SigV4, and a signed POST needs the
+    // viewer to supply the body hash — which the frontend was made to do. It
+    // still did not work: the request was refused before the function ran, so
+    // nothing reached our code and nothing said why. Diagnosing that further
+    // while the feature was down was not worth it.
+    //
+    // What is given up: this URL stays reachable by anyone who knows it. What
+    // is kept: it is not reachable from a browser on another page, because the
+    // CORS block is gone, and everything Vanessa uses goes through CloudFront.
+    // The API's own origin is still closed — see the shared secret above.
     const photoFunctionUrl = readPhotoFn.addFunctionUrl({
-      authType: FunctionUrlAuthType.AWS_IAM,
+      authType: FunctionUrlAuthType.NONE,
     });
     this.photoUrl = photoFunctionUrl.url;
 
@@ -216,7 +227,7 @@ export class AppStack extends Stack {
           originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
         },
         '/foto/*': {
-          origin: FunctionUrlOrigin.withOriginAccessControl(photoFunctionUrl, {
+          origin: new HttpOrigin(Fn.select(2, Fn.split('/', photoFunctionUrl.url)), {
             // CloudFront caps the origin at 60 seconds and will not go higher
             // without a quota increase. A reading should take 15 to 40; past
             // 60 the viewer gets a 504, which the app already shows as "the

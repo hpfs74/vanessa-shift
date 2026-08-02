@@ -142,15 +142,30 @@ jobs:
           echo "Il sito non risponde 200 dopo il deploy"
           exit 1
 
-      - name: Verifica che l'API risponda
+      - name: Verifica che l'API risponda, e solo da CloudFront
         run: |
+          # Dalla distribuzione: deve rispondere. Non si chiama piu' l'origine
+          # per nome — le rotte stanno sotto /api e l'origine rifiuta chi non
+          # arriva da CloudFront, quindi la vecchia prova sarebbe fallita a
+          # deploy riuscito.
           codice=$(curl -s -o /dev/null -w '%{http_code}' \
-            "${{ steps.uscite.outputs.api }}/config")
+            "${{ steps.uscite.outputs.sito }}/api/config")
           if [ "$codice" != "200" ]; then
-            echo "L'API risponde $codice"
+            echo "L'API dalla distribuzione risponde $codice"
             exit 1
           fi
-          echo "API in linea (HTTP $codice)"
+          echo "API in linea dalla distribuzione (HTTP $codice)"
+
+          # E dall'origine in proprio: deve rifiutare. Un 200 qui vuol dire che
+          # il segreto e' arrivato a una sola delle due parti, e la porta unica
+          # e' solo un'intenzione.
+          diretto=$(curl -s -o /dev/null -w '%{http_code}' \
+            "${{ steps.uscite.outputs.api }}/api/config")
+          if [ "$diretto" != "401" ]; then
+            echo "L'origine dell'API risponde $diretto a chi la chiama diretta, atteso 401"
+            exit 1
+          fi
+          echo "Origine dell'API chiusa (HTTP $diretto)"
 
       - name: Riepilogo
         run: |

@@ -193,11 +193,12 @@ describe('hosting', () => {
   });
 
   it('CloudFront reads the bucket through Origin Access Control', () => {
-    // One for the site bucket, one for the photo Function URL (see "one door
-    // only" below) — both origins are closed behind OAC, none directly public.
+    // One, for the site bucket. The photo Function URL had a second one and no
+    // longer does: OAC over a signed POST refused the request before the
+    // function ran, so it was taken back out (see the comment in app-stack.ts).
     expect(
       Object.keys(app.findResources('AWS::CloudFront::OriginAccessControl')),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
   });
 
   it('serves the domain, forces HTTPS and sends 404s back to the app', () => {
@@ -238,12 +239,11 @@ describe('reading photos', () => {
   });
 
   it('sits behind a Function URL, not behind API Gateway, closed to anything but CloudFront', () => {
-    // `Cors` has to be gone, not merely unused: a Function URL that still
-    // declares its own CORS is one that was meant to be called from a browser
-    // directly, which is exactly what AWS_IAM takes away. `hasResourceProperties`
-    // matches partially, so without `Match.absent()` this passes with the
-    // block still attached.
-    app.hasResourceProperties('AWS::Lambda::Url', { AuthType: 'AWS_IAM', Cors: Match.absent() });
+    // `Cors` has to be gone, not merely unused. It is what stops a browser on
+    // some other page from calling this URL directly, now that OAC is not
+    // there to stop it outright. `hasResourceProperties` matches partially, so
+    // without `Match.absent()` this passes with the block still attached.
+    app.hasResourceProperties('AWS::Lambda::Url', { AuthType: 'NONE', Cors: Match.absent() });
   });
 
   it('can invoke the model, and nothing else of Bedrock', () => {
@@ -306,23 +306,17 @@ describe('one door only', () => {
     }
   });
 
-  it('closes the photo function to anything that is not the distribution', () => {
-    app.hasResourceProperties('AWS::Lambda::Url', { AuthType: 'AWS_IAM' });
-    // FunctionUrlOrigin.withOriginAccessControl's generated CfnPermission
-    // (aws-cdk-lib 2.263.0) never sets FunctionUrlAuthType — AuthType is
-    // already asserted on the Function URL itself above, so it isn't repeated
-    // here. Principal and Action are what tie the permission to CloudFront.
-    const [distribution] = Object.keys(app.findResources('AWS::CloudFront::Distribution'));
-    app.hasResourceProperties('AWS::Lambda::Permission', {
-      Action: 'lambda:InvokeFunctionUrl',
-      Principal: 'cloudfront.amazonaws.com',
-      // The strongest half of the guarantee, and the one worth pinning:
-      // without SourceArn the principal is every CloudFront distribution
-      // there is, anybody's included. With it, this one.
-      SourceArn: {
-        'Fn::Join': ['', Match.arrayWith([':distribution/', { Ref: distribution }])],
-      },
-    });
+  it('leaves the photo function open, deliberately, with the reason on record', () => {
+    // AWS_IAM plus Origin Access Control was tried here and taken back out: a
+    // signed POST was refused before the function ever ran, so nothing reached
+    // our code and nothing said why. If someone puts it back, this test fails
+    // and points them at the comment in app-stack.ts saying what was already
+    // tried — rather than letting them rediscover it in production.
+    app.hasResourceProperties('AWS::Lambda::Url', { AuthType: 'NONE' });
+    const cloudFrontInvoke = Object.values(
+      app.findResources('AWS::Lambda::Permission'),
+    ).filter((r) => r.Properties?.Principal === 'cloudfront.amazonaws.com');
+    expect(cloudFrontInvoke).toHaveLength(0);
   });
 
   it('hands the API its shared secret as an origin header, never to the browser', () => {

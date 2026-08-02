@@ -41,28 +41,6 @@ function requireJson(r: Response): void {
   if (!(r.headers.get('content-type') ?? '').includes('json')) throw new Error(UNREACHABLE);
 }
 
-/** The SHA-256 of the body, hex-encoded, as `x-amz-content-sha256`.
- *
- * The photo function sits behind Origin Access Control: CloudFront signs the
- * request to it with SigV4, and Lambda does not accept unsigned payloads. It
- * signs using the hash *the viewer supplied* — it does not hash the body
- * itself — so a POST that omits this header fails the signature check at the
- * origin. The `/foto/*` behaviour forwards every viewer header except Host,
- * so it arrives.
- *
- * The hash must cover the exact string that is sent, byte for byte: hashing a
- * second serialisation of the same object is not the same thing.
- *
- * `crypto.subtle` exists only in a secure context. The site is HTTPS-only, so
- * it holds there; `http://localhost` is not a secure context in every browser,
- * which is one more reason the photo path cannot be exercised from
- * `npm run dev`.
- */
-async function bodyHash(body: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -132,25 +110,19 @@ export const api: Api = {
     await request('/config', { method: 'PUT', body: JSON.stringify(p) });
   },
   async readPhoto(image) {
-    // The one string that is hashed and the one string that is sent.
     const body = JSON.stringify({ image });
 
     let r: Response;
     try {
       r = await fetch(PHOTO_URL, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-amz-content-sha256': await bodyHash(body),
-        },
+        headers: { 'content-type': 'application/json' },
         body,
       });
     } catch {
-      // The reading takes up to two minutes, from a phone: a timeout or a lost
+      // The reading takes up to a minute, from a phone: a timeout or a lost
       // connection is not the rare case. `fetch` rejects with the browser's own
-      // message — English, and with no way out. A `crypto.subtle` missing
-      // because the page is not in a secure context lands here too, and it is
-      // the same outcome for whoever is reading: the request never left.
+      // message — English, and with no way out.
       throw new Error(UNREACHABLE);
     }
 

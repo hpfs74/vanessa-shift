@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { completaAccesso, esci, sessioneValida, verifierEsfida } from '../src/auth.js';
+import { completaAccesso, esci, rinnovaAccesso, sessioneValida, verifierEsfida } from '../src/auth.js';
 
 beforeEach(() => {
   localStorage.clear();
@@ -80,5 +80,50 @@ describe('completaAccesso', () => {
 
     expect(ok).toBe(true);
     expect(sessioneValida()?.idToken).toBe('IL-TOKEN-ID');
+  });
+});
+
+describe('rinnovaAccesso', () => {
+  // The ID token lives an hour, the refresh token the day the pool was
+  // configured for: without this, "she opens the app mid-afternoon" bounces
+  // her back out to Cognito instead of renewing silently.
+  it('renews an expired session when a refresh token is present', async () => {
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 1 }));
+    localStorage.setItem('refresh', 'un-refresh-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id_token: 'IL-TOKEN-RINNOVATO', expires_in: 3600 }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+
+    const s = await rinnovaAccesso();
+
+    expect(s?.idToken).toBe('IL-TOKEN-RINNOVATO');
+    expect(sessioneValida()?.idToken).toBe('IL-TOKEN-RINNOVATO');
+  });
+
+  it('is null with no refresh token to try, and never calls fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(await rinnovaAccesso()).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // A refused refresh is the twenty-four hours being up, not a fault: it
+  // clears everything and lets the gate send her to a fresh login, quietly.
+  it('clears the session and returns null when the refresh is refused', async () => {
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 1 }));
+    localStorage.setItem('refresh', 'un-refresh-token-scaduto');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 400 })));
+
+    const s = await rinnovaAccesso();
+
+    expect(s).toBeNull();
+    expect(sessioneValida()).toBeNull();
+    expect(localStorage.getItem('refresh')).toBeNull();
   });
 });

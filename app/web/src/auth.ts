@@ -8,6 +8,7 @@
 
 const CHIAVE_SESSIONE = 'sessione';
 const CHIAVE_VERIFIER = 'pkce';
+const CHIAVE_REFRESH = 'refresh';
 
 /** Config baked in at build time: none of it is secret. */
 const POOL_DOMAIN = import.meta.env.VITE_LOGIN_DOMAIN ?? '';
@@ -37,6 +38,7 @@ export function sessioneValida(now: number = Date.now()): Sessione | null {
 
 export function esci(): void {
   localStorage.removeItem(CHIAVE_SESSIONE);
+  localStorage.removeItem(CHIAVE_REFRESH);
   sessionStorage.removeItem(CHIAVE_VERIFIER);
 }
 
@@ -101,7 +103,11 @@ export async function completaAccesso(url: URL = new URL(location.href)): Promis
   });
   if (!r.ok) return false;
 
-  const j = (await r.json()) as { id_token: string; expires_in: number };
+  const j = (await r.json()) as {
+    id_token: string;
+    expires_in: number;
+    refresh_token?: string;
+  };
   // The ID token, not `access_token` — and not by convention, by necessity.
   // The photo Lambda verifies with `tokenUse: 'id'`, so it takes the ID token
   // alone; the five API Gateway routes are more permissive (their JWT
@@ -114,9 +120,57 @@ export async function completaAccesso(url: URL = new URL(location.href)): Promis
     CHIAVE_SESSIONE,
     JSON.stringify({ idToken: j.id_token, scade: Date.now() + j.expires_in * 1000 }),
   );
+  // The ID token lives an hour; the refresh token lives the day Task 1
+  // configured on the pool. Without keeping it, the day-long session is
+  // configured on one side only, and the hourly bounce she was promised
+  // wouldn't happen becomes real.
+  if (j.refresh_token) localStorage.setItem(CHIAVE_REFRESH, j.refresh_token);
   sessionStorage.removeItem(CHIAVE_VERIFIER);
   // Take the code out of the address bar: it is single-use, but it has no
   // business staying in history or in a shared link.
   history.replaceState({}, '', location.origin + '/');
   return true;
+}
+
+/** Renews the ID token from the refresh token, silently, so a session that
+ *  outlives the hour does not bounce her back out to Cognito every time she
+ *  opens the app during the same day. Returns the renewed session, or `null`
+ *  if there was nothing to refresh with or the refresh itself failed — a
+ *  failure here means the twenty-four hours are up, which is the design's
+ *  intent, not a fault to report to her. */
+export async function rinnovaAccesso(): Promise<Sessione | null> {
+  const refreshToken = localStorage.getItem(CHIAVE_REFRESH);
+  if (!refreshToken) return null;
+
+  let r: Response;
+  try {
+    r = await fetch(`${POOL_DOMAIN}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: CLIENT_ID,
+        refresh_token: refreshToken,
+      }),
+    });
+  } catch {
+    esci();
+    return null;
+  }
+  if (!r.ok) {
+    esci();
+    return null;
+  }
+
+  try {
+    const j = (await r.json()) as { id_token: string; expires_in: number };
+    // Cognito does not hand back a new refresh token on this grant: the one
+    // already stored keeps working until its own day is up.
+    const s: Sessione = { idToken: j.id_token, scade: Date.now() + j.expires_in * 1000 };
+    localStorage.setItem(CHIAVE_SESSIONE, JSON.stringify(s));
+    return s;
+  } catch {
+    esci();
+    return null;
+  }
 }

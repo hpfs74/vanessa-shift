@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './App.js';
-import { completaAccesso, iniziaAccesso, sessioneValida } from './auth.js';
+import { completaAccesso, iniziaAccesso, rinnovaAccesso, sessioneValida } from './auth.js';
 import './styles.css';
 
 const radice = document.getElementById('root');
@@ -22,7 +22,11 @@ const avvia = async () => {
       // code was ever there, and let the check below send her to a fresh
       // login instead of leaving #root blank forever.
     }
-    const s = sessioneValida();
+    // The ID token lives an hour; the refresh token lives the day the pool
+    // was configured for. Try it before deciding there is no session, so the
+    // ordinary case — she opens the app hours in, still the same day — is a
+    // silent renewal, not a redirect back out to Cognito.
+    const s = sessioneValida() ?? (await rinnovaAccesso());
     if (s) {
       createRoot(radice).render(
         <StrictMode>

@@ -12,7 +12,14 @@ import { AnthropicBedrockMantle } from '@anthropic-ai/bedrock-sdk';
 
 import { ROW_NAME, READING_SCHEMA, SHIFTS } from '@vanessa/core';
 
-export const MODEL = 'anthropic.claude-opus-5';
+/** The cross-region inference profile, not the bare model id.
+ *
+ * `anthropic.claude-opus-5` is what `list-foundation-models` shows in
+ * eu-south-1, and calling it returns "The model does not exist": in the EU
+ * regions the callable identifier is the `eu.` profile, which routes the
+ * request across the European regions that host the model. The bare id is the
+ * model; this is the thing you are allowed to invoke. */
+export const MODEL = 'eu.anthropic.claude-opus-5';
 export const REGION = process.env.AWS_REGION ?? 'eu-south-1';
 
 /** The minimum the client needs, so the tests don't pull in the SDK. */

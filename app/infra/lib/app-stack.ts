@@ -148,11 +148,20 @@ export class AppStack extends Stack {
         resources: [`arn:aws:bedrock-mantle:${this.region}:${this.account}:project/default`],
       }),
     );
+    // The model is invoked through the `eu.` cross-region inference profile,
+    // not by its bare id — that one answers "the model does not exist" here.
+    // A profile grant needs two resources: the profile itself, and the
+    // foundation model in every region the profile may route to. The region
+    // wildcard is inherent to cross-region inference; the model is still named
+    // exactly, so this grants one model and nothing else.
     readPhotoFn.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['bedrock:InvokeModel'],
-        resources: [`arn:aws:bedrock:${this.region}::foundation-model/anthropic.claude-opus-5`],
+        resources: [
+          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/eu.anthropic.claude-opus-5`,
+          'arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5',
+        ],
       }),
     );
 

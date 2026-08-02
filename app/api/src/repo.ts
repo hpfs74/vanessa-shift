@@ -8,6 +8,7 @@ import {
   GetCommand,
   PutCommand,
   QueryCommand,
+  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 
 import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
@@ -27,6 +28,13 @@ export interface ShiftRecord {
 export const CONFIG_PK = 'CONFIG';
 export const CONFIG_SK = 'PAY';
 
+/** The counter of photo readings, one row per day. */
+export const QUOTA_PK = 'QUOTA#FOTO';
+
+/** How long a count row survives past its day. Two days are enough to cover
+ *  any timezone and keep the table clean. */
+const QUOTA_TTL_DAYS = 2;
+
 export function shiftsPk(year: number): string {
   return `SHIFTS#${year}`;
 }
@@ -39,6 +47,10 @@ export interface Repo {
   saveShifts(shifts: readonly ShiftRecord[]): Promise<void>;
   readPaySettings(): Promise<PaySettings>;
   savePaySettings(p: PaySettings): Promise<void>;
+  /** Consumes a photo reading for that day. `false` if the cap has already
+   *  been reached. The condition and the increment are the same operation:
+   *  two simultaneous requests at the boundary must not both go through. */
+  consumePhotoQuota(date: IsoDate, max: number): Promise<boolean>;
 }
 
 /** DynamoDB writes at most 25 items per BatchWrite call. */
@@ -163,6 +175,28 @@ export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo
           Item: { pk: CONFIG_PK, sk: CONFIG_SK, ...p },
         }),
       );
+    },
+
+    async consumePhotoQuota(date, max) {
+      const { year, month, day } = parseIso(date);
+      const expires = Math.floor(Date.UTC(year, month - 1, day + QUOTA_TTL_DAYS) / 1000);
+      try {
+        await doc.send(
+          new UpdateCommand({
+            TableName: table,
+            Key: { pk: QUOTA_PK, sk: date },
+            UpdateExpression: 'SET expires = :expires ADD count :one',
+            ConditionExpression: 'attribute_not_exists(count) OR count < :max',
+            ExpressionAttributeValues: { ':one': 1, ':max': max, ':expires': expires },
+          }),
+        );
+        return true;
+      } catch (e) {
+        // The failed condition is a response, not a fault: the cap has been
+        // reached. Any other error must propagate.
+        if ((e as { name?: string }).name === 'ConditionalCheckFailedException') return false;
+        throw e;
+      }
     },
   };
 }

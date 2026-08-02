@@ -16,6 +16,7 @@ import type { Repo, ShiftRecord } from '../src/repo.js';
 /** In-memory repo: the tests never touch the network. */
 function fakeRepo() {
   const shifts = new Map<string, ShiftRecord>();
+  const quota = new Map<string, number>();
   let pay = EMPTY_PAY_SETTINGS;
   const calls: string[] = [];
 
@@ -46,8 +47,15 @@ function fakeRepo() {
       calls.push('savePaySettings');
       pay = p;
     },
+    async consumePhotoQuota(date, max) {
+      calls.push(`consumePhotoQuota(${date},${max})`);
+      const used = (quota.get(date) ?? 0) + 1;
+      if (used > max) return false;
+      quota.set(date, used);
+      return true;
+    },
   };
-  return { repo, shifts, calls, pay: () => pay };
+  return { repo, shifts, quota, calls, pay: () => pay };
 }
 
 function event(p: Partial<APIGatewayProxyEventV2>): APIGatewayProxyEventV2 {

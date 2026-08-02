@@ -186,6 +186,52 @@ def test_regole_di_colore_per_ogni_codice(wb):
         assert f'"{orario}"' in formule, orario
 
 
+def test_le_regole_di_colore_coprono_tutte_le_righe_con_formula(wb):
+    # test_regole_di_colore_per_ogni_codice controlla solo che le formule
+    # attese esistano da qualche parte nel set: non si accorgerebbe se un
+    # blocco mensile venisse dimenticato negli intervalli di formattazione
+    # condizionale, o se un intervallo fosse sfalsato di una riga. Qui si
+    # confrontano le RIGHE effettivamente coperte dagli intervalli con le
+    # righe che contengono davvero una formula di codice o di orario,
+    # calcolate leggendo il foglio (non un numero fisso), cosi' il test
+    # resta valido per qualsiasi anno. Il confronto e' per riga e non per
+    # singola cella perche' ogni intervallo copre l'intera riga A:G anche
+    # nelle settimane a cavallo fra due mesi, dove alcune colonne di quella
+    # riga restano senza formula (giorni fuori mese): non e' un difetto,
+    # e' cosi' che il Task 4 ha costruito gli intervalli.
+    from openpyxl.utils.cell import range_boundaries
+
+    ws = wb["Calendario"]
+
+    def formula_codice(v):
+        return (isinstance(v, str) and v.startswith("=IF(Presenze!$D$")
+                and "&IF(Presenze!$F$" in v)
+
+    def formula_orario(v):
+        return (isinstance(v, str) and v.startswith("=IF(Presenze!$D$")
+                and "VLOOKUP" in v)
+
+    righe_attese = set()
+    for r in range(1, ws.max_row + 1):
+        for c in range(1, 8):  # colonne A..G, dove stanno i giorni
+            v = ws.cell(row=r, column=c).value
+            if formula_codice(v) or formula_orario(v):
+                righe_attese.add(r)
+                break
+    assert righe_attese, "nessuna riga con formula trovata, il test non testerebbe nulla"
+
+    righe_coperte = set()
+    for intervallo in ws.conditional_formatting:
+        for pezzo in str(intervallo.sqref).split():
+            _min_col, min_row, _max_col, max_row = range_boundaries(pezzo)
+            righe_coperte.update(range(min_row, max_row + 1))
+
+    mancanti = righe_attese - righe_coperte
+    in_piu = righe_coperte - righe_attese
+    assert not mancanti, f"righe con formula non coperte da nessuna regola: {sorted(mancanti)}"
+    assert not in_piu, f"regole su righe che non hanno nessuna formula: {sorted(in_piu)}"
+
+
 def test_legenda(wb):
     ws = wb["Calendario"]
     assert ws["A1"].value == f"Calendario {ANNO}"

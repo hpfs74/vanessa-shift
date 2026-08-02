@@ -136,32 +136,25 @@ export class AppStack extends Stack {
     // Writes only the quota counter, but there's only one table.
     table.grantReadWriteData(readPhotoFn);
 
-    // Two namespaces, because the Messages-API client does not go through
-    // `bedrock:InvokeModel` at all: it calls `bedrock-mantle:CreateInference`
-    // against a project resource. Granting only the obvious one produced an
-    // AccessDenied that named the missing action — this is that name, kept
-    // narrow rather than widened to `bedrock*:*`.
+    // Two namespaces and one region that is not ours. The Messages-API client
+    // does not go through `bedrock:InvokeModel`: it calls
+    // `bedrock-mantle:CreateInference` against a project resource. And it calls
+    // it in eu-west-1, because eu-south-1 does not serve this model — see the
+    // comment on REGION in api/src/vision.ts. Both grants name one model and
+    // one region; neither is widened to a wildcard.
+    const modelRegion = 'eu-west-1';
     readPhotoFn.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['bedrock-mantle:CreateInference'],
-        resources: [`arn:aws:bedrock-mantle:${this.region}:${this.account}:project/default`],
+        resources: [`arn:aws:bedrock-mantle:${modelRegion}:${this.account}:project/default`],
       }),
     );
-    // The model is invoked through the `eu.` cross-region inference profile,
-    // not by its bare id — that one answers "the model does not exist" here.
-    // A profile grant needs two resources: the profile itself, and the
-    // foundation model in every region the profile may route to. The region
-    // wildcard is inherent to cross-region inference; the model is still named
-    // exactly, so this grants one model and nothing else.
     readPhotoFn.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['bedrock:InvokeModel'],
-        resources: [
-          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/eu.anthropic.claude-opus-5`,
-          'arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5',
-        ],
+        resources: [`arn:aws:bedrock:${modelRegion}::foundation-model/anthropic.claude-opus-5`],
       }),
     );
 

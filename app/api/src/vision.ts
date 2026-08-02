@@ -12,15 +12,26 @@ import { AnthropicBedrockMantle } from '@anthropic-ai/bedrock-sdk';
 
 import { ROW_NAME, READING_SCHEMA, SHIFTS } from '@vanessa/core';
 
-/** The cross-region inference profile, not the bare model id.
+export const MODEL = 'anthropic.claude-opus-5';
+
+/** Ireland, not Milan, and not where this Lambda runs.
  *
- * `anthropic.claude-opus-5` is what `list-foundation-models` shows in
- * eu-south-1, and calling it returns "The model does not exist": in the EU
- * regions the callable identifier is the `eu.` profile, which routes the
- * request across the European regions that host the model. The bare id is the
- * model; this is the thing you are allowed to invoke. */
-export const MODEL = 'eu.anthropic.claude-opus-5';
-export const REGION = process.env.AWS_REGION ?? 'eu-south-1';
+ * The Messages endpoint does not serve this model in eu-south-1: asking for it
+ * there answers "the model does not exist", while the same call to eu-west-1
+ * gets as far as permissions. That is the difference between an identifier the
+ * endpoint does not know and one it knows but will not run for you.
+ *
+ * Worth knowing before changing it: `aws bedrock list-foundation-models` lists
+ * the model in eu-south-1 quite happily. That is the older Bedrock API, and
+ * what it lists is not what this endpoint serves — checking availability there
+ * is how this was got wrong in the first place. The way to check is to call the
+ * endpoint and read which of the two errors comes back.
+ *
+ * The photo therefore leaves Italy for Ireland. Both are in the EU, so nothing
+ * crosses the EEA, but the sheet carries fourteen colleagues' names and that is
+ * worth stating rather than leaving to be discovered.
+ */
+export const REGION = 'eu-west-1';
 
 /** The minimum the client needs, so the tests don't pull in the SDK. */
 export interface MessagesResponse {

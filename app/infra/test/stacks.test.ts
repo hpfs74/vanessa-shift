@@ -261,29 +261,20 @@ describe('reading photos', () => {
         }),
       });
 
-    // Two resources, because the call goes through the `eu.` cross-region
-    // profile: the profile, and the model in whatever region it routes to.
-    app.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: Match.objectLike({
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: 'bedrock:InvokeModel',
-            Effect: 'Allow',
-            Resource: [
-              `arn:aws:bedrock:${CONFIG.region}:${CONFIG.account}:inference-profile/eu.anthropic.claude-opus-5`,
-              'arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5',
-            ],
-          }),
-        ]),
-      }),
-    });
+    // eu-west-1, not the stack's own region: eu-south-1 does not serve this
+    // model on the Messages endpoint. If someone "corrects" the region back to
+    // match the stack, this fails rather than every reading failing in silence.
+    bedrock(
+      'bedrock:InvokeModel',
+      'arn:aws:bedrock:eu-west-1::foundation-model/anthropic.claude-opus-5',
+    );
     // The one the Messages-API client actually calls. Granting only the obvious
     // `bedrock:InvokeModel` produced an AccessDenied naming this action
     // instead: a future edit that drops it breaks every reading, and nothing
     // else would notice.
     bedrock(
       'bedrock-mantle:CreateInference',
-      `arn:aws:bedrock-mantle:${CONFIG.region}:${CONFIG.account}:project/default`,
+      `arn:aws:bedrock-mantle:eu-west-1:${CONFIG.account}:project/default`,
     );
   });
 

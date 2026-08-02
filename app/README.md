@@ -95,7 +95,9 @@ metà — non si salvano e non cancellano niente.
 Sta dietro una **Lambda Function URL** e non dietro API Gateway, che tronca
 l'integrazione a 30 secondi: una lettura ne può prendere di più. L'indirizzo è
 l'output `PhotoUrl` dello stack e va in `web/.env.production` come
-`VITE_PHOTO_URL` prima di ricompilare il frontend.
+`VITE_PHOTO_URL` prima di ricompilare il frontend. Finché è vuoto il pulsante lo
+dice — «la lettura da foto non è configurata su questa installazione» — invece di
+chiamare un indirizzo che non esiste e mostrare l'errore del browser.
 
 Ogni lettura costa circa 0,09 €, su un'API che resta aperta. Le difese sono un
 **tetto di 10 letture al giorno** (contatore su DynamoDB, condizione e

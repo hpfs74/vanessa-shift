@@ -110,6 +110,61 @@ def test_la_riga_di_controllo_si_colora_se_negativa(wb):
         r.operator == "lessThan" and r.formula == ["0"] for r in regole), regole
 
 
+def test_celle_dei_parametri_sono_vuote_e_verdi(wb):
+    ws = wb["Stipendio"]
+    etichette = [ws.cell(row=r, column=1).value for r in range(5, 11)]
+    assert etichette == [
+        "Tariffa oraria lorda", "Maggiorazione sabato", "Maggiorazione domenica",
+        "Maggiorazione festivo", "Rateo 13a", "Coefficiente netto/lordo",
+    ]
+    for r in (5, 6, 7, 8, 10):
+        c = ws.cell(row=r, column=2)
+        assert c.value is None, r
+        assert c.fill.fgColor.rgb[-6:] == "E8F3EA", r
+    assert ws["B9"].value == "=1/12"
+
+
+def test_gli_importi_restano_vuoti_finche_manca_la_tariffa(wb):
+    ws = wb["Stipendio"]
+    r = MESI_RIGHE["Gennaio"]
+    assert ws.cell(row=r, column=6).value == (
+        f'=IF($B$5="","",(B{r}+C{r}+D{r}+E{r})*$B$5)')
+    assert ws.cell(row=r, column=7).value == f'=IF($B$5="","",C{r}*$B$5*$B$6)'
+    assert ws.cell(row=r, column=8).value == f'=IF($B$5="","",D{r}*$B$5*$B$7)'
+    assert ws.cell(row=r, column=9).value == f'=IF($B$5="","",E{r}*$B$5*$B$8)'
+    assert ws.cell(row=r, column=10).value == (
+        f'=IF($B$5="","",(F{r}+G{r}+H{r}+I{r})*$B$9)')
+    assert ws.cell(row=r, column=11).value == (
+        f'=IF($B$5="","",F{r}+G{r}+H{r}+I{r}+J{r})')
+
+
+def test_il_netto_richiede_anche_il_coefficiente(wb):
+    ws = wb["Stipendio"]
+    r = MESI_RIGHE["Gennaio"]
+    assert ws.cell(row=r, column=12).value == (
+        f'=IF(OR($B$5="",$B$10=""),"",K{r}*$B$10)')
+
+
+def test_formato_euro_sugli_importi(wb):
+    ws = wb["Stipendio"]
+    r = MESI_RIGHE["Gennaio"]
+    for col in range(6, 13):
+        assert ws.cell(row=r, column=col).number_format == '€ #,##0.00', col
+
+
+def test_ce_il_grafico(wb):
+    ws = wb["Stipendio"]
+    assert len(ws._charts) == 1
+    assert ws._charts[0].title is not None
+
+
+def test_nota_sui_limiti(wb):
+    ws = wb["Stipendio"]
+    testi = [ws.cell(row=r, column=1).value for r in range(1, 15)]
+    assert any(isinstance(t, str) and "straordinari" in t for t in testi)
+    assert any(isinstance(t, str) and "busta paga" in t for t in testi)
+
+
 def test_ogni_giorno_dell_anno_sta_in_esattamente_un_secchio(wb):
     """Le colonne C/D/E/B (sab/dom/fest/ord) devono partizionare esattamente
     le righe di Presenze di ogni mese: ogni giorno una volta sola, mai due,

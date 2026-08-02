@@ -4,11 +4,13 @@ Le ore arrivano dal foglio Presenze. La tariffa e le maggiorazioni le scrive
 l'utente nelle celle verdi: finche' sono vuote la tabella resta vuota.
 """
 
+from openpyxl.chart import BarChart, Reference
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from comune import BLU_SCURO, BOX, GRIGIO_INT, MESI, festivi_italiani, intesta, riga_presenze
+from comune import (BLU_SCURO, BOX, GRIGIO_INT, MESI, VERDE, festivi_italiani,
+                    intesta, riga_presenze, titolo)
 
 RIGA_PARAMETRI = 5
 RIGA_TABELLA = 15          # intestazione della tabella mensile
@@ -20,6 +22,45 @@ COLONNE = ["Mese", "Ore ord.", "Ore sab", "Ore dom", "Ore fest",
            "Lordo base", "Magg. sab", "Magg. dom", "Magg. fest",
            "Rateo 13a", "Lordo totale", "Netto stimato"]
 
+PARAMETRI = [
+    ("Tariffa oraria lorda", "€ #,##0.00"),
+    ("Maggiorazione sabato", "0.00%"),
+    ("Maggiorazione domenica", "0.00%"),
+    ("Maggiorazione festivo", "0.00%"),
+    ("Rateo 13a", "0.00%"),
+    ("Coefficiente netto/lordo", "0.00%"),
+]
+
+
+def _parametri(ws, anno):
+    """Righe 1-13: le celle da compilare a mano e le avvertenze."""
+    titolo(ws, "A1", f"Simulazione stipendio {anno}")
+    ws["A2"] = ("Compila le celle verdi: la tabella qui sotto si calcola da sola. "
+                "CCNL Cooperative Sociali, OSS livello C1.")
+    ws["A2"].font = Font(italic=True, size=10, color="5A6B7D")
+
+    intesta(ws, 4, ["Parametro", "Valore"])
+    for i, (etichetta, formato) in enumerate(PARAMETRI):
+        r = 5 + i
+        e = ws.cell(row=r, column=1, value=etichetta)
+        e.font = Font(bold=True)
+        e.border = BOX
+        c = ws.cell(row=r, column=2)
+        # Il rateo e' l'unico con un valore di partenza sensato: 1/12 del lordo.
+        c.value = "=1/12" if etichetta == "Rateo 13a" else None
+        c.number_format = formato
+        c.fill = PatternFill("solid", fgColor=VERDE)
+        c.alignment = Alignment(horizontal="center")
+        c.border = BOX
+
+    ws["A12"] = ("La tariffa oraria si legge sul contratto o sulla busta paga. "
+                 "Il coefficiente netto/lordo si ottiene dividendo il netto di una "
+                 "busta paga vera per il suo lordo.")
+    ws["A12"].font = Font(italic=True, size=10, color="5A6B7D")
+    ws["A13"] = ("Non calcola: straordinari, notturno, scatti di anzianita', TFR, "
+                 "conguagli, addizionali regionali e comunali.")
+    ws["A13"].font = Font(italic=True, size=10, color="5A6B7D")
+
 
 def _somma_righe(righe):
     """Somma esplicita di celle di Presenze, o 0 se non ce n'e' nessuna."""
@@ -30,6 +71,7 @@ def _somma_righe(righe):
 
 def foglio_stipendio(wb, anno, p_r1, p_r2):
     ws = wb.create_sheet("Stipendio")
+    _parametri(ws, anno)
     festivi = festivi_italiani(anno)
     ore = f"Presenze!$E${p_r1}:$E${p_r2}"
     mesi = f"Presenze!$C${p_r1}:$C${p_r2}"
@@ -58,6 +100,17 @@ def foglio_stipendio(wb, anno, p_r1, p_r2):
         ws.cell(row=r, column=2, value=(
             f'=SUMIFS({ore},{mesi},$A{r})-C{r}-D{r}-E{r}'))
 
+        # Tutte le ore al lordo base, poi le maggiorazioni solo su sab/dom/fest.
+        ws.cell(row=r, column=6, value=f'=IF($B$5="","",(B{r}+C{r}+D{r}+E{r})*$B$5)')
+        ws.cell(row=r, column=7, value=f'=IF($B$5="","",C{r}*$B$5*$B$6)')
+        ws.cell(row=r, column=8, value=f'=IF($B$5="","",D{r}*$B$5*$B$7)')
+        ws.cell(row=r, column=9, value=f'=IF($B$5="","",E{r}*$B$5*$B$8)')
+        ws.cell(row=r, column=10, value=f'=IF($B$5="","",(F{r}+G{r}+H{r}+I{r})*$B$9)')
+        ws.cell(row=r, column=11, value=f'=IF($B$5="","",F{r}+G{r}+H{r}+I{r}+J{r})')
+        ws.cell(row=r, column=12, value=f'=IF(OR($B$5="",$B$10=""),"",K{r}*$B$10)')
+        for col in range(6, 13):
+            ws.cell(row=r, column=col).number_format = '€ #,##0.00'
+
         for col in range(1, len(COLONNE) + 1):
             c = ws.cell(row=r, column=col)
             c.border = BOX
@@ -79,6 +132,8 @@ def foglio_stipendio(wb, anno, p_r1, p_r2):
         c.border = BOX
         if col > 1:
             c.alignment = Alignment(horizontal="center")
+        if col >= 6:
+            c.number_format = '€ #,##0.00'
 
     # Rete di sicurezza: B e' costruito per differenza (SUMIFS(mese)-C-D-E),
     # quindi B+C+D+E e' identicamente uguale a SUM(ore): un doppio conteggio
@@ -99,4 +154,16 @@ def foglio_stipendio(wb, anno, p_r1, p_r2):
         CellIsRule(operator="lessThan", formula=["0"],
                    font=Font(bold=True, color="FFFFFF"),
                    fill=PatternFill("solid", fgColor="B03030")))
+
+    ch = BarChart()
+    ch.type = "col"
+    ch.title = "Lordo e netto stimato per mese"
+    ch.height, ch.width = 9, 18
+    ch.y_axis.title = "Euro"
+    ch.add_data(Reference(ws, min_col=11, max_col=12,
+                          min_row=RIGA_TABELLA, max_row=RIGA_TOTALE - 1),
+                titles_from_data=True)
+    ch.set_categories(Reference(ws, min_col=1,
+                                min_row=RIGA_PRIMO_MESE, max_row=RIGA_TOTALE - 1))
+    ws.add_chart(ch, "N4")
     return ws

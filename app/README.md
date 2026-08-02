@@ -37,7 +37,7 @@ cd infra && npx cdk deploy --all --require-approval never
 | **Calendario** | griglia mensile, CRUD completo del giorno: turno, turno originale, collega, tipo di scambio, note. Il puntino accanto al codice segnala uno scambio. |
 | **Carica** | scegli il mese, scrivi la sequenza dei codici e riempi tutto in un colpo. Mostra quali giorni sovrascriverebbe **prima** di salvare. |
 | **Scambi** | saldo favori e saldo ore per collega, come il foglio Scambi. |
-| **Riepilogo** | turni per codice, giorni lavorati e ore per mese, con le barre. |
+| **Riepilogo** | due grafici ad anello (ore per turno, giorni per codice), ore per mese a barre, tabella per codice. |
 | **Stipendio** | parametri e simulazione mensile. |
 
 ## Ore effettive
@@ -53,6 +53,25 @@ settimana, totali del mese, riepilogo, simulazione stipendio e differenza ore de
 
 **Su questo l'app si discosta dal foglio Excel**, che deriva sempre le ore dalla sigla e non
 ha un campo per l'eccezione: sugli stessi dati i due possono dare totali diversi.
+
+## Colori dei grafici
+
+Gli spicchi **non** usano le tinte pastello delle celle del calendario. Quelle funzionano
+come sfondo dietro una sigla leggibile, ma come spicchi sono indistinguibili: il validatore
+misura la coppia peggiore a ΔE 4.9 per la vista normale, cioè illeggibile anche senza
+alcun deficit cromatico.
+
+I quattro colori in uso passano tutti i controlli sulla superficie chiara, confrontati su
+**tutte** le coppie e non solo su quelle adiacenti, perche' in un anello ogni spicchio
+confina con ogni altro. Il giallo e' stato scartato: contro l'arancio sta a ΔE 13.7, sotto
+la soglia di 15.
+
+L'identita' non dipende comunque dal colore: ogni spicchio ha una riga di legenda con la
+sigla del turno, ed e' la sigla — non il colore — a legarlo al calendario.
+
+L'app dichiara `color-scheme: light` e non ha un tema scuro. Se un giorno lo si aggiunge,
+questi valori vanno ricalcolati per la superficie scura e rivalidati: capovolgerli non
+supera il controllo.
 
 ## Mobile first
 

@@ -4,6 +4,7 @@ import {
   type DayEntry,
   type IsoDate,
   type ShiftCode,
+  hoursPerCode,
   parseSequence,
   planChanges,
   tokenise,
@@ -142,6 +143,21 @@ describe('year summary', () => {
     const t = summaryTotals(yearSummary(2026, shifts));
     expect(t.workedDays).toBe(0);
     expect(t.totalHours).toBe(0);
+  });
+
+  it('sums hours per code for the chart, honouring overrides', () => {
+    const shifts = new Map<IsoDate, DayEntry>([
+      ['2026-01-05', { code: 'M' }],
+      ['2026-01-07', { code: 'M' }],
+      ['2026-01-08', { code: 'P1', hoursOverride: 2 }],
+      ['2026-01-09', { code: 'L' }],
+      ['2025-01-05', { code: 'M' }],
+    ]);
+    const per = hoursPerCode(2026, shifts);
+    expect(per.M).toBe(12);
+    expect(per.P1).toBe(2);
+    expect(per.L).toBe(0);
+    expect(per.M1).toBe(0);
   });
 
   it('totals add the twelve months up', () => {

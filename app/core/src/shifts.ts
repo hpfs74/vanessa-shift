@@ -21,6 +21,10 @@ export const SHIFTS: readonly Shift[] = [
   { code: 'P1', description: 'Pomeriggio lungo', start: '13:00', end: '21:00', hours: 8 },
 ];
 
+/** Only the shifts that are actually worked. Libero is 0 hours: it would be
+ *  an invisible slice in an hours chart, exactly as in the Riepilogo sheet. */
+export const WORKED_SHIFTS: readonly Shift[] = SHIFTS.filter((s) => s.hours > 0);
+
 const BY_CODE = new Map(SHIFTS.map((s) => [s.code, s]));
 
 export function isShiftCode(v: unknown): v is ShiftCode {

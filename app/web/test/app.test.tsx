@@ -530,6 +530,65 @@ describe('summary view', () => {
   });
 });
 
+describe('summary charts', () => {
+  const goToSummary = async (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(
+      within(screen.getByRole('navigation', { name: 'Sezioni' })).getByRole('button', {
+        name: /Riepilogo/,
+      }),
+    );
+
+  it('draws hours per shift and days per code', async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        today={JAN}
+        api={
+          fakeApi([
+            { date: '2026-01-05', code: 'M' }, // 6h
+            { date: '2026-01-07', code: 'M' }, // 6h
+            { date: '2026-01-08', code: 'P1' }, // 8h
+            { date: '2026-01-09', code: 'L' }, // 0h
+          ]).api
+        }
+      />,
+    );
+    await goToSummary(user);
+
+    const hours = screen.getByRole('img', { name: /^Ore per turno/ });
+    expect(hours).toHaveAccessibleName(/M 12 ore, 60%/);
+    expect(hours).toHaveAccessibleName(/P1 8 ore, 40%/);
+    // Libero is 0 hours: it has no place in an hours chart.
+    expect(hours).not.toHaveAccessibleName(/L /);
+
+    const days = screen.getByRole('img', { name: /^Giorni per codice/ });
+    expect(days).toHaveAccessibleName(/M 2 giorni/);
+    expect(days).toHaveAccessibleName(/L 1 giorni/);
+  });
+
+  it('counts the hours actually worked, not the shift nominal ones', async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        today={JAN}
+        api={fakeApi([{ date: '2026-01-05', code: 'P1', hoursOverride: 2 }]).api}
+      />,
+    );
+    await goToSummary(user);
+    expect(screen.getByRole('img', { name: /^Ore per turno/ })).toHaveAccessibleName(
+      /P1 2 ore/,
+    );
+  });
+
+  it('says there is nothing to draw on an empty year', async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi().api} today={JAN} />);
+    await goToSummary(user);
+    expect(screen.getByText(/Nessuna ora registrata/)).toBeInTheDocument();
+    expect(screen.getByText(/Nessun giorno registrato/)).toBeInTheDocument();
+  });
+});
+
 describe('pay view', () => {
   const goToPay = async (user: ReturnType<typeof userEvent.setup>) =>
     user.click(within(screen.getByRole('navigation', { name: 'Sezioni' })).getByRole('button', { name: /Stipendio/ }));

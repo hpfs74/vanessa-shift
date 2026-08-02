@@ -18,6 +18,7 @@
   --P1: #ffcfa0;
   --L: #edf1f5;
   --tap: 44px; /* smallest comfortable target for a thumb */
+  --surface: #ffffff; /* what sits behind a chart: the gap colour between slices */
   color-scheme: light;
 }
 
@@ -213,6 +214,27 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
 .good { color: #1f7a44; }
 .bad { color: #8d2020; }
 
+/* --- donuts ---
+   Stacked on a phone, side by side as soon as there is room. The legend
+   carries the numbers so nothing depends on a hover a touchscreen cannot
+   produce. */
+.donuts { display: grid; grid-template-columns: 1fr; gap: 1rem; margin: 0.5rem 0 1rem; }
+.donut { margin: 0; border: 1px solid var(--border); border-radius: 10px; background: #fff; padding: 0.7rem; }
+.donut figcaption { font-size: 0.8rem; font-weight: 700; color: var(--navy); margin-bottom: 0.5rem; }
+.donut-body { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
+.donut-svg { width: 8.5rem; height: 8.5rem; flex: 0 0 auto; }
+.donut-total { font-size: 30px; font-weight: 700; fill: var(--navy); text-anchor: middle; }
+.donut-unit { font-size: 13px; fill: var(--muted); text-anchor: middle; }
+
+.donut-legend { list-style: none; margin: 0; padding: 0; flex: 1 1 9rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.donut-legend li { display: grid; grid-template-columns: 0.7rem 1.6rem 1fr auto; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
+.chip { width: 0.7rem; height: 0.7rem; border-radius: 3px; }
+/* The code letter, not the colour, is what ties a slice to the calendar. */
+.chip-code { font-weight: 700; color: var(--text); }
+.chip-desc { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip-value { font-weight: 600; color: var(--navy); white-space: nowrap; }
+.chip-value small { color: var(--muted); font-weight: 400; }
+
 /* --- bars --- */
 .bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
 .bars li { display: grid; grid-template-columns: 2.2rem 1fr 2.2rem; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
@@ -244,5 +266,6 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
   .code { font-size: 1rem; }
   .time { font-size: 0.58rem; }
   .settings { grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
+  .donuts { grid-template-columns: 1fr 1fr; }
   .tabbar button { font-size: 0.68rem; }
 }

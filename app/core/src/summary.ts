@@ -46,6 +46,20 @@ export function yearSummary(
   return months;
 }
 
+/** Hours per shift code across the year, honouring per-day overrides.
+ *  Feeds the "ore per turno" chart, which the Riepilogo sheet also draws. */
+export function hoursPerCode(
+  year: number,
+  days: ReadonlyMap<IsoDate, DayEntry>,
+): Record<ShiftCode, number> {
+  const out = emptyPerCode();
+  for (const [date, entry] of days) {
+    if (parseIso(date).year !== year) continue;
+    out[entry.code] += entryHours(entry);
+  }
+  return out;
+}
+
 export function summaryTotals(months: readonly MonthSummary[]): {
   perCode: Record<ShiftCode, number>;
   workedDays: number;

@@ -3,6 +3,20 @@
 Data: 2026-08-02
 Stato: approvato
 
+> **Superata in parte.** Due cose scritte qui non descrivono più il progetto, e le correzioni
+> stanno accanto ai punti in cui compaiono:
+>
+> 1. **La Function URL della foto non è passata a `AWS_IAM` dietro Origin Access Control.** Ci
+>    si è provato e l'OAC è stato tolto di nuovo; è rimasta su `authType: NONE`, cioè
+>    raggiungibile da chiunque ne conosca l'indirizzo. La fonte è `infra/lib/app-stack.ts`, che
+>    spiega anche perché. Vedi §*Le origini si chiudono*.
+> 2. **L'autenticazione non è più fuori perimetro**, da
+>    `2026-08-02-autenticazione-passkey-design.md`: le cinque rotte stanno dietro un authorizer
+>    JWT e la Lambda della foto verifica il token da sé. Vedi §*Fuori perimetro*.
+>
+> Il resto — la porta unica, il segreto d'origine, i path relativi, il controllo del
+> `content-type` — vale ancora com'è scritto.
+
 ## Obiettivo
 
 Il browser parla con un solo indirizzo. Oggi ne conosce tre — il sito su
@@ -80,10 +94,24 @@ Origin Access Control (vedi §Le origini si chiudono), e da lì nessun browser l
 direttamente: un blocco CORS rimasto lì descriverebbe un accesso che non esiste più, e
 leggendolo fra sei mesi si crederebbe che la Function URL si possa ancora chiamare a mano.
 
+> **La premessa è caduta, la conclusione no.** L'OAC è stato tolto e la Function URL è rimasta
+> su `NONE`, quindi l'indirizzo *è* raggiungibile a mano. Togliere il CORS resta comunque
+> giusto, per un motivo diverso da quello scritto sopra: senza intestazioni CORS nessuna pagina
+> di terzi può chiamare quell'indirizzo dal browser di chi la visita. Chi lo chiama fuori dal
+> browser lo raggiunge eccome, e a fermarlo c'è solo il token.
+
 ## Le origini si chiudono
 
 Non era nel perimetro della prima stesura, e ci è entrato: una volta che CloudFront è l'unica
 porta, lasciare le due origini raggiungibili in proprio rende la porta un suggerimento.
+
+> **Non è andata così.** La Function URL è rimasta su `authType: NONE`, senza Origin Access
+> Control: l'OAC è stato provato e tolto — la richiesta veniva rifiutata prima che la funzione
+> girasse, quindi niente arrivava al nostro codice e niente diceva perché. Il paragrafo qui
+> sotto, e il prezzo dell'`x-amz-content-sha256` che lo segue, descrivono quindi una chiusura
+> che **non esiste**: quell'indirizzo è raggiungibile da chiunque lo conosca, e la sua unica
+> porta è il token che la Lambda verifica per prima (`api/src/token.ts`). La fonte è
+> `infra/lib/app-stack.ts`.
 
 **La Function URL** passa da `NONE` a `AWS_IAM` e sta dietro Origin Access Control: CloudFront
 firma ogni richiesta con SigV4, e il permesso di invocazione è ristretto — via `SourceArn` — a
@@ -144,7 +172,7 @@ secondi, o riportare `/foto` sulla sua Function URL.
 
 | File | Cosa |
 |------|------|
-| `infra/lib/app-stack.ts` | due `additionalBehaviors`, le origini, le rotte sotto `/api`, il segreto condiviso, la Function URL su `AWS_IAM` dietro OAC, l'output `PhotoUrl` che diventa informativo |
+| `infra/lib/app-stack.ts` | due `additionalBehaviors`, le origini, le rotte sotto `/api`, il segreto condiviso, la Function URL su `AWS_IAM` dietro OAC *(non fatto: è rimasta su `NONE`, vedi l'avviso in cima)*, l'output `PhotoUrl` che diventa informativo |
 | `infra/test/stacks.test.ts` | le behaviour esistono e sono configurate come sopra; le rotte sono sotto `/api`; le due origini sono chiuse |
 | `api/src/http.ts` | il confronto a tempo costante del segreto, e il 401 di chi non passa da CloudFront |
 | `web/src/api.ts` | path relativi, via il guard sull'URL vuoto, `/foto/leggi`, lo SHA-256 del corpo, il controllo del `content-type` |
@@ -169,7 +197,16 @@ accettabile. Se CloudFormation fallisce a metà, fa rollback e resta buono quell
 Niente WAF e niente rate limiting oltre il throttling che API Gateway già fa.
 
 La restrizione delle origini invece **è rientrata nel perimetro** durante l'esecuzione, e sta in
-§Le origini si chiudono: entrambe rifiutano l'accesso diretto, con forze diverse. Quello che
-resta fuori è l'autenticazione dell'utente: dietro CloudFront l'API è aperta a chiunque, come
-prima, e questa è la scelta deliberata di sempre — non una svista che le due chiusure
-correggono a metà.
+§Le origini si chiudono — con l'avvertenza in cima a quella sezione: solo l'API ha finito per
+avere una chiusura, la Function URL no.
+
+> **Superato dal 2026-08-02**, da `2026-08-02-autenticazione-passkey-design.md`. Il paragrafo
+> qui sotto resta perché era una decisione vera, presa con cognizione del rischio, e la sua
+> motivazione è parte della storia del progetto — ma non descrive più il progetto: le cinque
+> rotte dell'API stanno dietro un authorizer JWT di API Gateway e la Lambda della foto verifica
+> lo stesso token da sé, per prima. Il segreto d'origine resta accanto all'autenticazione, non
+> al posto suo: risponde a *da quale porta sei entrato*, non a *chi sei*.
+
+Quello che resta fuori è l'autenticazione dell'utente: dietro CloudFront l'API è aperta a
+chiunque, come prima, e questa è la scelta deliberata di sempre — non una svista che le due
+chiusure correggono a metà.

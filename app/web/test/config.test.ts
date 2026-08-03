@@ -54,10 +54,12 @@ describe('VITE_LOGIN_DOMAIN', () => {
     // is not the pool's, or on none at all.
     const { host, protocol } = new URL(leggiEnv('.env.production').VITE_LOGIN_DOMAIN);
     expect(protocol).toBe('https:');
+    // And it is under a domain we control, which is what stops the passkeys
+    // from being bound to a name we would one day have to abandon. That does
+    // not need an assertion of its own: a suffix check one line under an
+    // equality check can never fail while the equality passes, and reads as
+    // coverage that is not there.
     expect(host).toBe('auth.vanessa.matteo.cool');
-    // Under a domain we control, which is what stops the passkeys from
-    // being bound to a name we would one day have to abandon.
-    expect(host.endsWith('.vanessa.matteo.cool')).toBe(true);
   });
 
   it('still refuses the empty and the mistyped, which is what it is for', () => {

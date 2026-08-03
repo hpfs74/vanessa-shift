@@ -184,12 +184,11 @@ l'asterisco vale zero o più caratteri **dopo** il prefisso letterale, quindi
 `/foto` secco non la incontra e finisce sul bucket. La Lambda il path non lo
 guarda.
 
-Per questo il percorso foto non si prova più da `npm run dev`: il server di
-sviluppo inoltra `/foto` alla Function URL così com'è, ma quella pretende una
-firma SigV4 che solo CloudFront sa produrre, e rifiuta la richiesta non
-firmata. In più `crypto.subtle`, con cui il browser calcola l'hash del corpo,
-esiste solo in un contesto sicuro, e `http://localhost` non lo è in tutti i
-browser. Una lettura vera va provata in linea.
+Il percorso foto non si prova da `npm run dev`, ma non perché l'origine
+rifiuti: la Function URL è su `authType: NONE` e risponde a chiunque. È che da
+`npm run dev` non si entra affatto — vedi *«`npm run dev` non fa accedere»*
+qui sotto — quindi la richiesta parte senza token e la Lambda la rifiuta per
+prima cosa. Una lettura vera va provata in linea.
 
 Ogni lettura costa circa 0,09 €. L'endpoint è dietro lo stesso token verificato in
 **Autenticazione** — la Lambda lo controlla per primo, prima della quota e prima di Bedrock —
@@ -233,8 +232,16 @@ lo legge dallo stack a ogni deploy. Se lo stack viene ricreato non c'è niente d
 ## Deploy automatico
 
 Ogni push su `main` lancia `.github/workflows/deploy.yml`: test, typecheck, build e
-`cdk deploy`, poi verifica che sito e API rispondano davvero 200. Sulle pull request
-girano solo i test. Il deploy si puo' anche lanciare a mano da GitHub (*Run workflow*).
+`cdk deploy`, poi verifica che il sito risponda 200 e che l'API risponda **401**. Il 401 è
+l'esito giusto: la pipeline non ha un token, e tutte e cinque le rotte stanno dietro
+l'authorizer JWT. Guarda anche il `content-type` del rifiuto, perché un 401 in `text/html`
+vorrebbe dire che la behaviour `/api/*` non combacia più e a rispondere è la SPA. La stessa
+chiamata all'hostname dell'API in proprio deve dare 401 anche lei: prova che l'authorizer è
+sulle rotte e non solo sul percorso attraverso CloudFront. **Non** prova che il segreto
+d'origine sia collegato a tutte e due le parti — l'authorizer rifiuta prima che il controllo sul
+segreto venga eseguito, e per arrivarci servirebbe un token valido, che in CI non c'è. Sulle
+pull request girano solo i test. Il deploy si puo' anche lanciare a mano da GitHub
+(*Run workflow*).
 
 **Non ci sono credenziali AWS su GitHub.** La pipeline si autentica via OIDC: chiede ad AWS
 un token temporaneo a ogni esecuzione. Niente da ruotare, niente da revocare.
@@ -294,9 +301,13 @@ Oggi non costa niente perché nessun utente esiste ancora; dopo il primo accesso
 costa un giro di registrazioni su ogni telefono.
 
 Le tre cose insieme (`passkeyRelyingPartyId` sul pool, il dominio di accesso, `VITE_LOGIN_DOMAIN`
-nel frontend) sono lo **stesso nome scritto tre volte** e devono restare coerenti. Due test lo
+nel frontend) sono lo **stesso nome scritto tre volte** e devono restare coerenti. Tre test lo
 controllano: `infra/test/auth-stack.test.ts` verifica che il relying party id sia identico al
-dominio del pool, `web/test/config.test.ts` che il valore committato nel frontend sia quell'host.
+dominio del pool, `web/test/config.test.ts` che il valore committato nel frontend sia quell'host,
+e `infra/test/config.test.ts` confronta le prime due — costruite dal vero `CONFIG` di
+`infra/bin/config.ts`, non da una costante scritta nel test — con il `.env.production` del
+frontend. Serviva il terzo: gli altri due partono ciascuno da una copia propria del nome, quindi
+cambiare `CONFIG.loginDomain` da solo li lasciava entrambi verdi.
 
 ### La pagina di accesso è Managed Login, e ha un aspetto diverso dall'Hosted UI
 
@@ -319,6 +330,32 @@ togliere — anche se non è la strada normale per entrare. Il pavimento della s
 la sua forza, non il volto: lo stack impone almeno 32 caratteri con tutte e quattro le classi
 (maiuscole, minuscole, numeri, simboli), quindi va generata da un gestore di password, non a
 memoria, e conservata lì — mai digitata.
+
+### `npm run dev` non fa accedere, e non è un guasto
+
+**Da `npm run dev` non si entra nell'app, e non c'è niente da compilare per farlo funzionare.**
+Sta scritto qui perché la conclusione naturale davanti a una pagina vuota è che manchi un
+valore, e riempirlo peggiora le cose invece di sistemarle.
+
+Il client registra un solo indirizzo di ritorno, `https://vanessa.matteo.cool/`, mentre il
+browser da `npm run dev` chiede di tornare su `http://localhost:5173/`. Managed Login risponde
+`redirect_mismatch` sulla propria pagina e non torna indietro. Con `VITE_CLIENT_ID` vuoto —
+com'è, e come deve restare in `.env.development` — non si arriva neanche a quel punto: l'app
+mostra «Configurazione di accesso mancante» e si ferma lì.
+
+**Perché `http://localhost:5173/` non è stato aggiunto ai `callbackUrls`**, che sarebbe una riga:
+perché non basterebbe. Il proxy di sviluppo (`web/vite.config.ts`) manda `/api` all'hostname di
+API Gateway, che rifiuta chi non porta il segreto d'origine iniettato da CloudFront — e quel
+segreto in locale non c'è. L'accesso funzionerebbe e l'app resterebbe vuota, con un 401 a ogni
+chiamata: una mezza correzione che costa una risorsa in più su un pool di produzione e lascia
+esattamente lo stesso schermo bianco. Se un giorno serve davvero lo sviluppo in locale contro i
+dati veri, va rimessa in piedi tutta la catena — indirizzo di ritorno **e** una via per `/api` —
+non solo il primo pezzo.
+
+Quello che resta in locale è `npm test`: le viste, il calcolo delle ore e dello stipendio,
+l'accesso e il cancello sono coperti lì, con un'API finta e un `fetch` finto. Da `npm run dev`
+oggi non si vede l'app — nemmeno per lavorare sul disegno delle pagine — perché il cancello non
+disegna niente senza sessione. Il percorso vero si prova in linea, dopo il deploy.
 
 ### Il perimetro vero è la casella email di Vanessa
 
@@ -386,24 +423,27 @@ Poi, separatamente: il primo accesso di Vanessa dal telefono, col codice una-tan
 da lì si registra la passkey. Ogni dispositivo nuovo rifà lo stesso giro: codice via email, poi
 passkey su quel dispositivo.
 
-### Le due origini restano protette, ma è una domanda diversa
+### Le due origini, e perché una sola delle due è protetta
 
 Oltre all'autenticazione resta il segreto d'origine introdotto quando l'app era ancora aperta a
 chiunque (`docs/superpowers/specs/2026-08-02-api-dietro-cloudfront-design.md`): risponde a *da
 quale porta sei entrato*, non a *chi sei*, e le due cose non si sostituiscono a vicenda. Le due
-origini non si raggiungono più direttamente, ma non con la stessa forza — e la differenza conta,
-quindi sta scritta:
+origini però non sono affatto nella stessa condizione, e la differenza conta abbastanza da
+stare scritta per esteso:
 
-- **`/foto` è chiuso davvero.** La Function URL è su `AWS_IAM` dietro Origin Access Control:
-  CloudFront firma ogni richiesta con SigV4 e il permesso di invocazione è ristretto a questa
-  distribuzione. Senza la firma non si entra, e la firma non si indovina. Per questo una
-  richiesta POST deve portare `x-amz-content-sha256` con lo SHA-256 del corpo: Lambda non accetta
-  payload non firmati, e CloudFront firma con l'hash che il browser gli ha dato.
-- **`/api` è chiuso più debolmente.** Un HTTP API non ha resource policy — è una funzionalità dei
-  REST API — quindi al suo posto CloudFront inietta un header con un segreto condiviso, e l'API
-  rifiuta con 401 chi non lo porta. È un segreto al portatore: chi lo ottiene lo può rigiocare
-  quante volte vuole, da dove vuole. Ferma gli scanner e l'accesso diretto casuale, che è quello
-  per cui c'è. Non è una barriera crittografica e non va scambiata per tale.
+- **`/foto` non è chiuso affatto.** La Function URL è su `authType: NONE`, senza Origin Access
+  Control (`infra/lib/app-stack.ts`, che racconta anche perché l'OAC è stato tolto): chiunque ne
+  conosca l'indirizzo la raggiunge. **La sua unica porta è il token**, che la Lambda verifica da
+  sé, per prima, prima della quota e prima di Bedrock (`api/src/token.ts`). Non c'è un secondo
+  strato dietro: quel controllo non è ridondante e non va allentato «per un momento» mentre si
+  indaga un 401. Se cade, l'endpoint che chiama Bedrock è aperto al mondo.
+- **`/api` è chiuso, debolmente, e per una domanda diversa.** Un HTTP API non ha resource policy —
+  è una funzionalità dei REST API — quindi al suo posto CloudFront inietta un header con un
+  segreto condiviso, e l'API rifiuta con 401 chi non lo porta. È un segreto al portatore: chi lo
+  ottiene lo può rigiocare quante volte vuole, da dove vuole. Ferma gli scanner e l'accesso
+  diretto casuale, che è quello per cui c'è. Non è una barriera crittografica e non va scambiata
+  per tale. Sotto di esso, e indipendente da esso, c'è l'authorizer JWT su tutte e cinque le
+  rotte.
 
 Restano anche le difese di prima: il throttling su API Gateway (100 richieste al secondo) — il
 freno contro chi è autenticato ma martella l'API più veloce di quanto farebbe una persona, non

@@ -1,5 +1,13 @@
 # API e foto dietro CloudFront — Implementation Plan
 
+> **Questo file registra il piano come fu scritto, non ciò che è stato distribuito. Non
+> copiarne codice.** In particolare: **la Function URL della foto non è passata a `AWS_IAM`
+> dietro Origin Access Control.** Ci si è provato durante l'esecuzione e l'OAC è stato tolto di
+> nuovo; è rimasta su `authType: NONE`, cioè raggiungibile da chiunque ne conosca l'indirizzo.
+> Ogni frase qui sotto che dice «`/foto` è chiuso davvero», o che dà per acquisita una firma
+> SigV4, è falsa. L'unica porta di quell'endpoint è il token che la Lambda verifica per prima.
+> La fonte attuale è `app/infra/lib/app-stack.ts`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Il browser conosce un solo indirizzo, e le due origini smettono di essere raggiungibili se non attraverso CloudFront.

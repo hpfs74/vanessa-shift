@@ -1,5 +1,19 @@
 # Autenticazione con passkey — Implementation Plan
 
+> **Questo file registra il piano come fu scritto, non ciò che è stato distribuito. Non
+> copiarne codice.** L'unica fonte attuale della configurazione del pool è
+> `app/infra/lib/auth-stack.ts`.
+>
+> Il piano è stato eseguito e, durante l'esecuzione, tre valori scritti nei blocchi di codice
+> qui sotto si sono rivelati sbagliati e sono stati corretti nello stack. Restano qui come
+> erano, e sono precisamente i tre che falliscono in silenzio: il pool si costruisce, `cdk
+> synth` passa, il deploy riesce, e la pagina di accesso non offre mai la passkey. In più lo
+> stack ha oggi due cose che il piano non prevedeva affatto (una `passwordPolicy` e una
+> `CfnManagedLoginBranding`, senza la quale Managed Login non serve nulla).
+>
+> Se serve ricostruire il pool, o crearne un secondo, si parte da `auth-stack.ts`. Da qui non si
+> copia niente.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Si entra nell'app col volto, e chi non è Vanessa non entra affatto.

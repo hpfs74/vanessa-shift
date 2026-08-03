@@ -49,6 +49,12 @@ Il segreto d'origine introdotto in `2026-08-02-api-dietro-cloudfront-design.md` 
 Risponde a una domanda diversa — da quale porta sei entrato, non chi sei — e le due cose non si
 sostituiscono a vicenda.
 
+Vale però **solo per l'API**, ed è bene dirlo qui perché la frase sopra parla di «due metà». La
+Function URL della foto non ha nessuna chiusura d'origine: è su `authType: NONE`, senza Origin
+Access Control — quella spec lo prevedeva, l'implementazione lo ha provato e tolto — quindi la
+raggiunge chiunque ne conosca l'indirizzo. **Il token che la Lambda verifica è l'unica porta di
+quella metà.** Vedi `infra/lib/app-stack.ts` e l'avviso in cima all'altra spec.
+
 ## Cognito
 
 - **User pool**, accesso via email, `featurePlan: ESSENTIALS`. Le passkey non esistono nel piano

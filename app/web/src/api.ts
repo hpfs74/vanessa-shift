@@ -43,14 +43,22 @@ function requireJson(r: Response): void {
   if (!(r.headers.get('content-type') ?? '').includes('json')) throw new Error(UNREACHABLE);
 }
 
-/** Every call carries the token. A 401 means the ID token died despite the
- *  margin — most likely a device that slept through it, not a revoked
- *  session — so `sessioneRifiutata()` keeps the refresh token and reloads:
- *  main.tsx's gate tries a silent renewal before falling back to a login.
- *  Without the reload she is left staring at "richiesta fallita (401)" with
- *  every subsequent tap repeating it, because requests now go out with no
- *  token at all — every write here is single and repeatable, so nothing is
- *  lost by starting over. */
+/** Every call carries the token. A 401 usually means the ID token died
+ *  despite the margin — most likely a device that slept through it, not a
+ *  revoked session — so `sessioneRifiutata()` keeps the refresh token and
+ *  reloads: the gate in `avvio.tsx` tries a silent renewal before falling
+ *  back to a login. Without the reload she is left staring at "richiesta
+ *  fallita (401)" with every subsequent tap repeating it, because requests
+ *  now go out with no token at all — every write here is single and
+ *  repeatable, so nothing is lost by starting over.
+ *
+ *  It is not the only 401 the API sends. `api/src/http.ts` answers 401, not
+ *  403, to a request that did not come through CloudFront — deliberately, so
+ *  the distribution does not rewrite it into `index.html` — so a missing
+ *  `ORIGIN_SECRET` on one of the two sides produces exactly this status with
+ *  nothing wrong with the token at all. That one no renewal cures, which is
+ *  why the breaker in `auth.ts` has to trip and the gate has to stop instead
+ *  of signing in again. Do not remove either as redundant. */
 function autorizzazione(): Record<string, string> {
   const s = sessioneValida();
   return s ? { authorization: `Bearer ${s.idToken}` } : {};

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  AccessoRifiutato,
+  accessoInterrotto,
   completaAccesso,
   esci,
   rinnovaAccesso,
@@ -89,6 +91,39 @@ describe('completaAccesso', () => {
     expect(ok).toBe(true);
     expect(sessioneValida()?.idToken).toBe('IL-TOKEN-ID');
   });
+
+  // Cognito answers the callback with `?error=…&error_description=…` for a
+  // disabled user, a client that is not allowed the flow, an unknown scope.
+  // Read as "no code" — which is what it was — the gate found no session and
+  // sent her straight back to /oauth2/authorize, which returned the same
+  // refusal: an endless redirect with the reason unread in the address bar.
+  it('turns a refusal from Cognito into a sentence, not another redirect', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const rifiuto = await completaAccesso(
+      new URL('https://esempio.test/?error=access_denied&error_description=Utente+disabilitato'),
+    ).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(rifiuto).toBeInstanceOf(AccessoRifiutato);
+    expect((rifiuto as Error).message).toContain('Utente disabilitato');
+    // No token exchange was even attempted: there is no code to exchange.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the error code when Cognito sends no description', async () => {
+    const rifiuto = await completaAccesso(
+      new URL('https://esempio.test/?error=invalid_scope'),
+    ).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect((rifiuto as Error).message).toContain('invalid_scope');
+  });
 });
 
 describe('rinnovaAccesso', () => {
@@ -173,6 +208,41 @@ describe('sessioneRifiutata', () => {
     expect(localStorage.getItem('sessione')).toBeNull();
     expect(localStorage.getItem('refresh')).toBeNull();
     expect(ricarica).toHaveBeenCalledTimes(2);
+  });
+
+  // The loop this closes: `esci()` has to clear the retry marker, or a real
+  // logout would leave the breaker half-tripped. It used to clear the "we
+  // have already been all the way round" mark with it, so the fresh login
+  // that followed reset the counter, the next call 401'd for the reason that
+  // was never about the token, and she was asked for Face ID every few
+  // seconds with nothing on the screen.
+  it('leaves a mark that esci() does not clear, so the fresh login does not start the loop again', () => {
+    reload();
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
+    localStorage.setItem('refresh', 'un-refresh-token');
+
+    sessioneRifiutata();
+    // Not after the first one: the ordinary case is a renewal that works, and
+    // stopping here would take that away.
+    expect(accessoInterrotto()).toBe(false);
+
+    sessioneRifiutata();
+    expect(accessoInterrotto()).toBe(true);
+
+    // And it survives the logout the second call itself performed, plus any
+    // later one.
+    esci();
+    expect(accessoInterrotto()).toBe(true);
+  });
+
+  it('a call that finally works clears that mark too, or the app stays stuck for the whole tab', () => {
+    reload();
+    sessioneRifiutata();
+    sessioneRifiutata();
+    expect(accessoInterrotto()).toBe(true);
+
+    sessioneConfermata();
+    expect(accessoInterrotto()).toBe(false);
   });
 
   it('a confirmed session resets the breaker, so the next 401 is treated as a first one again', () => {

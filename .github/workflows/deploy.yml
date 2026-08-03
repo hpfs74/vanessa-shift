@@ -142,30 +142,56 @@ jobs:
           echo "Il sito non risponde 200 dopo il deploy"
           exit 1
 
-      - name: Verifica che l'API risponda, e solo da CloudFront
+      - name: Verifica che l'API risponda, e rifiuti chi non ha il token
         run: |
-          # Dalla distribuzione: deve rispondere. Non si chiama piu' l'origine
-          # per nome — le rotte stanno sotto /api e l'origine rifiuta chi non
-          # arriva da CloudFront, quindi la vecchia prova sarebbe fallita a
-          # deploy riuscito.
-          codice=$(curl -s -o /dev/null -w '%{http_code}' \
+          # Dalla distribuzione, senza token: atteso 401, non piu' 200. Le
+          # cinque rotte stanno dietro l'authorizer JWT, che risponde prima
+          # dell'integrazione, e CloudFront non riscrive il 401 (mappa solo
+          # 403 e 404). Un 200 qui vorrebbe dire che l'authorizer non c'e'
+          # piu': l'API sarebbe aperta a chiunque, che e' esattamente la cosa
+          # che questo branch ha chiuso.
+          intestazioni=$(mktemp)
+          codice=$(curl -s -D "$intestazioni" -o /dev/null -w '%{http_code}' \
             "${{ steps.uscite.outputs.sito }}/api/config")
-          if [ "$codice" != "200" ]; then
-            echo "L'API dalla distribuzione risponde $codice"
+          if [ "$codice" != "401" ]; then
+            echo "L'API dalla distribuzione risponde $codice senza token, atteso 401"
             exit 1
           fi
-          echo "API in linea dalla distribuzione (HTTP $codice)"
 
-          # E dall'origine in proprio: deve rifiutare. Un 200 qui vuol dire che
-          # il segreto e' arrivato a una sola delle due parti, e la porta unica
-          # e' solo un'intenzione.
+          # Il 401 deve venire da API Gateway, cioe' avere un corpo JSON. La
+          # behaviour /api/* e' cio' che manda la richiesta all'API invece che
+          # al bucket del sito: se smettesse di combaciare, la risposta
+          # sarebbe la SPA — e questa prova, guardando il solo codice,
+          # continuerebbe a dire che va tutto bene mentre nessuna chiamata
+          # arriva piu' all'API. Il content-type e' quello che distingue le
+          # due cose.
+          if ! grep -qi '^content-type:.*json' "$intestazioni"; then
+            echo "Il 401 dalla distribuzione non arriva da API Gateway:"
+            grep -i '^content-type:' "$intestazioni" || echo "(nessun content-type)"
+            exit 1
+          fi
+          echo "API in linea dalla distribuzione: 401 JSON, la rotta c'e' e l'authorizer risponde"
+
+          # E dall'origine in proprio, sempre senza token: deve rifiutare.
+          #
+          # Cosa prova: che l'authorizer e' attaccato alle rotte anche
+          # sull'hostname dell'API, non solo attraverso la distribuzione.
+          #
+          # Cosa NON prova, e prima lo diceva: che il segreto d'origine sia
+          # arrivato a tutte e due le parti. L'authorizer rifiuta prima che
+          # `requireFromCloudFront` in api/src/http.ts venga eseguito, quindi
+          # questo 401 si ottiene identico anche con ORIGIN_SECRET tolto dalla
+          # Lambda o l'header tolto dall'origine. Per provare il segreto
+          # servirebbe un token valido qui dentro, e un token di lunga durata
+          # in CI non esiste: la verifica resta a mano, con un token vero, e
+          # sta nella lista di cio' che solo un deploy puo' dire.
           diretto=$(curl -s -o /dev/null -w '%{http_code}' \
             "${{ steps.uscite.outputs.api }}/api/config")
           if [ "$diretto" != "401" ]; then
-            echo "L'origine dell'API risponde $diretto a chi la chiama diretta, atteso 401"
+            echo "L'origine dell'API risponde $diretto a chi la chiama diretta senza token, atteso 401"
             exit 1
           fi
-          echo "Origine dell'API chiusa (HTTP $diretto)"
+          echo "Origine dell'API: 401 anche in proprio, l'authorizer e' attaccato alle rotte"
 
       - name: Riepilogo
         run: |

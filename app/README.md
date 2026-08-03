@@ -29,9 +29,10 @@ npm run deploy       # build + cdk deploy
 voluta. Prima che esistesse, un client id lasciato vuoto per errore si buildava pulito, si
 distribuiva pulito, e falliva solo quando lei provava ad aprire l'app — un errore anonimo sulla
 pagina di Cognito, non qui. Un build rosso è il segnale giusto, non un guasto da aggirare:
-**non va sistemato inventando un valore.** Su un checkout nuovo, prima che `VanessaAccesso` sia
-mai stato distribuito, `VITE_CLIENT_ID` è vuoto di proposito — il pool non esiste ancora — e
-l'unica cosa giusta è la sequenza sotto.
+**non va sistemato inventando un valore.** Oggi tutti e due sono compilati: `VanessaAccesso` è
+distribuito e `VITE_CLIENT_ID` porta il suo `IdClient`. Erano vuoti di proposito finché il pool
+non esisteva, e se un giorno il pool viene ricreato tornano a esserlo — l'unica cosa giusta,
+allora, è rifare la sequenza sotto.
 
 `VITE_LOGIN_DOMAIN` invece è già compilato e non va toccato: vale
 **`https://auth.vanessa.matteo.cool`**, cioè la pagina di accesso sul nostro dominio, non su
@@ -534,18 +535,17 @@ segreto scollegato. Con un token vero:
 `curl -H "authorization: Bearer <id token>" <UrlApi>/api/config` chiamando l'API **per nome**
 deve dare 401; la stessa chiamata attraverso `https://vanessa.matteo.cool` deve dare 200.
 
-**6. Se `VanessaAccesso` esiste già.** Tutto nel repository dice di no (`VITE_CLIENT_ID` vuoto,
-la sezione del primo deploy scritta come da fare), e se il pool non esiste non c'è nessun
-conflitto di sostituzione sul dominio a prefisso. Una chiamata lo dice prima del deploy invece
-che durante:
-`aws cloudformation describe-stacks --stack-name VanessaAccesso --region eu-south-1`. Se esiste,
-serve prima la via d'uscita `delete-user-pool-domain` descritta in *Primo deploy*.
+**6. Se `VanessaAccesso` esiste già — chiusa.** Non esisteva, verificato con
+`aws cloudformation describe-stacks --stack-name VanessaAccesso --region eu-south-1` prima del
+deploy invece che durante. Nessun dominio a prefisso da sostituire, quindi la via d'uscita
+`delete-user-pool-domain` non è servita. Resta qui perché la domanda torna identica il giorno in
+cui il pool venisse ricreato.
 
-**7. Se la validazione ACM finisce in tempo su un `--all` a freddo.** Il riferimento fra regioni
-fa dipendere `VanessaAccesso` da `VanessaCertificato` nel manifesto, e CDK aspetta l'emissione
-dentro lo stack del certificato, quindi dovrebbe reggere — ma i tempi della validazione DNS non
-sono qualcosa che `cdk synth` possa provare. La prima volta conviene seguire la sequenza
-manuale di *Primo deploy* invece di lanciare `--all`.
+**7. Se la validazione ACM finisce in tempo — chiusa per come si distribuisce davvero.**
+`VanessaCertificato` da solo ha emesso e validato via DNS il certificato di
+`auth.vanessa.matteo.cool` in meno di tre minuti, e `VanessaAccesso` è partito dopo, a
+certificato già emesso. Il dubbio riguardava un `--all` a freddo, che la sequenza manuale di
+*Primo deploy* evita per costruzione: la prima volta conviene ancora seguire quella.
 
 **8. Che la sessione da 24 ore si rinnovi davvero.** `ALLOW_REFRESH_TOKEN_AUTH` viene emesso —
 verificato leggendo il codice di CDK — quindi il template del client è giusto. Quello che non è

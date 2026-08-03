@@ -79,11 +79,17 @@ describe('VITE_LOGIN_DOMAIN', () => {
 });
 
 describe('VITE_CLIENT_ID', () => {
-  it('is deliberately empty until the pool exists, so the build stays red', () => {
-    // Not a broken checkout. `VanessaAccesso` has to be deployed first and
-    // its `IdClient` output pasted in; filling in a placeholder to make the
-    // build go green is the one thing that must not happen.
-    expect(leggiEnv('.env.production').VITE_CLIENT_ID).toBe('');
+  it('carries the client id of the pool that was actually deployed', () => {
+    // It was empty on purpose until `VanessaAccesso` existed — the build
+    // stayed red rather than shipping a bundle that could not sign anyone in.
+    // The pool is deployed now and this is its `IdClient` output. It is not a
+    // secret: it ends up in the bundle, and the client has none, because a
+    // client secret inside a JavaScript file is not a secret. What must never
+    // happen is the other thing: a placeholder invented to make the build go
+    // green.
+    expect(CLIENT_ID_SHAPE.test(leggiEnv('.env.production').VITE_CLIENT_ID)).toBe(true);
+    // And the guard still refuses the empty value, which is what kept the
+    // build red for as long as it needed to be.
     expect(CLIENT_ID_SHAPE.test('')).toBe(false);
   });
 

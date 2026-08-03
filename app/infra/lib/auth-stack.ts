@@ -126,7 +126,18 @@ export class AuthStack extends Stack {
       oAuth: {
         flows: { authorizationCodeGrant: true },
         scopes: [OAuthScope.OPENID, OAuthScope.EMAIL],
+        // One URL, the deployed one. `http://localhost:5173/` is deliberately
+        // not here: registering it would make managed login redirect back to
+        // a dev server whose `/api` proxy the origin secret refuses anyway,
+        // so the reward would be a signed-in app that still loads nothing.
+        // See `web/.env.development`.
         callbackUrls: [`https://${props.domain}/`],
+        // Nothing calls `/logout` today — `esci()` clears local storage and
+        // stops there, so the managed-login cookie outlives it, and the spec
+        // puts a real logout out of scope. Kept anyway because Cognito
+        // refuses a `/logout` whose `logout_uri` is not registered here:
+        // with this line, adding logout later is a change to the frontend
+        // alone; without it, it is a change to the pool as well.
         logoutUrls: [`https://${props.domain}/`],
       },
       // A day, so she touches Face ID once in the morning. OAuth's natural

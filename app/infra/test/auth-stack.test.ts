@@ -2,19 +2,8 @@ import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { CONFIG } from '../bin/config.js';
 import { AuthStack } from '../lib/auth-stack.js';
-
-// Duplicated from `bin/main.ts` rather than imported: importing `CONFIG`
-// from there instantiates the certificate and app stacks too, just to read
-// one constant.
-const CONFIG = {
-  account: '495133941005',
-  region: 'eu-south-1',
-  domain: 'vanessa.matteo.cool',
-  loginDomain: 'auth.vanessa.matteo.cool',
-  zoneDomain: 'matteo.cool',
-  zoneId: 'Z2T8X72UH7FONU',
-};
 
 let auth: Template;
 
@@ -61,21 +50,18 @@ describe('user pool', () => {
     // arrayEquals, not arrayWith: a fourth factor added later (say
     // `smsOtp: true`) would open a new, weaker way into the account, and an
     // `arrayWith` check would keep passing right through it.
+    //
+    // This is also the only assertion that `WEB_AUTHN` is a first factor at
+    // all — the feature the branch is named after. A second, `arrayWith`
+    // test used to say so separately; equality implies the subsequence, so
+    // it could never fail while this one passed, and its stated reason (that
+    // it would survive a CDK reordering of the other two) was not true either:
+    // a reordering breaks `arrayEquals` here and nothing downstream cares.
     auth.hasResourceProperties('AWS::Cognito::UserPool', {
       Policies: Match.objectLike({
         // CDK emits the factors in its own fixed order (password, emailOtp,
         // smsOtp, passkey), not the order they were listed in the props.
         SignInPolicy: { AllowedFirstAuthFactors: Match.arrayEquals(['PASSWORD', 'EMAIL_OTP', 'WEB_AUTHN']) },
-      }),
-    });
-  });
-
-  it('allows the passkey as a first factor, whatever order the others end up in', () => {
-    // The one factor the feature is named after, checked on its own so a
-    // future CDK reordering of the other two cannot take this down with it.
-    auth.hasResourceProperties('AWS::Cognito::UserPool', {
-      Policies: Match.objectLike({
-        SignInPolicy: { AllowedFirstAuthFactors: Match.arrayWith(['WEB_AUTHN']) },
       }),
     });
   });
@@ -130,6 +116,11 @@ describe('user pool', () => {
     // A client secret inside a JavaScript bundle is not a secret. CDK
     // renders `generateSecret: false` as an explicit `false`, not an absent
     // key.
+    //
+    // One callback URL, and it is the deployed origin: `npm run dev` on
+    // `http://localhost:5173/` is deliberately not registered. See the
+    // `logoutUrls` comment in `auth-stack.ts` for why the logout URL is here
+    // when nothing calls `/logout` yet.
     auth.hasResourceProperties('AWS::Cognito::UserPoolClient', {
       GenerateSecret: false,
       AllowedOAuthFlows: ['code'],
@@ -203,9 +194,10 @@ describe('login domain', () => {
   });
 
   it('is a custom domain, not a Cognito prefix domain', () => {
-    // A prefix domain is spelt as a bare label with no `CustomDomainConfig`.
-    // `Match.absent()` on that config is what tells the two apart, since a
-    // partial match would pass on the domain name alone.
+    // A prefix domain is spelt as a bare label with no `CustomDomainConfig`:
+    // requiring that config to be *present* is what tells the two apart,
+    // since `hasResourceProperties` matches partially and would pass on the
+    // domain name alone.
     auth.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
       Domain: CONFIG.loginDomain,
       CustomDomainConfig: { CertificateArn: Match.anyValue() },

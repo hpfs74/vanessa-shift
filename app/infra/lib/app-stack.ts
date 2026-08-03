@@ -60,8 +60,11 @@ export class AppStack extends Stack {
     super(scope, id, { ...props, crossRegionReferences: true });
 
     // --- Data ---
-    // Point-in-time recovery is the only safety net left, given the API is
-    // open: it makes it possible to roll back after damage.
+    // Point-in-time recovery: the way back after damage. It was the only
+    // safety net when the API was open to anyone; the API is now behind a JWT
+    // authorizer on all five routes, so this is no longer the last line — but
+    // authentication does not undo a mistake made by someone signed in, which
+    // is the case it was really for.
     const table = new TableV2(this, 'Tabella', {
       partitionKey: { name: 'pk', type: AttributeType.STRING },
       sortKey: { name: 'sk', type: AttributeType.STRING },

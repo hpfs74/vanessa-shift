@@ -2,17 +2,9 @@ import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { CONFIG } from '../bin/config.js';
 import { AppStack } from '../lib/app-stack.js';
 import { CertificateStack } from '../lib/certificate-stack.js';
-
-const CONFIG = {
-  account: '495133941005',
-  region: 'eu-south-1',
-  domain: 'vanessa.matteo.cool',
-  loginDomain: 'auth.vanessa.matteo.cool',
-  zoneDomain: 'matteo.cool',
-  zoneId: 'Z2T8X72UH7FONU',
-};
 
 let app: Template;
 let cert: Template;

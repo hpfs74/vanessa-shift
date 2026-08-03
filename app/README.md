@@ -175,9 +175,9 @@ l'integrazione a 30 secondi: una lettura ne può prendere di più.
 
 Il frontend chiama sempre la propria origine: `/api/...` e `/foto/leggi`,
 inoltrati da CloudFront verso API Gateway e verso la Function URL. Un solo
-dominio, niente da incollare in un file dopo il deploy. Le due origini non si
-raggiungono più direttamente — con che forza, lo dice più sotto, dentro
-**Autenticazione**.
+dominio, niente da incollare in un file dopo il deploy. L'API non si raggiunge più
+direttamente; la Function URL sì, e la sua unica porta è il token — con che forza ciascuna delle
+due, lo dice più sotto, dentro **Autenticazione**.
 
 Il sotto-path della lettura serve: la behaviour è `/foto/*`, e in CloudFront
 l'asterisco vale zero o più caratteri **dopo** il prefisso letterale, quindi
@@ -239,8 +239,9 @@ vorrebbe dire che la behaviour `/api/*` non combacia più e a rispondere è la S
 chiamata all'hostname dell'API in proprio deve dare 401 anche lei: prova che l'authorizer è
 sulle rotte e non solo sul percorso attraverso CloudFront. **Non** prova che il segreto
 d'origine sia collegato a tutte e due le parti — l'authorizer rifiuta prima che il controllo sul
-segreto venga eseguito, e per arrivarci servirebbe un token valido, che in CI non c'è. Sulle
-pull request girano solo i test. Il deploy si puo' anche lanciare a mano da GitHub
+segreto venga eseguito, e per arrivarci servirebbe un token valido, che in CI non c'è — è la
+voce 5 di *Cosa solo un deploy può dire*, dentro **Autenticazione**, insieme a come farla a
+mano. Sulle pull request girano solo i test. Il deploy si puo' anche lanciare a mano da GitHub
 (*Run workflow*).
 
 **Non ci sono credenziali AWS su GitHub.** La pipeline si autentica via OIDC: chiede ad AWS
@@ -305,9 +306,11 @@ nel frontend) sono lo **stesso nome scritto tre volte** e devono restare coerent
 controllano: `infra/test/auth-stack.test.ts` verifica che il relying party id sia identico al
 dominio del pool, `web/test/config.test.ts` che il valore committato nel frontend sia quell'host,
 e `infra/test/config.test.ts` confronta le prime due — costruite dal vero `CONFIG` di
-`infra/bin/config.ts`, non da una costante scritta nel test — con il `.env.production` del
-frontend. Serviva il terzo: gli altri due partono ciascuno da una copia propria del nome, quindi
-cambiare `CONFIG.loginDomain` da solo li lasciava entrambi verdi.
+`infra/bin/config.ts` — con il `.env.production` del frontend. Serviva il terzo, e per due
+motivi diversi: `web/test/config.test.ts` fissa un literal, quindi non vede il pool muoversi;
+`infra/test/auth-stack.test.ts` importa lo stesso `CONFIG` che costruisce il pool, quindi le due
+copie lato-stack si muovono insieme e restano d'accordo fra loro anche quando il valore è
+sbagliato. Cambiare `CONFIG.loginDomain` da solo li lasciava entrambi verdi.
 
 ### La pagina di accesso è Managed Login, e ha un aspetto diverso dall'Hosted UI
 
@@ -449,6 +452,102 @@ Restano anche le difese di prima: il throttling su API Gateway (100 richieste al
 freno contro chi è autenticato ma martella l'API più veloce di quanto farebbe una persona, non
 contro chi non lo è, che l'authorizer ferma prima — e il point-in-time recovery sulla tabella,
 che permette di tornare indietro dopo un danno.
+
+### Cosa solo un deploy può dire, e in che ordine guardarlo
+
+Tutto quello che questo repository verifica lo verifica contro un template CloudFormation
+sintetizzato o contro una finestra `jsdom`. Nessuno dei due vede una pagina disegnata, una
+richiesta vera a CloudFront, o l'opinione di Cognito su una configurazione. Questo elenco è
+quello che resta fuori, in ordine. **I tre difetti che questa funzionalità ha avuto — il dominio
+di accesso, la versione di Managed Login, il relying party id — sono usciti tutti da questo modo
+di guardare, cioè dal chiedersi cosa il verde dei test non stia provando; nessuno dei tre l'ha
+trovato un test.** Vale la pena rifare l'elenco a ogni modifica del pool, non solo la prima
+volta.
+
+**0. Che il 401 di API Gateway porti `content-type: application/json`.** Prima perché si
+manifesta da sé, subito e senza che nessuno vada a cercarlo: se l'assunzione è sbagliata, il job
+Deploy è rosso al primo push. Il passo stampa il `content-type` che ha visto prima di uscire,
+quindi la diagnosi è una riga di log e la correzione una riga di YAML.
+
+**1. Che la pagina di Managed Login offra davvero la passkey.** Prima fra le cose da andare a
+guardare, e per una ragione che nessun'altra voce ha: **cambiare `passkeyRelyingPartyId`
+invalida ogni passkey già registrata**, una per dispositivo. Oggi nessun utente esiste e
+correggere non costa niente; dal primo accesso di Vanessa in poi costa un giro di registrazioni
+su ogni telefono che ha. Quindi va guardato nella finestra fra il deploy e il suo primo accesso.
+Sulla carta ogni ingrediente è a posto e ognuno ha il suo test — relying party id uguale al
+dominio, `ManagedLoginVersion: 2`, risorsa di branding legata al nostro client,
+`UserPoolTier: ESSENTIALS`, `WEB_AUTHN` fra i primi fattori, `ALLOW_USER_AUTH` sul client — ma
+sei impostazioni giuste non sono la settima cosa, cioè la pagina.
+
+Come: dopo il deploy di `VanessaAccesso`, aprire
+
+```
+https://auth.vanessa.matteo.cool/login?client_id=<IdClient>&response_type=code&scope=openid+email&redirect_uri=https://vanessa.matteo.cool/
+```
+
+e confermare tre cose: (a) che la pagina si disegni — è la prova che
+`useCognitoProvidedValues: true` da solo basta, cioè la voce 4 di questo elenco; (b) che sia
+l'impaginato di Managed Login e non l'Hosted UI classica; (c) che una passkey venga offerta. Se
+manca una delle tre, si corregge **prima** di creare l'utente.
+
+**2. Che CloudFront inoltri `Authorization` a tutte e due le origini.** È l'ignoto con il raggio
+più largo e la prova più economica. `ALL_VIEWER_EXCEPT_HOST_HEADER` su `/api/*` e `/foto/*`
+dovrebbe inoltrare ogni header del viewer tranne `Host`, e la cache è disattivata, ma il
+trattamento di `Authorization` da parte di CloudFront ha abbastanza storia da meritare un curl.
+Se non lo inoltra, il token non arriva né all'authorizer né a `requireSignedIn`, ogni chiamata
+risponde 401, e quello che lei vede è la frase del cancello — non i dati. Come: preso un token
+da un accesso vero (devtools, `localStorage.sessione`),
+`curl -H "authorization: Bearer <id token>" https://vanessa.matteo.cool/api/config` → 200 con
+JSON, e lo stesso verso `/foto/leggi` con un corpo minuscolo → qualsiasi cosa tranne 401.
+
+**3. Che lo scambio del codice funzioni contro il dominio personalizzato.** `completaAccesso` e
+`rinnovaAccesso` fanno `POST` a `https://auth.vanessa.matteo.cool/oauth2/token` da una pagina su
+`https://vanessa.matteo.cool`: è cross-origin e vuole un `Access-Control-Allow-Origin` da
+Cognito. I client pubblici lo ricevono, ma la combinazione dominio personalizzato + Managed
+Login v2 non è qualcosa su cui `jsdom` con un `fetch` finto abbia un'opinione. Se fallisce: Face
+ID riesce, il browser torna con `?code=`, `fetch` viene rifiutato per CORS, il cancello tratta
+il caso come «nessun codice» — di proposito, perché una connessione che cade sulla via del
+ritorno è il caso ordinario — e rimanda al login, che risponde lo stesso. **Questo è l'unico
+giro infinito rimasto senza una frase sullo schermo**, e il breaker non lo copre: quel breaker
+conta i 401 di `api.ts`, e qui nessuna chiamata all'API parte mai. La causa sta solo nella
+console del browser. È l'unico motivo per cui questa voce va guardata subito dopo la 2 e non più
+tardi.
+
+**4. Che `useCognitoProvidedValues: true` da solo basti** perché Managed Login serva qualcosa.
+La documentazione AWS indica `CreateManagedLoginBranding` come il requisito e questo flag come
+«applica i valori predefiniti di Cognito», che è quello che lo stack fa. Solo una pagina
+disegnata lo prova: il punto (a) della voce 1 è quella prova.
+
+**5. Che il segreto d'origine sia collegato a tutte e due le parti.** La pipeline **non** lo
+copre più, e c'è scritto perché nel passo stesso: l'authorizer rifiuta prima che il controllo sul
+segreto venga eseguito, quindi senza un token valido quel 401 si ottiene identico anche a
+segreto scollegato. Con un token vero:
+`curl -H "authorization: Bearer <id token>" <UrlApi>/api/config` chiamando l'API **per nome**
+deve dare 401; la stessa chiamata attraverso `https://vanessa.matteo.cool` deve dare 200.
+
+**6. Se `VanessaAccesso` esiste già.** Tutto nel repository dice di no (`VITE_CLIENT_ID` vuoto,
+la sezione del primo deploy scritta come da fare), e se il pool non esiste non c'è nessun
+conflitto di sostituzione sul dominio a prefisso. Una chiamata lo dice prima del deploy invece
+che durante:
+`aws cloudformation describe-stacks --stack-name VanessaAccesso --region eu-south-1`. Se esiste,
+serve prima la via d'uscita `delete-user-pool-domain` descritta in *Primo deploy*.
+
+**7. Se la validazione ACM finisce in tempo su un `--all` a freddo.** Il riferimento fra regioni
+fa dipendere `VanessaAccesso` da `VanessaCertificato` nel manifesto, e CDK aspetta l'emissione
+dentro lo stack del certificato, quindi dovrebbe reggere — ma i tempi della validazione DNS non
+sono qualcosa che `cdk synth` possa provare. La prima volta conviene seguire la sequenza
+manuale di *Primo deploy* invece di lanciare `--all`.
+
+**8. Che la sessione da 24 ore si rinnovi davvero.** `ALLOW_REFRESH_TOKEN_AUTH` viene emesso —
+verificato leggendo il codice di CDK — quindi il template del client è giusto. Quello che non è
+provato è la promessa costruita sopra: un Face ID la mattina e silenzio per il resto della
+giornata. L'unica cosa che esercita `rinnovaAccesso` è un test `jsdom` con un `fetch` finto. La
+prima prova vera è Vanessa che apre l'app nel pomeriggio e non le viene chiesto niente.
+
+**9. Quando Cognito applichi la regola sul `RelyingPartyId`** — se al momento della
+configurazione o al momento della sfida. Resta in elenco solo perché nessuno la riapra: il
+valore distribuito soddisfa sia la regola WebAuthn sia quella di Cognito, quindi non può essere
+lui a rompere.
 
 ## Modello dati
 

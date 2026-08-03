@@ -183,8 +183,9 @@ jobs:
           # questo 401 si ottiene identico anche con ORIGIN_SECRET tolto dalla
           # Lambda o l'header tolto dall'origine. Per provare il segreto
           # servirebbe un token valido qui dentro, e un token di lunga durata
-          # in CI non esiste: la verifica resta a mano, con un token vero, e
-          # sta nella lista di cio' che solo un deploy puo' dire.
+          # in CI non esiste: la verifica resta a mano, con un token vero, ed
+          # e' la voce 5 di «Cosa solo un deploy puo' dire, e in che ordine
+          # guardarlo» in app/README.md, che dice anche come farla.
           diretto=$(curl -s -o /dev/null -w '%{http_code}' \
             "${{ steps.uscite.outputs.api }}/api/config")
           if [ "$diretto" != "401" ]; then

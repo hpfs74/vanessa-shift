@@ -67,6 +67,11 @@ Il resto degli header del viewer passa, ed è necessario che passi: serve `conte
 serve `x-amz-content-sha256`, senza il quale la lettura foto non supera la firma all'origine
 (§Le origini si chiudono).
 
+> **La seconda metà non vale più.** Nessuna firma all'origine, quindi nessun
+> `x-amz-content-sha256`: l'OAC è stato tolto e la Function URL è rimasta su `NONE` (avviso in
+> cima). Che gli header del viewer passino serve comunque, e adesso più di prima: da quando
+> l'app ha un accesso, è così che `authorization` arriva a tutte e due le origini.
+
 ## Cosa sparisce
 
 `VITE_API_URL` e `VITE_PHOTO_URL` non hanno più niente da dire: il frontend chiama `/api` e
@@ -173,12 +178,12 @@ secondi, o riportare `/foto` sulla sua Function URL.
 | File | Cosa |
 |------|------|
 | `infra/lib/app-stack.ts` | due `additionalBehaviors`, le origini, le rotte sotto `/api`, il segreto condiviso, la Function URL su `AWS_IAM` dietro OAC *(non fatto: è rimasta su `NONE`, vedi l'avviso in cima)*, l'output `PhotoUrl` che diventa informativo |
-| `infra/test/stacks.test.ts` | le behaviour esistono e sono configurate come sopra; le rotte sono sotto `/api`; le due origini sono chiuse |
+| `infra/test/stacks.test.ts` | le behaviour esistono e sono configurate come sopra; le rotte sono sotto `/api`; le due origini sono chiuse *(solo l'API: il test asserisce che la Function URL è su `NONE`, vedi l'avviso in cima)* |
 | `api/src/http.ts` | il confronto a tempo costante del segreto, e il 401 di chi non passa da CloudFront |
-| `web/src/api.ts` | path relativi, via il guard sull'URL vuoto, `/foto/leggi`, lo SHA-256 del corpo, il controllo del `content-type` |
+| `web/src/api.ts` | path relativi, via il guard sull'URL vuoto, `/foto/leggi`, lo SHA-256 del corpo *(non c'è: senza OAC non serve firmare niente)*, il controllo del `content-type` |
 | `web/vite.config.ts` | proxy di `/api` e `/foto` per il server di sviluppo |
 | `web/.env.production` | eliminato |
-| `web/test/api.test.ts` | le chiamate vanno ai path relativi, e portano l'hash del corpo |
+| `web/test/api.test.ts` | le chiamate vanno ai path relativi, e portano l'hash del corpo *(no: portano il token, che è quello che si è rivelato l'unica porta)* |
 | `app/README.md` | via il passo «incolla l'indirizzo»; e cosa protegge davvero l'app, adesso |
 
 Il core non si tocca. Gli handler prendono una riga ciascuno — il controllo sull'origine, primo

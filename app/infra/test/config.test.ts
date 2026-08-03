@@ -1,10 +1,12 @@
 /** The values `bin/config.ts` holds, and the wiring `bin/app.ts` does with
  *  them, checked against the graph the deploy actually builds.
  *
- *  Everything else in this folder builds a stack from a constant the test
- *  itself declares, which proves the stack class right and says nothing about
- *  what gets passed to it. These two mistakes both synthesize cleanly, pass
- *  every other test, and fail only on a real deploy — or, worse, after one.
+ *  The other files here build a stack and assert on the template, which
+ *  proves the stack class right and says nothing about what is handed to it.
+ *  They import the same `CONFIG` this file does, so a wrong value in it moves
+ *  every stack-side copy at once and they go on agreeing with each other. The
+ *  two mistakes below both synthesize cleanly, leave the whole suite green,
+ *  and fail only on a real deploy — or, worse, after one.
  */
 
 import { readFileSync } from 'node:fs';
@@ -46,8 +48,10 @@ describe('CONFIG.loginDomain', () => {
     // pool, the pool's custom domain, and `VITE_LOGIN_DOMAIN` in the bundle.
     // The first two come from `CONFIG.loginDomain`; the third is committed by
     // hand. Change `CONFIG.loginDomain` alone and both stack-side copies move
-    // together, so every assertion that builds a stack from its own constant
-    // still passes — while the deployed bundle sends her to a hostname the
+    // together and go on matching each other, so `auth-stack.test.ts` — which
+    // imports the same constant — stays green, and so does
+    // `web/test/config.test.ts`, which asserts a literal and never looks at
+    // the stack. Meanwhile the deployed bundle sends her to a hostname the
     // pool no longer serves, which resolves to nothing.
     const frontend = hostAccessoDelFrontend();
 

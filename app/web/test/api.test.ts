@@ -42,10 +42,6 @@ describe('readPhoto', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/foto/leggi');
   });
 
-  // Origin Access Control makes CloudFront sign the request with SigV4, and
-  // Lambda refuses an unsigned payload: the hash of the body has to come from
-  // the viewer, because CloudFront signs the one it was handed.
-
   // 403 and 404 come back from the distribution as index.html with a 200, for
   // the client router. Without a content-type check that HTML reaches
   // JSON.parse and the screen reads «unexpected token '<'».
@@ -133,6 +129,39 @@ describe('the API calls', () => {
     const message = await messageOf(api.paySettings());
     expect(message).not.toMatch(/token|JSON/);
     expect(message).toMatch(/a mano/);
+  });
+});
+
+describe('the token on every call', () => {
+  // The branch's central claim, and until these two tests nothing asserted
+  // it: every other test in this file runs with cleared storage, so
+  // `sessioneValida()` is null and `autorizzazione()` returns `{}` — the
+  // spread could be deleted from both call sites and the whole suite would
+  // stay green while every request in production came back 401.
+  //
+  // Two tests and not one: `request()` and `readPhoto()` build their headers
+  // separately, so neither covers the other.
+  const conSessione = () => {
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'IL-TOKEN-ID', scade: 9e12 }));
+    const fetchMock = vi.fn().mockResolvedValue(response({ pay: {}, reading: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+
+  /** The headers as `fetch` received them, whatever shape they were passed in. */
+  const intestazioni = (fetchMock: ReturnType<typeof vi.fn>): Headers =>
+    new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers);
+
+  it('request() sends the stored ID token as a bearer token', async () => {
+    const fetchMock = conSessione();
+    await api.paySettings();
+    expect(intestazioni(fetchMock).get('authorization')).toBe('Bearer IL-TOKEN-ID');
+  });
+
+  it('readPhoto() sends it too, from headers it builds on its own', async () => {
+    const fetchMock = conSessione();
+    await api.readPhoto('AAAA');
+    expect(intestazioni(fetchMock).get('authorization')).toBe('Bearer IL-TOKEN-ID');
   });
 });
 

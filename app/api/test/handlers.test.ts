@@ -419,6 +419,7 @@ describe('responses', () => {
 });
 
 import { readPhotoWith } from '../src/handlers.js';
+import { NotSignedIn } from '../src/token.js';
 import { VisionFailed } from '../src/vision.js';
 
 /** A valid August reading, with a single shift on the first of the month. */
@@ -447,7 +448,7 @@ describe('readPhoto', () => {
 
   it('reads the photo and returns the reading', async () => {
     const { repo } = fakeRepo();
-    const h = readPhotoWith(repo, async () => augustReading(), today, year);
+    const h = readPhotoWith(repo, async () => augustReading(), today, year, async () => {});
 
     const r: any = await h(photoEvent('AAAA'));
     expect(r.statusCode).toBe(200);
@@ -457,7 +458,7 @@ describe('readPhoto', () => {
 
   it('writes no shift', async () => {
     const { repo, shifts } = fakeRepo();
-    const h = readPhotoWith(repo, async () => augustReading(), today, year);
+    const h = readPhotoWith(repo, async () => augustReading(), today, year, async () => {});
 
     await h(photoEvent('AAAA'));
     expect(shifts.size).toBe(0);
@@ -474,6 +475,7 @@ describe('readPhoto', () => {
       },
       today,
       year,
+      async () => {},
     );
 
     for (let i = 0; i < 10; i++) {
@@ -496,6 +498,7 @@ describe('readPhoto', () => {
       },
       today,
       year,
+      async () => {},
     );
 
     const r: any = await h(photoEvent('A'.repeat(2 * 1024 * 1024 + 1)));
@@ -513,6 +516,7 @@ describe('readPhoto', () => {
       },
       today,
       year,
+      async () => {},
     );
 
     const r: any = await h(photoEvent('AAAA'));
@@ -534,6 +538,7 @@ describe('readPhoto', () => {
         },
         today,
         year,
+        async () => {},
       );
 
       const r: any = await h(photoEvent('AAAA'));
@@ -557,6 +562,7 @@ describe('readPhoto', () => {
       },
       today,
       year,
+      async () => {},
     );
 
     const r: any = await h(photoEvent('AAAA'));
@@ -574,6 +580,7 @@ describe('readPhoto', () => {
       },
       today,
       year,
+      async () => {},
     );
 
     const r: any = await h(photoEvent('AAAA'));
@@ -582,7 +589,7 @@ describe('readPhoto', () => {
 
   it('a reading that fails validation is 422, not 500', async () => {
     const { repo } = fakeRepo();
-    const h = readPhotoWith(repo, async () => ({ found: true, month: 99 }), today, year);
+    const h = readPhotoWith(repo, async () => ({ found: true, month: 99 }), today, year, async () => {});
 
     const r: any = await h(photoEvent('AAAA'));
     expect(r.statusCode).toBe(422);
@@ -596,6 +603,7 @@ describe('readPhoto', () => {
       async () => ({ ...augustReading(), found: false, foundName: null, foundRow: null }),
       today,
       year,
+      async () => {},
     );
 
     const r: any = await h(photoEvent('AAAA'));
@@ -605,10 +613,59 @@ describe('readPhoto', () => {
 
   it('without an image it is 400', async () => {
     const { repo } = fakeRepo();
-    const h = readPhotoWith(repo, async () => augustReading(), today, year);
+    const h = readPhotoWith(repo, async () => augustReading(), today, year, async () => {});
 
     const r: any = await h(event({ body: JSON.stringify({}) }));
     expect(r.statusCode).toBe(400);
+  });
+
+  it('refuses a reading with no token, before spending anything', async () => {
+    const { repo, calls } = fakeRepo();
+    let modelCalls = 0;
+    const h = readPhotoWith(
+      repo,
+      async () => { modelCalls += 1; return augustReading(); },
+      today,
+      year,
+      async () => { throw new NotSignedIn('nessun token'); },
+    );
+
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(401);
+    // The point: an unauthenticated caller must not burn one of the ten
+    // readings, or the day's quota can be emptied by someone with no access.
+    expect(calls.filter((c) => c.startsWith('consumePhotoQuota'))).toEqual([]);
+    expect(modelCalls).toBe(0);
+  });
+
+  it('checks the token before the body size, not after', async () => {
+    // The test right above proves the token check runs before the quota
+    // step: no token, and `consumePhotoQuota` is never called. This one pins
+    // it against `requireImage`, the step in between — an oversized body from
+    // a caller with no token is a 401, not the 413 `requireImage` would give.
+    //
+    // The 429 and 413 tests prove nothing about this ordering, though they
+    // sit nearby and look as if they might: both pass a verifier that lets
+    // every caller through, so neither one ever exercises the token check.
+    const { repo, calls } = fakeRepo();
+    const h = readPhotoWith(
+      repo,
+      async () => augustReading(),
+      today,
+      year,
+      async () => { throw new NotSignedIn('nessun token'); },
+    );
+
+    const r: any = await h(photoEvent('A'.repeat(2 * 1024 * 1024 + 1)));
+    expect(r.statusCode).toBe(401);
+    expect(calls.filter((c) => c.startsWith('consumePhotoQuota'))).toEqual([]);
+  });
+
+  it('reads for a caller who is signed in', async () => {
+    const { repo } = fakeRepo();
+    const h = readPhotoWith(repo, async () => augustReading(), today, year, async () => {});
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(200);
   });
 });
 

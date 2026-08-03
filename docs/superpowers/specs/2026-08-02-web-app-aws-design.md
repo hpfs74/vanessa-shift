@@ -15,6 +15,11 @@ Account AWS: `495133941005`. Regione: `eu-south-1` (Milano); il certificato Clou
 
 ## Decisione deliberata: nessuna autenticazione
 
+> **Superata dal 2026-08-02**, da `2026-08-02-autenticazione-passkey-design.md`. L'app ora
+> richiede accesso via Cognito (passkey, con password e codice via email come fallback). La
+> sezione qui sotto resta: era una decisione vera, presa con cognizione del rischio, e la sua
+> motivazione è parte della storia del progetto.
+
 L'app e l'API sono aperte. Chiunque conosca l'indirizzo può leggere e modificare i turni e i
 parametri dello stipendio. È una scelta esplicita del proprietario, presa dopo che il rischio è
 stato illustrato: i dati sono personali (turni e retribuzione) e un endpoint di scrittura

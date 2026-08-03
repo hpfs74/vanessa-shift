@@ -13,6 +13,7 @@ import type { IsoDate } from '@vanessa/core';
 
 import type { Repo } from './repo.js';
 import { createRepo } from './repo.js';
+import { requireSignedIn } from './token.js';
 import {
   failure,
   handle,
@@ -114,10 +115,14 @@ const UNREADABLE =
 
 /** Reads a photo of the sheet and returns what's written on it.
  *
- * The order of the three steps is the defense: the huge is rejected before
- * spending anything, the quota is consumed before calling the model, and the
- * quota is NOT refunded if the model fails — otherwise anyone abusing it gets
- * free attempts by making the reading fail on purpose.
+ * The order of the checks is the defense. The caller must be signed in
+ * before anything else runs — an unauthenticated request must never reach
+ * the quota, or anyone who merely knows the address could empty Vanessa's
+ * ten readings a day without having any access at all. Then the huge is
+ * rejected before spending anything, then the quota is consumed before
+ * calling the model, and the quota is NOT refunded if the model fails —
+ * otherwise anyone abusing it gets free attempts by making the reading fail
+ * on purpose.
  *
  * It writes no shift: saving stays on PUT /shifts, which already has the
  * review of what would be overwritten.
@@ -127,9 +132,12 @@ export function readPhotoWith(
   vision: Vision,
   today: () => IsoDate = romeToday,
   year: () => number = () => new Date().getFullYear(),
+  signedIn: (h: Record<string, string | undefined> | undefined) => Promise<void> = requireSignedIn,
 ) {
   return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
     handle(async () => {
+      await signedIn(event.headers);
+
       const image = requireImage(parseJson(event.body).image);
 
       if (!(await repo.consumePhotoQuota(today(), MAX_READINGS_PER_DAY))) {

@@ -2,16 +2,9 @@ import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { CONFIG } from '../bin/config.js';
 import { AppStack } from '../lib/app-stack.js';
 import { CertificateStack } from '../lib/certificate-stack.js';
-
-const CONFIG = {
-  account: '495133941005',
-  region: 'eu-south-1',
-  domain: 'vanessa.matteo.cool',
-  zoneDomain: 'matteo.cool',
-  zoneId: 'Z2T8X72UH7FONU',
-};
 
 let app: Template;
 let cert: Template;
@@ -21,6 +14,7 @@ beforeAll(() => {
   const sCert = new CertificateStack(a, 'Cert', {
     env: { account: CONFIG.account, region: 'us-east-1' },
     domain: CONFIG.domain,
+    loginDomain: CONFIG.loginDomain,
     zoneDomain: CONFIG.zoneDomain,
     zoneId: CONFIG.zoneId,
   });
@@ -30,6 +24,8 @@ beforeAll(() => {
     zoneDomain: CONFIG.zoneDomain,
     zoneId: CONFIG.zoneId,
     certificateArn: 'arn:aws:acm:us-east-1:495133941005:certificate/finto',
+    userPoolId: 'eu-south-1_finto',
+    userPoolClientId: 'clientefinto',
   });
   cert = Template.fromStack(sCert);
   app = Template.fromStack(sApp);
@@ -41,6 +37,7 @@ describe('certificate', () => {
     const s = new CertificateStack(a, 'C', {
       env: { account: CONFIG.account, region: 'us-east-1' },
       domain: CONFIG.domain,
+      loginDomain: CONFIG.loginDomain,
       zoneDomain: CONFIG.zoneDomain,
       zoneId: CONFIG.zoneId,
     });
@@ -51,6 +48,31 @@ describe('certificate', () => {
     cert.hasResourceProperties('AWS::CertificateManager::Certificate', {
       DomainName: CONFIG.domain,
       ValidationMethod: 'DNS',
+    });
+  });
+
+  it('there is a second one, for the login domain, validated the same way', () => {
+    cert.hasResourceProperties('AWS::CertificateManager::Certificate', {
+      DomainName: CONFIG.loginDomain,
+      ValidationMethod: 'DNS',
+      DomainValidationOptions: [
+        { DomainName: CONFIG.loginDomain, HostedZoneId: CONFIG.zoneId },
+      ],
+    });
+  });
+
+  it('the two are separate certificates, and the app one carries no extra name', () => {
+    // Not one certificate with a subject alternative name. ACM cannot add a
+    // name to an issued certificate: changing the domain list issues a new
+    // one and CloudFormation replaces it — and that certificate is the one
+    // serving the live distribution. So: two, either of which can be
+    // reissued without touching the other.
+    expect(
+      Object.keys(cert.findResources('AWS::CertificateManager::Certificate')),
+    ).toHaveLength(2);
+    cert.hasResourceProperties('AWS::CertificateManager::Certificate', {
+      DomainName: CONFIG.domain,
+      SubjectAlternativeNames: Match.absent(),
     });
   });
 });
@@ -153,17 +175,13 @@ describe('api', () => {
     });
   });
 
-  it('sets throttling, the only brake given there is no authentication', () => {
+  it('sets throttling, the brake against a signed-in caller moving too fast', () => {
     app.hasResourceProperties('AWS::ApiGatewayV2::Stage', {
       DefaultRouteSettings: Match.objectLike({
         ThrottlingRateLimit: 100,
         ThrottlingBurstLimit: 200,
       }),
     });
-  });
-
-  it('has no authorizer: a deliberate choice, not an oversight', () => {
-    expect(Object.keys(app.findResources('AWS::ApiGatewayV2::Authorizer'))).toHaveLength(0);
   });
 });
 
@@ -342,5 +360,39 @@ describe('one door only', () => {
     expect(apiOrigin.OriginCustomHeaders).toHaveLength(1);
     expect(apiOrigin.OriginCustomHeaders[0].HeaderName).toBe('x-cloudfront-origin');
     expect(apiOrigin.OriginCustomHeaders[0].HeaderValue).toBeTruthy();
+  });
+});
+
+describe('chi entra', () => {
+  it('puts an authorizer on all five API routes', () => {
+    const routes = app.findResources('AWS::ApiGatewayV2::Route');
+    expect(Object.keys(routes)).toHaveLength(5);
+    for (const r of Object.values(routes)) {
+      expect(r.Properties.AuthorizationType).toBe('JWT');
+      expect(r.Properties.AuthorizerId).toBeDefined();
+    }
+  });
+
+  it('points the authorizer at the pool, and at our client alone', () => {
+    app.hasResourceProperties('AWS::ApiGatewayV2::Authorizer', {
+      AuthorizerType: 'JWT',
+      JwtConfiguration: Match.objectLike({
+        Audience: ['clientefinto'],
+        Issuer: 'https://cognito-idp.eu-south-1.amazonaws.com/eu-south-1_finto',
+      }),
+    });
+  });
+
+  it('tells the photo function which pool to check against', () => {
+    // It cannot have an authorizer, so it needs to verify the token itself.
+    app.hasResourceProperties('AWS::Lambda::Function', {
+      Handler: 'index.readPhoto',
+      Environment: Match.objectLike({
+        Variables: Match.objectLike({
+          USER_POOL_ID: 'eu-south-1_finto',
+          USER_POOL_CLIENT_ID: 'clientefinto',
+        }),
+      }),
+    });
   });
 });

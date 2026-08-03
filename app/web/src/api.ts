@@ -2,6 +2,8 @@
 
 import type { PhotoReading, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
 
+import { sessioneConfermata, sessioneRifiutata, sessioneValida } from './auth.js';
+
 export interface RemoteShift {
   date: IsoDate;
   code: ShiftCode;
@@ -41,12 +43,38 @@ function requireJson(r: Response): void {
   if (!(r.headers.get('content-type') ?? '').includes('json')) throw new Error(UNREACHABLE);
 }
 
+/** Every call carries the token. A 401 usually means the ID token died
+ *  despite the margin — most likely a device that slept through it, not a
+ *  revoked session — so `sessioneRifiutata()` keeps the refresh token and
+ *  reloads: the gate in `avvio.tsx` tries a silent renewal before falling
+ *  back to a login. Without the reload she is left staring at "richiesta
+ *  fallita (401)" with every subsequent tap repeating it, because requests
+ *  now go out with no token at all — every write here is single and
+ *  repeatable, so nothing is lost by starting over.
+ *
+ *  It is not the only 401 the API sends. `api/src/http.ts` answers 401, not
+ *  403, to a request that did not come through CloudFront — deliberately, so
+ *  the distribution does not rewrite it into `index.html` — so a missing
+ *  `ORIGIN_SECRET` on one of the two sides produces exactly this status with
+ *  nothing wrong with the token at all. That one no renewal cures, which is
+ *  why the breaker in `auth.ts` has to trip and the gate has to stop instead
+ *  of signing in again. Do not remove either as redundant. */
+function autorizzazione(): Record<string, string> {
+  const s = sessioneValida();
+  return s ? { authorization: `Bearer ${s.idToken}` } : {};
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${API_URL}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...autorizzazione(),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!r.ok) {
+    if (r.status === 401) sessioneRifiutata();
     const text = await r.text().catch(() => '');
     // The fallback stays in Italian: it reaches the screen.
     let message = `richiesta fallita (${r.status})`;
@@ -59,6 +87,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(message);
   }
   requireJson(r);
+  // A call that succeeds is proof the session is good — but only past this
+  // point: a CloudFront-rewritten refusal (a 403 or 404 turned into
+  // `index.html` with a 200) is `r.ok` too, and would otherwise clear the
+  // circuit breaker's marker on a response that was never a real answer.
+  // Confirming before `requireJson` let two such refusals in a row reset the
+  // counter between them, so a genuine second 401 right after was still read
+  // as attempt one — reloading forever instead of tripping the breaker.
+  sessioneConfermata();
   return (await r.json()) as T;
 }
 
@@ -116,7 +152,7 @@ export const api: Api = {
     try {
       r = await fetch(PHOTO_URL, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...autorizzazione() },
         body,
       });
     } catch {
@@ -127,6 +163,7 @@ export const api: Api = {
     }
 
     if (!r.ok) {
+      if (r.status === 401) sessioneRifiutata();
       const text = await r.text().catch(() => '');
       let message = `lettura fallita (${r.status})`;
       try {
@@ -140,6 +177,11 @@ export const api: Api = {
 
     try {
       requireJson(r);
+      // See the matching comment in `request()`: this has to run after
+      // `requireJson`, not before, or a CloudFront-rewritten refusal (a 200
+      // that isn't really an answer) would confirm a session that was never
+      // actually checked.
+      sessioneConfermata();
       const j = (await r.json()) as { reading: PhotoReading };
       return j.reading;
     } catch {

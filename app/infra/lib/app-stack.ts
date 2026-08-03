@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import { HttpApi, HttpMethod, CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpJwtAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import {
@@ -40,6 +41,8 @@ export interface AppStackProps extends StackProps {
   readonly zoneDomain: string;
   readonly zoneId: string;
   readonly certificateArn: string;
+  readonly userPoolId: string;
+  readonly userPoolClientId: string;
   /** Folder holding the built frontend. Absent on the very first deploy. */
   readonly webDist?: string;
 }
@@ -57,8 +60,11 @@ export class AppStack extends Stack {
     super(scope, id, { ...props, crossRegionReferences: true });
 
     // --- Data ---
-    // Point-in-time recovery is the only safety net left, given the API is
-    // open: it makes it possible to roll back after damage.
+    // Point-in-time recovery: the way back after damage. It was the only
+    // safety net when the API was open to anyone; the API is now behind a JWT
+    // authorizer on all five routes, so this is no longer the last line — but
+    // authentication does not undo a mistake made by someone signed in, which
+    // is the case it was really for.
     const table = new TableV2(this, 'Tabella', {
       partitionKey: { name: 'pk', type: AttributeType.STRING },
       sortKey: { name: 'sk', type: AttributeType.STRING },
@@ -129,6 +135,8 @@ export class AppStack extends Stack {
       environment: {
         TABLE_NAME: table.tableName,
         ALLOWED_ORIGIN: `https://${props.domain}`,
+        USER_POOL_ID: props.userPoolId,
+        USER_POOL_CLIENT_ID: props.userPoolClientId,
       },
       bundling: { format: undefined, minify: true, sourceMap: true },
     });
@@ -184,11 +192,21 @@ export class AppStack extends Stack {
       },
     });
 
+    // The five API routes are checked by the gateway, before our code runs.
+    // The photo function cannot have this — a Function URL takes no
+    // authorizer — so it verifies the same token itself; see api/src/token.ts.
+    const authorizer = new HttpJwtAuthorizer(
+      'Autorizzatore',
+      `https://cognito-idp.${this.region}.amazonaws.com/${props.userPoolId}`,
+      { jwtAudience: [props.userPoolClientId] },
+    );
+
     const route = (path: string, method: HttpMethod, fn: NodejsFunction, constructId: string) =>
       api.addRoutes({
         path,
         methods: [method],
         integration: new HttpLambdaIntegration(constructId, fn),
+        authorizer,
       });
 
     route('/api/shifts', HttpMethod.GET, getShiftsFn, 'IntGetShifts');
@@ -197,7 +215,8 @@ export class AppStack extends Stack {
     route('/api/config', HttpMethod.GET, getConfigFn, 'IntGetConfig');
     route('/api/config', HttpMethod.PUT, putConfigFn, 'IntPutConfig');
 
-    // With no authentication, throttling is the only brake on third-party traffic.
+    // The authorizer stops a caller who isn't signed in; throttling is what
+    // stops one who is, from hammering the API faster than a person would.
     api.defaultStage!.node.addDependency(table);
     const stage = api.defaultStage!.node
       .defaultChild as import('aws-cdk-lib/aws-apigatewayv2').CfnStage;

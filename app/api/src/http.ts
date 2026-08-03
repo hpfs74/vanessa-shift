@@ -18,6 +18,8 @@ import {
   isValidHours,
 } from '@vanessa/core';
 
+import { NotSignedIn } from './token.js';
+
 export const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? 'https://vanessa.matteo.cool';
 
 /** The header CloudFront injects on requests it forwards to the API.
@@ -28,8 +30,12 @@ export const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? 'https://vanessa.mat
  *
  * It is a bearer secret, not a cryptographic control: anyone who obtains the
  * value can replay it. It stops scanners and casual direct access, which is
- * what it is for. The photo Function URL is a different story — that one is
- * signed with SigV4 through Origin Access Control and is genuinely closed.
+ * what it is for. The photo Function URL is a different story, and not a
+ * reassuring one: `AuthType: NONE`, no Origin Access Control, no shared
+ * header — SigV4 through OAC was tried and taken back out (see the comment
+ * in app-stack.ts) — so that URL is reachable by anyone who learns it. The
+ * token check in token.ts is the only thing standing in front of the quota
+ * and Bedrock there, not a second layer behind one that was already closed.
  */
 export const ORIGIN_SECRET_HEADER = 'x-cloudfront-origin';
 
@@ -240,6 +246,7 @@ export function handle(
   fn: () => Promise<APIGatewayProxyResultV2>,
 ): Promise<APIGatewayProxyResultV2> {
   return fn().catch((e: unknown) => {
+    if (e instanceof NotSignedIn) return failure(NO_CREDENTIAL, 'accesso non effettuato');
     if (e instanceof NotFromCloudFront) {
       return failure(NO_CREDENTIAL, 'credenziale di origine mancante o non valida');
     }

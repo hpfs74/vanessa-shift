@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../src/api.js';
 
 /** The message, whatever the failure was. */
@@ -22,6 +22,11 @@ function response(body: unknown, init: ResponseInit = {}): Response {
   });
 }
 
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -35,10 +40,6 @@ describe('readPhoto', () => {
     // matches paths carrying the literal '/foto/' prefix.
     expect(fetchMock.mock.calls[0][0]).toBe('/foto/leggi');
   });
-
-  // Origin Access Control makes CloudFront sign the request with SigV4, and
-  // Lambda refuses an unsigned payload: the hash of the body has to come from
-  // the viewer, because CloudFront signs the one it was handed.
 
   // 403 and 404 come back from the distribution as index.html with a 200, for
   // the client router. Without a content-type check that HTML reaches
@@ -127,5 +128,89 @@ describe('the API calls', () => {
     const message = await messageOf(api.paySettings());
     expect(message).not.toMatch(/token|JSON/);
     expect(message).toMatch(/a mano/);
+  });
+});
+
+describe('the token on every call', () => {
+  // The branch's central claim, and until these two tests nothing asserted
+  // it: every other test in this file runs with cleared storage, so
+  // `sessioneValida()` is null and `autorizzazione()` returns `{}` — the
+  // spread could be deleted from both call sites and the whole suite would
+  // stay green while every request in production came back 401.
+  //
+  // Two tests and not one: `request()` and `readPhoto()` build their headers
+  // separately, so neither covers the other.
+  const conSessione = () => {
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'IL-TOKEN-ID', scade: 9e12 }));
+    const fetchMock = vi.fn().mockResolvedValue(response({ pay: {}, reading: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+
+  /** The headers as `fetch` received them, whatever shape they were passed in. */
+  const intestazioni = (fetchMock: ReturnType<typeof vi.fn>): Headers =>
+    new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers);
+
+  it('request() sends the stored ID token as a bearer token', async () => {
+    const fetchMock = conSessione();
+    await api.paySettings();
+    expect(intestazioni(fetchMock).get('authorization')).toBe('Bearer IL-TOKEN-ID');
+  });
+
+  it('readPhoto() sends it too, from headers it builds on its own', async () => {
+    const fetchMock = conSessione();
+    await api.readPhoto('AAAA');
+    expect(intestazioni(fetchMock).get('authorization')).toBe('Bearer IL-TOKEN-ID');
+  });
+});
+
+describe('the 401 circuit breaker', () => {
+  // A CloudFront-rewritten refusal is `r.ok` — its status is 200 — so it
+  // must not be mistaken for a real, session-confirming answer. If it were,
+  // two of them in a row would reset the breaker's marker between them, and
+  // a genuine second 401 right after would still read as attempt one:
+  // reloading forever instead of ever tripping the breaker.
+  it('two HTML refusals in a row do not confirm the session; a real 401 after them still trips the breaker', async () => {
+    vi.stubGlobal('location', { reload: vi.fn() });
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
+    localStorage.setItem('refresh', 'un-refresh-token');
+
+    // A first 401 already happened in the cycle before this one: the breaker
+    // spent its one free retry there and kept the refresh token. It has to
+    // come from a *different* module instance, because `sessioneRifiutata`
+    // allows one reload per document — the page this test is standing in
+    // reloaded after that 401, and `api` below is the page that came back.
+    // Storage survives the reset, as it survives a reload.
+    vi.resetModules();
+    (await import('../src/auth.js')).sessioneRifiutata();
+    expect(sessionStorage.getItem('riprovaSessione')).not.toBeNull();
+    expect(localStorage.getItem('refresh')).toBe('un-refresh-token');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('<!doctype html><html></html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+      ),
+    );
+    await expect(api.paySettings()).rejects.toThrow();
+    await expect(api.paySettings()).rejects.toThrow();
+
+    // Neither refusal was a real answer: the marker from the first 401 must
+    // have survived both.
+    expect(sessionStorage.getItem('riprovaSessione')).not.toBeNull();
+    expect(localStorage.getItem('refresh')).toBe('un-refresh-token');
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
+    await expect(api.paySettings()).rejects.toThrow();
+
+    // The second cycle's refusal: everything is gone now, the refresh token
+    // included. What the breaker does from here — the mark that stops the
+    // gate — is `auth.test.ts`'s business; this test's job is that the two
+    // HTML refusals in the middle did not reset the count.
+    expect(localStorage.getItem('refresh')).toBeNull();
+    expect(sessionStorage.getItem('riprovaSessione')).toBeNull();
   });
 });

@@ -12,7 +12,10 @@ import { type ShiftCode, SHIFTS, isShiftCode } from './shifts.js';
 /** The row to look for on the sheet. */
 export const ROW_NAME = 'Vanessa';
 
-/** The API is open and every reading costs money: the cap is the main defense. */
+/** Every reading costs money. The cap is the second defense, not the first:
+ *  the photo Lambda verifies the token before anything else, so this is what
+ *  stops a caller who is already signed in — Vanessa on a bad day, or her
+ *  device with a stolen token — rather than the open internet. */
 export const MAX_READINGS_PER_DAY = 10;
 
 export interface ReadDay {

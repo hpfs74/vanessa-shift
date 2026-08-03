@@ -3,6 +3,20 @@
 Data: 2026-08-02
 Stato: approvato
 
+> **Superata in parte.** Due cose scritte qui non descrivono più il progetto, e le correzioni
+> stanno accanto ai punti in cui compaiono:
+>
+> 1. **La Function URL della foto non è passata a `AWS_IAM` dietro Origin Access Control.** Ci
+>    si è provato e l'OAC è stato tolto di nuovo; è rimasta su `authType: NONE`, cioè
+>    raggiungibile da chiunque ne conosca l'indirizzo. La fonte è `infra/lib/app-stack.ts`, che
+>    spiega anche perché. Vedi §*Le origini si chiudono*.
+> 2. **L'autenticazione non è più fuori perimetro**, da
+>    `2026-08-02-autenticazione-passkey-design.md`: le cinque rotte stanno dietro un authorizer
+>    JWT e la Lambda della foto verifica il token da sé. Vedi §*Fuori perimetro*.
+>
+> Il resto — la porta unica, il segreto d'origine, i path relativi, il controllo del
+> `content-type` — vale ancora com'è scritto.
+
 ## Obiettivo
 
 Il browser parla con un solo indirizzo. Oggi ne conosce tre — il sito su
@@ -53,6 +67,11 @@ Il resto degli header del viewer passa, ed è necessario che passi: serve `conte
 serve `x-amz-content-sha256`, senza il quale la lettura foto non supera la firma all'origine
 (§Le origini si chiudono).
 
+> **La seconda metà non vale più.** Nessuna firma all'origine, quindi nessun
+> `x-amz-content-sha256`: l'OAC è stato tolto e la Function URL è rimasta su `NONE` (avviso in
+> cima). Che gli header del viewer passino serve comunque, e adesso più di prima: da quando
+> l'app ha un accesso, è così che `authorization` arriva a tutte e due le origini.
+
 ## Cosa sparisce
 
 `VITE_API_URL` e `VITE_PHOTO_URL` non hanno più niente da dire: il frontend chiama `/api` e
@@ -80,10 +99,24 @@ Origin Access Control (vedi §Le origini si chiudono), e da lì nessun browser l
 direttamente: un blocco CORS rimasto lì descriverebbe un accesso che non esiste più, e
 leggendolo fra sei mesi si crederebbe che la Function URL si possa ancora chiamare a mano.
 
+> **La premessa è caduta, la conclusione no.** L'OAC è stato tolto e la Function URL è rimasta
+> su `NONE`, quindi l'indirizzo *è* raggiungibile a mano. Togliere il CORS resta comunque
+> giusto, per un motivo diverso da quello scritto sopra: senza intestazioni CORS nessuna pagina
+> di terzi può chiamare quell'indirizzo dal browser di chi la visita. Chi lo chiama fuori dal
+> browser lo raggiunge eccome, e a fermarlo c'è solo il token.
+
 ## Le origini si chiudono
 
 Non era nel perimetro della prima stesura, e ci è entrato: una volta che CloudFront è l'unica
 porta, lasciare le due origini raggiungibili in proprio rende la porta un suggerimento.
+
+> **Non è andata così.** La Function URL è rimasta su `authType: NONE`, senza Origin Access
+> Control: l'OAC è stato provato e tolto — la richiesta veniva rifiutata prima che la funzione
+> girasse, quindi niente arrivava al nostro codice e niente diceva perché. Il paragrafo qui
+> sotto, e il prezzo dell'`x-amz-content-sha256` che lo segue, descrivono quindi una chiusura
+> che **non esiste**: quell'indirizzo è raggiungibile da chiunque lo conosca, e la sua unica
+> porta è il token che la Lambda verifica per prima (`api/src/token.ts`). La fonte è
+> `infra/lib/app-stack.ts`.
 
 **La Function URL** passa da `NONE` a `AWS_IAM` e sta dietro Origin Access Control: CloudFront
 firma ogni richiesta con SigV4, e il permesso di invocazione è ristretto — via `SourceArn` — a
@@ -115,6 +148,11 @@ quegli stati: adesso ha motivo di emetterli. Il rifiuto dell'origine sarebbe sta
 strada che si percorre davvero, e un 403 da CloudFront può arrivare anche dall'origine foto se
 una firma non torna. Da qui due mosse:
 
+> **La seconda metà della frase sopra non vale.** Nessuna firma esiste: l'OAC è stato tolto e la
+> Function URL è rimasta su `NONE` (avviso in cima). Le due mosse restano giuste per il primo
+> motivo, che basta da solo — un 403 dall'origine dell'API su una strada percorsa davvero
+> tornerebbe al browser come `index.html` con un 200.
+
 - il rifiuto dell'origine risponde **401** e non 403. CloudFront il 401 non lo riscrive, quindi
   la collisione non si presenta; ed è anche lo stato più giusto dei due, perché alla richiesta
   mancava una credenziale, non le è stata negata una risorsa per cui era identificata;
@@ -144,13 +182,13 @@ secondi, o riportare `/foto` sulla sua Function URL.
 
 | File | Cosa |
 |------|------|
-| `infra/lib/app-stack.ts` | due `additionalBehaviors`, le origini, le rotte sotto `/api`, il segreto condiviso, la Function URL su `AWS_IAM` dietro OAC, l'output `PhotoUrl` che diventa informativo |
-| `infra/test/stacks.test.ts` | le behaviour esistono e sono configurate come sopra; le rotte sono sotto `/api`; le due origini sono chiuse |
+| `infra/lib/app-stack.ts` | due `additionalBehaviors`, le origini, le rotte sotto `/api`, il segreto condiviso, la Function URL su `AWS_IAM` dietro OAC *(non fatto: è rimasta su `NONE`, vedi l'avviso in cima)*, l'output `PhotoUrl` che diventa informativo |
+| `infra/test/stacks.test.ts` | le behaviour esistono e sono configurate come sopra; le rotte sono sotto `/api`; le due origini sono chiuse *(solo l'API: il test asserisce che la Function URL è su `NONE`, vedi l'avviso in cima)* |
 | `api/src/http.ts` | il confronto a tempo costante del segreto, e il 401 di chi non passa da CloudFront |
-| `web/src/api.ts` | path relativi, via il guard sull'URL vuoto, `/foto/leggi`, lo SHA-256 del corpo, il controllo del `content-type` |
+| `web/src/api.ts` | path relativi, via il guard sull'URL vuoto, `/foto/leggi`, lo SHA-256 del corpo *(non c'è: senza OAC non serve firmare niente)*, il controllo del `content-type` |
 | `web/vite.config.ts` | proxy di `/api` e `/foto` per il server di sviluppo |
 | `web/.env.production` | eliminato |
-| `web/test/api.test.ts` | le chiamate vanno ai path relativi, e portano l'hash del corpo |
+| `web/test/api.test.ts` | le chiamate vanno ai path relativi, e portano l'hash del corpo *(no: portano il token, che è quello che si è rivelato l'unica porta)* |
 | `app/README.md` | via il passo «incolla l'indirizzo»; e cosa protegge davvero l'app, adesso |
 
 Il core non si tocca. Gli handler prendono una riga ciascuno — il controllo sull'origine, primo
@@ -169,7 +207,16 @@ accettabile. Se CloudFormation fallisce a metà, fa rollback e resta buono quell
 Niente WAF e niente rate limiting oltre il throttling che API Gateway già fa.
 
 La restrizione delle origini invece **è rientrata nel perimetro** durante l'esecuzione, e sta in
-§Le origini si chiudono: entrambe rifiutano l'accesso diretto, con forze diverse. Quello che
-resta fuori è l'autenticazione dell'utente: dietro CloudFront l'API è aperta a chiunque, come
-prima, e questa è la scelta deliberata di sempre — non una svista che le due chiusure
-correggono a metà.
+§Le origini si chiudono — con l'avvertenza in cima a quella sezione: solo l'API ha finito per
+avere una chiusura, la Function URL no.
+
+> **Superato dal 2026-08-02**, da `2026-08-02-autenticazione-passkey-design.md`. Il paragrafo
+> qui sotto resta perché era una decisione vera, presa con cognizione del rischio, e la sua
+> motivazione è parte della storia del progetto — ma non descrive più il progetto: le cinque
+> rotte dell'API stanno dietro un authorizer JWT di API Gateway e la Lambda della foto verifica
+> lo stesso token da sé, per prima. Il segreto d'origine resta accanto all'autenticazione, non
+> al posto suo: risponde a *da quale porta sei entrato*, non a *chi sei*.
+
+Quello che resta fuori è l'autenticazione dell'utente: dietro CloudFront l'API è aperta a
+chiunque, come prima, e questa è la scelta deliberata di sempre — non una svista che le due
+chiusure correggono a metà.

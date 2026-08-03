@@ -507,11 +507,15 @@ Cognito. I client pubblici lo ricevono, ma la combinazione dominio personalizzat
 Login v2 non è qualcosa su cui `jsdom` con un `fetch` finto abbia un'opinione. Se fallisce: Face
 ID riesce, il browser torna con `?code=`, `fetch` viene rifiutato per CORS, il cancello tratta
 il caso come «nessun codice» — di proposito, perché una connessione che cade sulla via del
-ritorno è il caso ordinario — e rimanda al login, che risponde lo stesso. **Questo è l'unico
-giro infinito rimasto senza una frase sullo schermo**, e il breaker non lo copre: quel breaker
-conta i 401 di `api.ts`, e qui nessuna chiamata all'API parte mai. La causa sta solo nella
-console del browser. È l'unico motivo per cui questa voce va guardata subito dopo la 2 e non più
-tardi.
+ritorno è il caso ordinario. Il breaker non lo vede: quello conta i 401 di `api.ts`, e qui
+all'API non si arriva mai.
+
+**Quello che lei vede, se succede, è comunque una frase.** Il cancello conta i viaggi verso
+`/oauth2/authorize` e dal secondo si ferma: dice che l'accesso non si completa e che è un
+problema di configurazione, non qualcosa che ha sbagliato lei. Il motivo vero — quale
+intestazione CORS manchi — resta solo nella console del browser, ed è per questo che la frase
+manda lì. Quindi questa voce non è un guasto muto: è una cosa da verificare perché se è rotta
+l'app non si usa affatto, non perché sia difficile accorgersene.
 
 **4. Che `useCognitoProvidedValues: true` da solo basti** perché Managed Login serva qualcosa.
 La documentazione AWS indica `CreateManagedLoginBranding` come il requisito e questo flag come

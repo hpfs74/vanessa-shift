@@ -11,9 +11,11 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import {
   AccessoInterrotto,
+  AccessoNonCompletato,
   ErroreDaMostrare,
   accessoInterrotto,
   completaAccesso,
+  giriDiAccesso,
   iniziaAccesso,
   rinnovaAccesso,
   sessioneValida,
@@ -36,6 +38,11 @@ export const avvia = async (radice: HTMLElement): Promise<void> => {
       // Not so when Cognito told us why it refused: that is not a hiccup, it
       // is an answer, and it will be the same answer next time round.
       if (e instanceof ErroreDaMostrare) throw e;
+      // Swallowed, but not silently. When this is not a lost connection but a
+      // CORS refusal from the token endpoint, this is the only place the real
+      // cause exists — the redirect counter below can say that signing in
+      // does not complete, and nothing anywhere can say why.
+      console.error("scambio del codice non riuscito all'accesso:", e);
     }
     // The ID token lives an hour; the refresh token lives the day the pool
     // was configured for. Try it before deciding there is no session, so the
@@ -59,6 +66,22 @@ export const avvia = async (radice: HTMLElement): Promise<void> => {
       throw new AccessoInterrotto(
         "L'accesso riesce ma il servizio rifiuta comunque le richieste. " +
           "Non è qualcosa che puoi sistemare tu: chiudi la pagina e riprova più tardi.",
+      );
+    }
+    // The other way of never getting anywhere, and the one no 401 ever
+    // reports: we sent her to Cognito, Cognito sent her back with a code, and
+    // the code did not become a session. `completaAccesso` has already zeroed
+    // this counter for every other way of arriving here — a bare URL, a fresh
+    // visit, the back button — so a non-zero value has exactly one meaning,
+    // and another trip would only cost her another Face ID. Checked after the
+    // breaker because the breaker implies a sign-in that *did* work, which
+    // zeroes this.
+    if (giriDiAccesso() >= 1) {
+      throw new AccessoNonCompletato(
+        "Non riesco a completare l'accesso: la pagina di accesso ti rimanda qui, " +
+          'ma la sessione non si crea. È un problema di configurazione ' +
+          "dell'app, non qualcosa che hai sbagliato tu — chi l'ha messa in " +
+          'piedi trova il motivo nella console del browser.',
       );
     }
     await iniziaAccesso();

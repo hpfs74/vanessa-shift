@@ -60,6 +60,54 @@ describe('when there is no session', () => {
 
     expect(assign).toHaveBeenCalledOnce();
     expect(String(assign.mock.calls[0][0])).toContain('/oauth2/authorize');
+    // And the trip is counted on the way out, which is what lets the next
+    // page tell "she came back with nothing" from "she just opened the app".
+    expect(sessionStorage.getItem('giriAccesso')).toBe('1');
+  });
+});
+
+describe('when signing in never completes', () => {
+  // No 401 is ever produced on this path — no call to the API is made — so
+  // the breaker cannot see it. Cognito redirects back with `?code=`, the
+  // token exchange fails (its endpoint is cross-origin and wants a CORS
+  // header from Cognito), the gate finds no session and sends her round
+  // again: Face ID for as long as she keeps looking, nothing on the screen,
+  // and the cause visible only in the console.
+  it('says so instead of sending her round again, and leaves the cause in the console', async () => {
+    const assign = finestraSu('https://vanessa.test/?code=un-codice');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // The trip that has already been made and came back with nothing.
+    sessionStorage.setItem('giriAccesso', '1');
+    sessionStorage.setItem('pkce', 'un-verifier');
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    const avvia = await caricaAvvio();
+
+    await avvia(radice);
+
+    expect(assign).not.toHaveBeenCalled();
+    expect(radice.textContent).toContain('configurazione');
+    // Different words from the breaker's sentence: that one means she gets in
+    // and the service refuses her, this one that she never gets in. Sending
+    // whoever debugs it to the same place would be wrong for one of the two.
+    expect(radice.textContent).not.toContain('rifiuta comunque le richieste');
+    // The message tells her the reason is in the console, so it has to be.
+    expect(logged).toHaveBeenCalled();
+  });
+
+  // The counter must not strand her. A session that expires while the tab is
+  // open, or simply opening the app again, arrives with a bare URL — no code
+  // came back, so there is no failed trip to count — and she is entitled to
+  // a sign-in like any other.
+  it('does not fire on an ordinary sign-in that follows an earlier one', async () => {
+    const assign = finestraSu('https://vanessa.test/');
+    sessionStorage.setItem('giriAccesso', '1');
+    const avvia = await caricaAvvio();
+
+    await avvia(radice);
+
+    expect(assign).toHaveBeenCalledOnce();
+    expect(String(assign.mock.calls[0][0])).toContain('/oauth2/authorize');
+    expect(radice.textContent).toBe('');
   });
 });
 

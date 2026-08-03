@@ -156,6 +156,13 @@ niente.
 | Sessione scaduta mentre l'app è aperta | Un 401 da una chiamata: si rinnova in silenzio e si riprova. Se anche il rinnovo scade, si va al login. |
 | Passkey rifiutata o annullata | Resta sulla pagina di Cognito, che lo dice da sé. |
 | Telefono nuovo | Codice via email, poi registra la passkey. |
+| Cognito rifiuta l'accesso (utente disabilitato, client non autorizzato) | Il motivo torna nella query string e il cancello lo mostra, invece di rimandare alla stessa pagina che l'ha appena rifiutato. |
+| Si entra, ma il servizio rifiuta le chiamate lo stesso | Dopo un rinnovo e una seconda 401, il cancello si ferma e lo dice: non è qualcosa che possa sistemare lei. Non un altro Face ID. |
+| L'accesso non si completa mai (lo scambio del codice fallisce) | Al secondo viaggio verso la pagina di accesso il cancello si ferma e dice che è un problema di configurazione. Il motivo è nella console del browser. |
+
+Le ultime tre righe sono la ragione per cui questa tabella non è solo documentazione: **ognuna
+delle tre è un giro infinito senza una parola sullo schermo, se la riga non c'è.** Sono state
+scritte una alla volta, dopo che ognuna era stata scoperta.
 
 Nessuno di questi le perde quello che stava scrivendo: le chiamate che modificano dati sono
 tutte singole e ripetibili.

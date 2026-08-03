@@ -5,6 +5,7 @@ import {
   accessoInterrotto,
   completaAccesso,
   esci,
+  giriDiAccesso,
   rinnovaAccesso,
   sessioneConfermata,
   sessioneRifiutata,
@@ -90,6 +91,26 @@ describe('completaAccesso', () => {
 
     expect(ok).toBe(true);
     expect(sessioneValida()?.idToken).toBe('IL-TOKEN-ID');
+  });
+
+  // The trip ended in a session, so it was not a loop. Without this the count
+  // would still stand at the next sign-in — hours later, same tab — and the
+  // gate would refuse one she is entitled to.
+  it('clears the redirect count once the exchange produces a session', async () => {
+    sessionStorage.setItem('giriAccesso', '1');
+    sessionStorage.setItem('pkce', 'un-verifier');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id_token: 'IL-TOKEN-ID', expires_in: 3600 }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+
+    await completaAccesso(new URL('https://esempio.test/?code=un-codice'));
+
+    expect(giriDiAccesso()).toBe(0);
   });
 
   // Cognito answers the callback with `?error=…&error_description=…` for a

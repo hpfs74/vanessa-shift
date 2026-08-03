@@ -19,6 +19,20 @@ const CHIAVE_RIPROVATO = 'riprovaSessione';
  *  the breaker starts counting from zero again. It lives in `sessionStorage`,
  *  so closing the tab is enough to start over. */
 const CHIAVE_INTERROTTO = 'accessoInterrotto';
+/** How many times she has been sent to `/oauth2/authorize` in this tab since
+ *  the last time a token exchange actually produced a session.
+ *
+ *  It exists for the one failure that reaches no other alarm. The breaker
+ *  above counts 401s from `api.ts`; a sign-in that never completes produces
+ *  none, because no call to the API is ever made. Cognito redirects back with
+ *  `?code=`, the exchange fails — the token endpoint is cross-origin and needs
+ *  a CORS header from Cognito that only a deploy can confirm — and without
+ *  something counting, the gate would find no session and send her round
+ *  again: Face ID for as long as she kept looking, nothing on the screen, and
+ *  the cause only in the browser console. It is the last of the three rows
+ *  the spec's table of "what Vanessa sees when something goes wrong" needed
+ *  and did not have. */
+const CHIAVE_GIRI = 'giriAccesso';
 
 /** One turn of the breaker per document, because one cycle *is* one document.
  *
@@ -133,6 +147,22 @@ export function accessoInterrotto(): boolean {
   return sessionStorage.getItem(CHIAVE_INTERROTTO) !== null;
 }
 
+/** Trips to `/oauth2/authorize` in this tab that have not yet ended in a
+ *  session. Zero at rest, and the gate refuses to make another trip once it
+ *  is not.
+ *
+ *  One is already enough to stop, and that is not as aggressive as it looks,
+ *  because `completaAccesso` resets this to zero whenever the page is entered
+ *  *without* a `code`. So a non-zero value cannot mean "she opened the app
+ *  again" or "she pressed back from the login page" — those arrive with a
+ *  bare URL and start from zero. It can only mean: we sent her to Cognito,
+ *  Cognito sent her back with a code, and that code did not become a session.
+ *  There is no second reading, so a second trip would buy nothing but another
+ *  Face ID. */
+export function giriDiAccesso(): number {
+  return Number(sessionStorage.getItem(CHIAVE_GIRI) ?? 0);
+}
+
 /** Errors whose message is written for her and can go on the screen as it
  *  is: the gate in `avvio.tsx` shows these verbatim, while anything else gets a
  *  fixed Italian sentence instead of an English stack trace. */
@@ -151,6 +181,12 @@ export class AccessoRifiutato extends ErroreDaMostrare {}
 /** The sign-in works and the calls are refused anyway: see
  *  `accessoInterrotto` above. */
 export class AccessoInterrotto extends ErroreDaMostrare {}
+
+/** She never gets in at all: see `giriDiAccesso` below. A different failure
+ *  from `AccessoInterrotto`, and it has to read differently — one means the
+ *  service refuses someone who is signed in, the other that signing in does
+ *  not complete. Whoever debugs them looks in different places. */
+export class AccessoNonCompletato extends ErroreDaMostrare {}
 
 function base64url(bytes: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)))
@@ -201,6 +237,10 @@ export async function iniziaAccesso(): Promise<void> {
   // single-tenant, so there is no second account to be pushed into and
   // nothing of hers to leak that way. Add `state` the day a second user
   // exists.
+
+  // Counted before leaving, not after coming back: if the page never comes
+  // back the count is what says so.
+  sessionStorage.setItem(CHIAVE_GIRI, String(giriDiAccesso() + 1));
   location.assign(u.toString());
 }
 
@@ -222,7 +262,17 @@ export async function completaAccesso(url: URL = new URL(location.href)): Promis
   }
 
   const code = url.searchParams.get('code');
-  if (!code) return false;
+  if (!code) {
+    // Nothing came back from Cognito, so we are not in the middle of a
+    // sign-in: this is her opening the app, or pressing back from the login
+    // page. Whatever `giriDiAccesso` was counting belongs to a trip that is
+    // over, and leaving it standing would make the gate refuse a sign-in she
+    // has every right to be given. Zeroed here rather than in the gate so
+    // that the count keeps one meaning only: trips that came back with a code
+    // and produced nothing.
+    sessionStorage.removeItem(CHIAVE_GIRI);
+    return false;
+  }
   const verifier = sessionStorage.getItem(CHIAVE_VERIFIER);
   if (!verifier) return false;
 
@@ -262,6 +312,13 @@ export async function completaAccesso(url: URL = new URL(location.href)): Promis
   // wouldn't happen becomes real.
   if (j.refresh_token) localStorage.setItem(CHIAVE_REFRESH, j.refresh_token);
   sessionStorage.removeItem(CHIAVE_VERIFIER);
+  // The trip ended in a session, so it was not a loop. Cleared here and not
+  // in `sessioneConfermata()` on purpose: this counter asks "did signing in
+  // work", and it now demonstrably did. Waiting for a call to the API to come
+  // back would keep the mark alive across a first request that may legitimately
+  // 401 — tying two independent failures together, when the one that is about
+  // the service already has its own mark.
+  sessionStorage.removeItem(CHIAVE_GIRI);
   // Take the code out of the address bar: it is single-use, but it has no
   // business staying in history or in a shared link.
   history.replaceState({}, '', location.origin + '/');

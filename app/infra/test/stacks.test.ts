@@ -9,6 +9,7 @@ const CONFIG = {
   account: '495133941005',
   region: 'eu-south-1',
   domain: 'vanessa.matteo.cool',
+  loginDomain: 'auth.vanessa.matteo.cool',
   zoneDomain: 'matteo.cool',
   zoneId: 'Z2T8X72UH7FONU',
 };
@@ -21,6 +22,7 @@ beforeAll(() => {
   const sCert = new CertificateStack(a, 'Cert', {
     env: { account: CONFIG.account, region: 'us-east-1' },
     domain: CONFIG.domain,
+    loginDomain: CONFIG.loginDomain,
     zoneDomain: CONFIG.zoneDomain,
     zoneId: CONFIG.zoneId,
   });
@@ -43,6 +45,7 @@ describe('certificate', () => {
     const s = new CertificateStack(a, 'C', {
       env: { account: CONFIG.account, region: 'us-east-1' },
       domain: CONFIG.domain,
+      loginDomain: CONFIG.loginDomain,
       zoneDomain: CONFIG.zoneDomain,
       zoneId: CONFIG.zoneId,
     });
@@ -53,6 +56,31 @@ describe('certificate', () => {
     cert.hasResourceProperties('AWS::CertificateManager::Certificate', {
       DomainName: CONFIG.domain,
       ValidationMethod: 'DNS',
+    });
+  });
+
+  it('there is a second one, for the login domain, validated the same way', () => {
+    cert.hasResourceProperties('AWS::CertificateManager::Certificate', {
+      DomainName: CONFIG.loginDomain,
+      ValidationMethod: 'DNS',
+      DomainValidationOptions: [
+        { DomainName: CONFIG.loginDomain, HostedZoneId: CONFIG.zoneId },
+      ],
+    });
+  });
+
+  it('the two are separate certificates, and the app one carries no extra name', () => {
+    // Not one certificate with a subject alternative name. ACM cannot add a
+    // name to an issued certificate: changing the domain list issues a new
+    // one and CloudFormation replaces it — and that certificate is the one
+    // serving the live distribution. So: two, either of which can be
+    // reissued without touching the other.
+    expect(
+      Object.keys(cert.findResources('AWS::CertificateManager::Certificate')),
+    ).toHaveLength(2);
+    cert.hasResourceProperties('AWS::CertificateManager::Certificate', {
+      DomainName: CONFIG.domain,
+      SubjectAlternativeNames: Match.absent(),
     });
   });
 });

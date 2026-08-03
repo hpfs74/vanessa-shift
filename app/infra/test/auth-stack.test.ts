@@ -1,6 +1,6 @@
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { beforeAll, describe, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { AuthStack } from '../lib/auth-stack.js';
 
@@ -11,6 +11,9 @@ const CONFIG = {
   account: '495133941005',
   region: 'eu-south-1',
   domain: 'vanessa.matteo.cool',
+  loginDomain: 'auth.vanessa.matteo.cool',
+  zoneDomain: 'matteo.cool',
+  zoneId: 'Z2T8X72UH7FONU',
 };
 
 let auth: Template;
@@ -20,9 +23,21 @@ beforeAll(() => {
   const s = new AuthStack(a, 'Auth', {
     env: { account: CONFIG.account, region: CONFIG.region },
     domain: CONFIG.domain,
+    loginDomain: CONFIG.loginDomain,
+    loginCertificateArn: 'arn:aws:acm:us-east-1:495133941005:certificate/finto-accesso',
+    zoneDomain: CONFIG.zoneDomain,
+    zoneId: CONFIG.zoneId,
   });
   auth = Template.fromStack(s);
 });
+
+/** True when `rpId` is one the browser will accept for a page served from
+ *  `host`: WebAuthn allows the origin's own host, or any domain the host is
+ *  a subdomain of (a "registrable suffix"). "vanessa.matteo.cool" is not a
+ *  registrable suffix of "x.amazoncognito.com", which is the whole point. */
+function isRegistrableSuffix(rpId: string, host: string): boolean {
+  return host === rpId || host.endsWith(`.${rpId}`);
+}
 
 describe('user pool', () => {
   it('accepts a passkey as a way in, and demands the face rather than the unlock', () => {
@@ -144,5 +159,70 @@ describe('user pool', () => {
     auth.hasOutput('IdPool', {});
     auth.hasOutput('IdClient', {});
     auth.hasOutput('DominioLogin', {});
+  });
+});
+
+describe('login domain', () => {
+  it('the passkey works from the login page at all: the relying party id is a registrable suffix of it', () => {
+    // This is the assertion the whole custom domain exists for, and the one
+    // that would have caught the pool shipping with managed login on
+    // `turni-vanessa.auth.eu-south-1.amazoncognito.com`. WebAuthn accepts a
+    // relying party id only when it is the login origin's own host or a
+    // domain that host sits under; anything else the browser refuses
+    // outright, so the passkey is never offered and what is left is a login
+    // page with a password box — not the feature.
+    //
+    // Read from the synthesized template, not from the props: what gets
+    // deployed is what has to agree.
+    const [pool] = Object.values(auth.findResources('AWS::Cognito::UserPool'));
+    const [domain] = Object.values(auth.findResources('AWS::Cognito::UserPoolDomain'));
+    const rpId: string = pool.Properties.WebAuthnRelyingPartyID;
+    const host: string = domain.Properties.Domain;
+
+    expect(isRegistrableSuffix(rpId, host)).toBe(true);
+    // And the check itself is worth something: the domain this replaced
+    // fails it.
+    expect(isRegistrableSuffix(rpId, 'turni-vanessa.auth.eu-south-1.amazoncognito.com')).toBe(
+      false,
+    );
+  });
+
+  it('is a custom domain, not a Cognito prefix domain', () => {
+    // A prefix domain is spelt as a bare label with no `CustomDomainConfig`.
+    // `Match.absent()` on that config is what tells the two apart, since a
+    // partial match would pass on the domain name alone.
+    auth.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
+      Domain: CONFIG.loginDomain,
+      CustomDomainConfig: { CertificateArn: Match.anyValue() },
+    });
+  });
+
+  it('presents the certificate issued for that hostname', () => {
+    auth.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
+      CustomDomainConfig: {
+        CertificateArn: 'arn:aws:acm:us-east-1:495133941005:certificate/finto-accesso',
+      },
+    });
+  });
+
+  it('points DNS at the pool domain, which Cognito does not do for us', () => {
+    // Cognito serves a custom domain from a CloudFront distribution of its
+    // own and leaves the record to us: without it the hostname resolves to
+    // nothing and there is no login page to reach.
+    const records = Object.values(auth.findResources('AWS::Route53::RecordSet'));
+    expect(records).toHaveLength(1);
+    const [record] = records;
+    expect(record.Properties.Name).toBe(`${CONFIG.loginDomain}.`);
+    expect(record.Properties.Type).toBe('A');
+    expect(record.Properties.HostedZoneId).toBe(CONFIG.zoneId);
+    // An alias onto the pool domain's own CloudFront endpoint, not an
+    // address typed in by hand: that endpoint is not knowable before the
+    // deploy. CDK reads it back with a small custom resource, so the chain
+    // is record -> lookup -> domain, and all three links are asserted.
+    const [lookupId, attribute] = record.Properties.AliasTarget.DNSName['Fn::GetAtt'];
+    expect(attribute).toBe('DomainDescription.CloudFrontDistribution');
+    const lookup = auth.findResources('Custom::UserPoolCloudFrontDomainName')[lookupId];
+    const [domainLogicalId] = Object.keys(auth.findResources('AWS::Cognito::UserPoolDomain'));
+    expect(JSON.stringify(lookup.Properties.Create)).toContain(domainLogicalId);
   });
 });

@@ -33,21 +33,68 @@ pagina di Cognito, non qui. Un build rosso è il segnale giusto, non un guasto d
 mai stato distribuito, `VITE_CLIENT_ID` è vuoto di proposito — il pool non esiste ancora — e
 l'unica cosa giusta è la sequenza sotto.
 
+`VITE_LOGIN_DOMAIN` invece è già compilato e non va toccato: vale
+**`https://auth.vanessa.matteo.cool`**, cioè la pagina di accesso sul nostro dominio, non su
+`amazoncognito.com`. Il perché sta in **Autenticazione**, e non è una preferenza estetica: da
+un indirizzo Amazon la passkey non funziona affatto. La guardia controlla che sia un'origine
+`https://` con un host e senza percorso — non più che assomigli a un dominio Cognito, forma che
+rifiutava proprio il valore giusto.
+
 ### Primo deploy — e ogni volta che `VanessaAccesso` viene ricreato
 
-Ordine obbligato: **prima `VanessaAccesso`, poi il client id nel frontend, poi `VanessaApp`.**
-Il secondo stack legge gli output del primo, e il frontend deve conoscere il client id prima di
-poter compilare qualcosa che sappia entrare.
+Ordine obbligato: **prima `VanessaCertificato`, poi `VanessaAccesso`, poi il client id nel
+frontend, poi `VanessaApp`.** Il pool ha bisogno del certificato di `auth.vanessa.matteo.cool`,
+`VanessaApp` legge gli output del pool, e il frontend deve conoscere il client id prima di poter
+compilare qualcosa che sappia entrare.
 
-1. `cd infra && npx cdk deploy VanessaAccesso` — leggi dagli output `IdPool`, `IdClient`,
-   `DominioLogin`.
-2. Incolla `IdClient` in `web/.env.production` (`VITE_CLIENT_ID=...`), committa.
-3. `git push` su `main` — la pipeline (**Deploy automatico**, più sotto) distribuisce
+1. `cd infra && npx cdk deploy VanessaCertificato` — emette i due certificati e li valida da sé
+   via DNS, aggiungendo i record CNAME nella zona.
+2. `npx cdk deploy VanessaAccesso` — leggi dagli output `IdPool`, `IdClient`, `DominioLogin`.
+3. Incolla `IdClient` in `web/.env.production` (`VITE_CLIENT_ID=...`), committa.
+4. `git push` su `main` — la pipeline (**Deploy automatico**, più sotto) distribuisce
    `VanessaApp` e il frontend.
 
 Una volta che il client id è nel repository, i deploy successivi non hanno più questo problema
 d'ordine: `cd infra && npx cdk deploy --all --require-approval never` distribuisce i tre stack
 insieme, e `npm run deploy` builda con il valore già presente.
+
+#### Tre cose che il dominio di accesso pretende, e che nessun altro stack pretende
+
+Il dominio personalizzato del pool è la risorsa più capricciosa del progetto. Non c'è niente da
+fare a mano se le condizioni sono già soddisfatte — e oggi lo sono — ma se un deploy si pianta
+qui, è quasi certamente una di queste tre.
+
+- **`vanessa.matteo.cool` deve già avere un record A.** Cognito lo interroga prima di creare
+  `auth.vanessa.matteo.cool` e rifiuta se il dominio padre non risolve. Il record c'è: è
+  l'alias verso CloudFront che crea `VanessaApp`, e un alias A vale come record A a tutti gli
+  effetti — nel DNS risponde con degli indirizzi, che è tutto quello che il controllo guarda.
+  **Su un account vuoto, però, questo è un giro chiuso:** `VanessaApp` viene per ultimo perché
+  legge gli output del pool, ma è lui a creare il record che il pool pretende. Se un giorno si
+  riparte davvero da zero, il record A del dominio padre va creato a mano prima di
+  `VanessaAccesso`, e `VanessaApp` poi se lo riprende.
+- **La creazione richiede parecchio tempo.** Cognito tira su una distribuzione CloudFront tutta
+  sua: il deploy resta fermo su `AWS::Cognito::UserPoolDomain` per diversi minuti, e la pagina
+  può non rispondere subito nemmeno dopo che CloudFormation ha finito, il tempo che il DNS e la
+  distribuzione si propaghino. Non è un blocco: va aspettato.
+- **Sul pool può esserci una operazione sola alla volta.** Cognito rifiuta di creare o togliere
+  un dominio mentre un'altra modifica al pool è in corso. In pratica significa non lanciare due
+  deploy di `VanessaAccesso` in parallelo, e non lanciarne uno mentre si sta cambiando qualcosa
+  sul pool dalla console o dalla CLI. Se capita, l'errore parla di una operazione concorrente e
+  la cura è ritentare quando l'altra è finita.
+
+E una quarta, solo se `VanessaAccesso` fosse già stato distribuito **prima** di questa modifica,
+cioè con la pagina di accesso ancora su `turni-vanessa.auth.eu-south-1.amazoncognito.com`:
+cambiare il dominio è per CloudFormation una sostituzione, e la sostituzione crea il nuovo prima
+di togliere il vecchio — cioè prova a mettere due domini sullo stesso pool. Se il deploy fallisce
+così, si toglie prima il dominio vecchio a mano e si rilancia:
+
+```bash
+aws cognito-idp delete-user-pool-domain \
+  --region eu-south-1 \
+  --domain turni-vanessa \
+  --user-pool-id "$(aws cloudformation describe-stacks --stack-name VanessaAccesso \
+      --query "Stacks[0].Outputs[?OutputKey=='IdPool'].OutputValue" --output text)"
+```
 
 ## Viste
 
@@ -160,14 +207,20 @@ PROVA_BEDROCK=1 FOTO_LUGLIO=~/vanessa-foto/luglio.jpeg \
 
 ## Risorse AWS
 
-Account `495133941005`, regione `eu-south-1`. Il certificato sta in `us-east-1` perché
-CloudFront non ne accetta altrove: da qui i tre stack.
+Account `495133941005`, regione `eu-south-1`. I certificati stanno in `us-east-1` perché
+CloudFront non ne accetta altrove — e un dominio personalizzato di Cognito è CloudFront sotto,
+quindi vale anche per lui: da qui i tre stack.
 
 | Stack | Contenuto |
 |-------|-----------|
-| `VanessaCertificato` | certificato ACM (us-east-1) |
-| `VanessaAccesso` | user pool Cognito, app client, dominio di login |
+| `VanessaCertificato` | due certificati ACM (us-east-1): uno per `vanessa.matteo.cool`, uno per `auth.vanessa.matteo.cool` |
+| `VanessaAccesso` | user pool Cognito, app client, dominio di accesso `auth.vanessa.matteo.cool` e il suo record DNS |
 | `VanessaApp` | tabella, Lambda, API, bucket, distribuzione, record DNS |
+
+Sono **due** certificati, non uno con un nome aggiuntivo. ACM non sa aggiungere un nome a un
+certificato già emesso: cambiare l'elenco dei domini ne emette un altro e CloudFormation
+sostituisce quello vecchio — e quello vecchio è il certificato che serve la distribuzione in
+linea. Due costano zero e nessuno dei due può far cadere l'altro.
 
 Il frontend non conosce l'endpoint dell'API: CloudFront lo inoltra da `/api`, e la distribuzione
 lo legge dallo stack a ogni deploy. Se lo stack viene ricreato non c'è niente da aggiornare a mano.
@@ -208,6 +261,27 @@ sbloccato. Cognito, user pool `featurePlan: ESSENTIALS` (le passkey non esistono
 Lite), Managed Login come pagina di accesso. La sessione dura un giorno **di proposito** — un
 tocco di Face ID quando si apre l'app la mattina, non un rientro silenzioso che dura mesi se il
 telefono va perso.
+
+### La pagina di accesso sta su `auth.vanessa.matteo.cool`, e non è un dettaglio
+
+La passkey è legata a un dominio — il *relying party id*, qui `vanessa.matteo.cool` — e il
+browser la offre **solo** a una pagina servita da quel dominio o da un suo sottodominio.
+Qualunque altra origine viene rifiutata dal browser prima ancora di chiedere il volto.
+
+Il pool ha quindi un dominio suo, `auth.vanessa.matteo.cool`, con il suo certificato e il suo
+record DNS. Il dominio gratuito di Cognito — `turni-vanessa.auth.eu-south-1.amazoncognito.com`,
+che è quello che questo progetto usava all'inizio — non funzionerebbe: `vanessa.matteo.cool` non
+è un sottodominio di `amazoncognito.com`, il browser non offre nessuna passkey, e quello che
+resta è una pagina di accesso con la casella della password. Cioè non la funzionalità.
+
+L'altra strada — legare le passkey al dominio di Amazon — è stata scartata: le credenziali
+registrate su un dominio che non controlliamo andrebbero registrate di nuovo, **su ogni
+dispositivo**, il giorno in cui ci si sposta da lì.
+
+Le tre cose insieme (`passkeyRelyingPartyId` sul pool, il dominio di accesso, `VITE_LOGIN_DOMAIN`
+nel frontend) devono restare coerenti, e un test le controlla: `infra/test/auth-stack.test.ts`
+verifica che il relying party id sia un suffisso registrabile del dominio di accesso,
+`web/test/config.test.ts` che il valore committato punti sotto `vanessa.matteo.cool`.
 
 **Una password esiste comunque.** L'API di Cognito la dichiara obbligatoria — non si può
 togliere — anche se non è la strada normale per entrare. Il pavimento della sicurezza dell'app è

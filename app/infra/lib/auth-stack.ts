@@ -6,6 +6,7 @@
  */
 
 import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import {
   AccountRecovery,
   FeaturePlan,
@@ -15,10 +16,19 @@ import {
   UserPoolClient,
   UserPoolClientIdentityProvider,
 } from 'aws-cdk-lib/aws-cognito';
+import { ARecord, HostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
+import { UserPoolDomainTarget } from 'aws-cdk-lib/aws-route53-targets';
 import type { Construct } from 'constructs';
 
 export interface AuthStackProps extends StackProps {
   readonly domain: string;
+  /** Hostname of the managed login page. It has to sit *under* `domain`, or
+   *  the passkey does not work at all — see the domain comment below. */
+  readonly loginDomain: string;
+  /** us-east-1, like CloudFront's: a Cognito custom domain is CloudFront. */
+  readonly loginCertificateArn: string;
+  readonly zoneDomain: string;
+  readonly zoneId: string;
 }
 
 export class AuthStack extends Stack {
@@ -27,7 +37,9 @@ export class AuthStack extends Stack {
   readonly loginDomain: string;
 
   constructor(scope: Construct, id: string, props: AuthStackProps) {
-    super(scope, id, props);
+    // The login certificate comes from the us-east-1 stack; this one is in
+    // Milan.
+    super(scope, id, { ...props, crossRegionReferences: true });
 
     const pool = new UserPool(this, 'Utenti', {
       signInAliases: { email: true },
@@ -68,6 +80,16 @@ export class AuthStack extends Stack {
           passkey: true,
         },
       },
+      // The app's own domain, and it is not a free choice. WebAuthn requires
+      // the relying party id to be the login origin's own host or a
+      // registrable suffix of it, and refuses anything else outright: the
+      // browser never offers the passkey, leaving a page with a password box.
+      // This holds only because managed login is served from `loginDomain`,
+      // which sits under this. Hosting login on Cognito's own prefix domain
+      // would break it — and binding the passkeys to `amazoncognito.com`
+      // instead is not the way out, because credentials registered against a
+      // domain we do not control have to be registered again, on every
+      // device, the day we move off it.
       passkeyRelyingPartyId: props.domain,
       // `required` is the whole point. Without it a passkey is satisfied by a
       // phone that happens to be unlocked, which is not what was asked for.
@@ -97,8 +119,33 @@ export class AuthStack extends Stack {
       idTokenValidity: Duration.hours(1),
     });
 
+    // A domain of our own, not the `turni-vanessa.auth.<region>.amazoncognito.com`
+    // prefix this used to be. The prefix domain is free and needs no
+    // certificate, and it also makes the passkey impossible: see
+    // `passkeyRelyingPartyId` above.
     const login = pool.addDomain('DominioAccesso', {
-      cognitoDomain: { domainPrefix: 'turni-vanessa' },
+      customDomain: {
+        domainName: props.loginDomain,
+        certificate: Certificate.fromCertificateArn(
+          this,
+          'CertificatoAccesso',
+          props.loginCertificateArn,
+        ),
+      },
+    });
+
+    const zone = HostedZone.fromHostedZoneAttributes(this, 'Zona', {
+      hostedZoneId: props.zoneId,
+      zoneName: props.zoneDomain,
+    });
+
+    // Cognito serves a custom domain from a CloudFront distribution of its
+    // own and does not point DNS at it for us: without this record the
+    // hostname resolves to nothing and the login page is unreachable.
+    new ARecord(this, 'RecordAccesso', {
+      zone,
+      recordName: props.loginDomain,
+      target: RecordTarget.fromAlias(new UserPoolDomainTarget(login)),
     });
 
     this.userPoolId = pool.userPoolId;

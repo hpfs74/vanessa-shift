@@ -35,6 +35,10 @@ vanessa.matteo.cool  (CloudFront)
 ├── /*            → la SPA. Senza sessione valida va a Cognito e torna
 ├── /api/*        → API Gateway + authorizer JWT Cognito
 └── /foto/leggi   → Function URL: il JWT lo verifica la Lambda, in codice
+
+auth.vanessa.matteo.cool  (dominio personalizzato del pool)
+└── Managed Login. È il «va a Cognito» qui sopra, ed è anche il relying
+    party id della passkey — vedi sotto.
 ```
 
 Le due metà si difendono in modo diverso per una ragione tecnica, non per gusto: **un
@@ -50,7 +54,10 @@ sostituiscono a vicenda.
 - **User pool**, accesso via email, `featurePlan: ESSENTIALS`. Le passkey non esistono nel piano
   Lite: questo è il motivo del piano, non una preferenza.
 - **Primi fattori ammessi**: passkey, codice una-tantum via email, password.
-- `passkeyRelyingPartyId: vanessa.matteo.cool` — deve essere il dominio da cui si fa login.
+- `passkeyRelyingPartyId: auth.vanessa.matteo.cool` — **deve essere esattamente il dominio da cui
+  si fa login**, non il dominio della app. Il browser accetterebbe anche `vanessa.matteo.cool`,
+  visto che l'host di login gli sta sotto; Cognito no, e pretende il nome completo del dominio
+  personalizzato. Da qui il dominio di accesso tutto suo, sotto un nome che controlliamo.
 - `passkeyUserVerification: required` — è questo che obbliga il volto o l'impronta. Senza,
   basterebbe che il telefono fosse sbloccato.
 - **Managed Login** come pagina di accesso, app client pubblico, authorization code + PKCE.

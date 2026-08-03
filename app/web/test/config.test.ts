@@ -45,15 +45,19 @@ describe('VITE_LOGIN_DOMAIN', () => {
     );
   });
 
-  it('the login page is served from under the app domain, or the passkey is never offered', () => {
-    // WebAuthn ties the credential to `vanessa.matteo.cool` and the browser
-    // only hands it to a page that domain is a suffix of. This is the same
-    // fact `infra/test/auth-stack.test.ts` asserts on the pool; it is
-    // asserted again here because the frontend sends her to this URL, and
-    // the two could be changed independently.
+  it('sends her to the host the pool actually serves login from, which is also the relying party id', () => {
+    // `infra/lib/auth-stack.ts` gives the pool this exact hostname as its
+    // custom domain *and* as `passkeyRelyingPartyId` — Cognito requires the
+    // two to be the same string. The frontend is the third copy of that
+    // name, and the only one no CDK code can keep in step, so it is pinned
+    // here: point the browser somewhere else and she lands on a page that
+    // is not the pool's, or on none at all.
     const { host, protocol } = new URL(leggiEnv('.env.production').VITE_LOGIN_DOMAIN);
     expect(protocol).toBe('https:');
-    expect(host === 'vanessa.matteo.cool' || host.endsWith('.vanessa.matteo.cool')).toBe(true);
+    expect(host).toBe('auth.vanessa.matteo.cool');
+    // Under a domain we control, which is what stops the passkeys from
+    // being bound to a name we would one day have to abandon.
+    expect(host.endsWith('.vanessa.matteo.cool')).toBe(true);
   });
 
   it('still refuses the empty and the mistyped, which is what it is for', () => {

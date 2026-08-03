@@ -16,12 +16,13 @@ export const CONFIG = {
   domain: DOMAIN,
   zoneDomain: 'matteo.cool',
   zoneId: 'Z2T8X72UH7FONU',
-  // Managed login, on a hostname of ours. Written as a subdomain of `domain`
-  // rather than spelt out, because that relationship is the whole point: the
-  // passkey's relying party id is `domain`, and WebAuthn hands the credential
-  // only to an origin that `domain` is a registrable suffix of. A login page
-  // anywhere else — Cognito's own `*.amazoncognito.com` included — is a login
-  // page where the passkey is never offered.
+  // Managed login, on a hostname of ours. This is also the passkey's relying
+  // party id — Cognito requires the two to be the same string once the pool
+  // has a custom domain — so it is the name every credential gets bound to,
+  // and moving it later means re-enrolling every device. Written under
+  // `DOMAIN` because it must be a name we control: Cognito's own
+  // `*.amazoncognito.com` would satisfy Cognito and bind the passkeys to
+  // someone else's domain.
   loginDomain: `auth.${DOMAIN}`,
 } as const;
 

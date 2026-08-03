@@ -24,8 +24,8 @@ import type { Construct } from 'constructs';
 
 export interface AuthStackProps extends StackProps {
   readonly domain: string;
-  /** Hostname of the managed login page. It has to sit *under* `domain`, or
-   *  the passkey does not work at all — see the domain comment below. */
+  /** Hostname of the managed login page, and — not by coincidence — the
+   *  passkey relying party id. See `passkeyRelyingPartyId` below. */
   readonly loginDomain: string;
   /** us-east-1, like CloudFront's: a Cognito custom domain is CloudFront. */
   readonly loginCertificateArn: string;
@@ -82,17 +82,33 @@ export class AuthStack extends Stack {
           passkey: true,
         },
       },
-      // The app's own domain, and it is not a free choice. WebAuthn requires
-      // the relying party id to be the login origin's own host or a
-      // registrable suffix of it, and refuses anything else outright: the
-      // browser never offers the passkey, leaving a page with a password box.
-      // This holds only because managed login is served from `loginDomain`,
-      // which sits under this. Hosting login on Cognito's own prefix domain
-      // would break it — and binding the passkeys to `amazoncognito.com`
-      // instead is not the way out, because credentials registered against a
-      // domain we do not control have to be registered again, on every
-      // device, the day we move off it.
-      passkeyRelyingPartyId: props.domain,
+      // The login hostname itself, exactly — not the apex domain it sits
+      // under. Two rules bind this value and the narrower one is Cognito's,
+      // so it is the one to reason from:
+      //
+      //   "Under the following conditions, the passkey relying party ID must
+      //   be the fully-qualified domain name of your custom domain: the user
+      //   pool is configured for passkey authentication; the user pool has a
+      //   custom domain, whether or not it also has a prefix domain; your
+      //   application performs authentication with managed login or the
+      //   classic hosted UI."
+      //     — Cognito API reference, WebAuthnConfigurationType.RelyingPartyId
+      //
+      // All three hold here. WebAuthn on its own would also accept the apex
+      // `vanessa.matteo.cool`, since the login host sits under it — which is
+      // why the apex looks defensible and is not. Do not "simplify" this back
+      // to `props.domain`: the browser would be satisfied and Cognito would
+      // not, and nothing in a passing test run would say so.
+      //
+      // The domain still has to be one we control, which is the reason the
+      // pool has a custom domain at all. Cognito's own prefix domain would
+      // satisfy the rule above and bind every credential to a name we cannot
+      // keep.
+      //
+      // Changing this value invalidates every passkey already registered
+      // against the old one: each device has to enrol again. Free today —
+      // no user exists — and permanently expensive after the first sign-in.
+      passkeyRelyingPartyId: props.loginDomain,
       // `required` is the whole point. Without it a passkey is satisfied by a
       // phone that happens to be unlocked, which is not what was asked for.
       passkeyUserVerification: PasskeyUserVerification.REQUIRED,

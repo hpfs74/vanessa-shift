@@ -31,10 +31,13 @@ beforeAll(() => {
   auth = Template.fromStack(s);
 });
 
-/** True when `rpId` is one the browser will accept for a page served from
+/** True when `rpId` is one the *browser* will accept for a page served from
  *  `host`: WebAuthn allows the origin's own host, or any domain the host is
- *  a subdomain of (a "registrable suffix"). "vanessa.matteo.cool" is not a
- *  registrable suffix of "x.amazoncognito.com", which is the whole point. */
+ *  a subdomain of (a "registrable suffix").
+ *
+ *  This is the looser of the two rules in play. Cognito additionally demands
+ *  equality once the pool has a custom domain, so passing this is necessary
+ *  and not sufficient — see the relying party id test below. */
 function isRegistrableSuffix(rpId: string, host: string): boolean {
   return host === rpId || host.endsWith(`.${rpId}`);
 }
@@ -43,11 +46,14 @@ describe('user pool', () => {
   it('accepts a passkey as a way in, and demands the face rather than the unlock', () => {
     // `required` is the whole point: without it a passkey is satisfied by a
     // phone that happens to be unlocked, which is not what was asked for.
+    //
+    // The relying party id is deliberately not asserted here. It used to be,
+    // pinned to `CONFIG.domain`, and that made this test fail when the value
+    // was corrected to the login hostname — a test that only had an opinion
+    // because it was standing next to one. It has an owner now: see "the
+    // passkey works at all" below.
     auth.hasResourceProperties('AWS::Cognito::UserPool', {
       WebAuthnUserVerification: 'required',
-      // CloudFormation spells this with a capitalised trailing "ID", unlike
-      // the CDK prop name `passkeyRelyingPartyId` that sets it.
-      WebAuthnRelyingPartyID: CONFIG.domain,
     });
   });
 
@@ -163,28 +169,37 @@ describe('user pool', () => {
 });
 
 describe('login domain', () => {
-  it('the passkey works from the login page at all: the relying party id is a registrable suffix of it', () => {
-    // This is the assertion the whole custom domain exists for, and the one
-    // that would have caught the pool shipping with managed login on
-    // `turni-vanessa.auth.eu-south-1.amazoncognito.com`. WebAuthn accepts a
-    // relying party id only when it is the login origin's own host or a
-    // domain that host sits under; anything else the browser refuses
-    // outright, so the passkey is never offered and what is left is a login
-    // page with a password box — not the feature.
+  it('the passkey works at all: the relying party id is exactly the login domain', () => {
+    // The assertion the whole custom domain exists for, and the one that
+    // would have caught the pool shipping with managed login on
+    // `turni-vanessa.auth.eu-south-1.amazoncognito.com`.
+    //
+    // Equality, not the registrable-suffix rule this used to assert. Two
+    // rules bind the value and Cognito's is the narrower: with a custom
+    // domain and managed login it demands "the fully-qualified domain name
+    // of your custom domain". WebAuthn alone would also accept the apex
+    // `vanessa.matteo.cool`, so a suffix check passes on a value Cognito
+    // rejects — it tests the rule that is not in force.
     //
     // Read from the synthesized template, not from the props: what gets
-    // deployed is what has to agree.
+    // deployed is what has to agree. CloudFormation spells the property with
+    // a capitalised trailing "ID", unlike the CDK prop name
+    // `passkeyRelyingPartyId` that sets it.
     const [pool] = Object.values(auth.findResources('AWS::Cognito::UserPool'));
     const [domain] = Object.values(auth.findResources('AWS::Cognito::UserPoolDomain'));
     const rpId: string = pool.Properties.WebAuthnRelyingPartyID;
     const host: string = domain.Properties.Domain;
 
+    expect(rpId).toBe(host);
+
+    // Why the pool has a custom domain at all, kept on the record: on the
+    // prefix domain this replaced, the apex fails even the looser browser
+    // rule, so the passkey was never offered.
+    expect(
+      isRegistrableSuffix('vanessa.matteo.cool', 'turni-vanessa.auth.eu-south-1.amazoncognito.com'),
+    ).toBe(false);
+    // And the value we do ship satisfies that looser rule too, trivially.
     expect(isRegistrableSuffix(rpId, host)).toBe(true);
-    // And the check itself is worth something: the domain this replaced
-    // fails it.
-    expect(isRegistrableSuffix(rpId, 'turni-vanessa.auth.eu-south-1.amazoncognito.com')).toBe(
-      false,
-    );
   });
 
   it('is a custom domain, not a Cognito prefix domain', () => {

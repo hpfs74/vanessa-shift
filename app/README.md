@@ -35,8 +35,9 @@ l'unica cosa giusta è la sequenza sotto.
 
 `VITE_LOGIN_DOMAIN` invece è già compilato e non va toccato: vale
 **`https://auth.vanessa.matteo.cool`**, cioè la pagina di accesso sul nostro dominio, non su
-`amazoncognito.com`. Il perché sta in **Autenticazione**, e non è una preferenza estetica: da
-un indirizzo Amazon la passkey non funziona affatto. La guardia controlla che sia un'origine
+`amazoncognito.com`. Il perché sta in **Autenticazione**, e non è una preferenza estetica: questo
+host è anche l'identità a cui ogni passkey resta legata, e su un indirizzo Amazon sarebbero legate
+a un dominio che non controlliamo. La guardia controlla che sia un'origine
 `https://` con un host e senza percorso — non più che assomigli a un dominio Cognito, forma che
 rifiutava proprio il valore giusto.
 
@@ -268,24 +269,34 @@ telefono va perso.
 
 ### La pagina di accesso sta su `auth.vanessa.matteo.cool`, e non è un dettaglio
 
-La passkey è legata a un dominio — il *relying party id*, qui `vanessa.matteo.cool` — e il
-browser la offre **solo** a una pagina servita da quel dominio o da un suo sottodominio.
-Qualunque altra origine viene rifiutata dal browser prima ancora di chiedere il volto.
+La passkey è legata a un dominio — il *relying party id* — e qui quel dominio è
+**`auth.vanessa.matteo.cool`**, cioè esattamente la pagina di accesso. Non il dominio della app.
+Le regole in gioco sono due, e quella che comanda è la più stretta:
 
-Il pool ha quindi un dominio suo, `auth.vanessa.matteo.cool`, con il suo certificato e il suo
-record DNS. Il dominio gratuito di Cognito — `turni-vanessa.auth.eu-south-1.amazoncognito.com`,
-che è quello che questo progetto usava all'inizio — non funzionerebbe: `vanessa.matteo.cool` non
-è un sottodominio di `amazoncognito.com`, il browser non offre nessuna passkey, e quello che
-resta è una pagina di accesso con la casella della password. Cioè non la funzionalità.
+- **Il browser** accetta un relying party id che sia l'host della pagina di login o un dominio
+  di cui quell'host è sottodominio.
+- **Cognito** è più stretto: con un dominio personalizzato e Managed Login pretende che il
+  relying party id sia *il nome completo del dominio personalizzato*. Uguale, non «sotto».
 
-L'altra strada — legare le passkey al dominio di Amazon — è stata scartata: le credenziali
-registrate su un dominio che non controlliamo andrebbero registrate di nuovo, **su ogni
-dispositivo**, il giorno in cui ci si sposta da lì.
+`vanessa.matteo.cool` soddisfarebbe solo la prima, quindi non basta — ed è il motivo per cui
+questo valore non va «semplificato» al dominio della app: il browser sarebbe contento e Cognito
+no, e nessun test verde lo direbbe.
+
+Il pool ha quindi un dominio suo, con il suo certificato e il suo record DNS. Il dominio
+gratuito di Cognito — `turni-vanessa.auth.eu-south-1.amazoncognito.com`, quello che il progetto
+usava all'inizio — soddisferebbe la regola di Cognito ma legherebbe ogni credenziale a un nome
+che non controlliamo: le passkey andrebbero registrate di nuovo, **su ogni dispositivo**, il
+giorno in cui ci si sposta da lì. Per questo il dominio di accesso sta sotto
+`vanessa.matteo.cool`.
+
+**Cambiare il relying party id invalida tutte le passkey già registrate**, una per dispositivo.
+Oggi non costa niente perché nessun utente esiste ancora; dopo il primo accesso di Vanessa
+costa un giro di registrazioni su ogni telefono.
 
 Le tre cose insieme (`passkeyRelyingPartyId` sul pool, il dominio di accesso, `VITE_LOGIN_DOMAIN`
-nel frontend) devono restare coerenti, e un test le controlla: `infra/test/auth-stack.test.ts`
-verifica che il relying party id sia un suffisso registrabile del dominio di accesso,
-`web/test/config.test.ts` che il valore committato punti sotto `vanessa.matteo.cool`.
+nel frontend) sono lo **stesso nome scritto tre volte** e devono restare coerenti. Due test lo
+controllano: `infra/test/auth-stack.test.ts` verifica che il relying party id sia identico al
+dominio del pool, `web/test/config.test.ts` che il valore committato nel frontend sia quell'host.
 
 ### La pagina di accesso è Managed Login, e ha un aspetto diverso dall'Hosted UI
 

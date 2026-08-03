@@ -148,17 +148,14 @@ export function accessoInterrotto(): boolean {
 }
 
 /** Trips to `/oauth2/authorize` in this tab that have not yet ended in a
- *  session. Zero at rest, and the gate refuses to make another trip once it
- *  is not.
+ *  session. Zero at rest.
  *
- *  One is already enough to stop, and that is not as aggressive as it looks,
- *  because `completaAccesso` resets this to zero whenever the page is entered
- *  *without* a `code`. So a non-zero value cannot mean "she opened the app
- *  again" or "she pressed back from the login page" — those arrive with a
- *  bare URL and start from zero. It can only mean: we sent her to Cognito,
- *  Cognito sent her back with a code, and that code did not become a session.
- *  There is no second reading, so a second trip would buy nothing but another
- *  Face ID. */
+ *  It counts trips and not arrivals because `completaAccesso` puts it back to
+ *  zero on every way of getting here that is not "we sent her to Cognito and
+ *  the code that came back did not become a session": a bare URL, a refusal
+ *  from Cognito, an exchange that worked. So a non-zero value has one meaning
+ *  — a round trip that produced nothing — and the gate can count rounds
+ *  without having to ask how she arrived. */
 export function giriDiAccesso(): number {
   return Number(sessionStorage.getItem(CHIAVE_GIRI) ?? 0);
 }
@@ -256,6 +253,11 @@ export async function completaAccesso(url: URL = new URL(location.href)): Promis
     // go on the screen through `textContent`, never as HTML, and are cut
     // short so a long one cannot bury the sentence around it.
     const descrizione = url.searchParams.get('error_description') ?? '';
+    // The trip is over and its outcome is known: Cognito refused, and that has
+    // its own sentence. Leaving the count standing would give it a second
+    // meaning — "a refusal happened" as well as "a round trip produced
+    // nothing" — and the two ask for different messages.
+    sessionStorage.removeItem(CHIAVE_GIRI);
     throw new AccessoRifiutato(
       `L'accesso è stato rifiutato: ${(descrizione || errore).slice(0, 200)}`,
     );
@@ -273,8 +275,18 @@ export async function completaAccesso(url: URL = new URL(location.href)): Promis
     sessionStorage.removeItem(CHIAVE_GIRI);
     return false;
   }
+  // From here on every way out that is not a session is a failure the gate may
+  // end up describing to her as "the reason is in the console". That sentence
+  // is a promise, so each of these branches has to leave something there — the
+  // one that throws is logged by the gate's own catch, these two log for
+  // themselves.
   const verifier = sessionStorage.getItem(CHIAVE_VERIFIER);
-  if (!verifier) return false;
+  if (!verifier) {
+    // A code with no verifier to redeem it: the tab that started the sign-in
+    // is not the tab that came back, or `sessionStorage` was cleared under us.
+    console.error("scambio del codice impossibile: manca il verifier PKCE di questa scheda");
+    return false;
+  }
 
   const r = await fetch(`${POOL_DOMAIN}/oauth2/token`, {
     method: 'POST',
@@ -287,7 +299,23 @@ export async function completaAccesso(url: URL = new URL(location.href)): Promis
       code_verifier: verifier,
     }),
   });
-  if (!r.ok) return false;
+  if (!r.ok) {
+    // The likeliest branch of the three, and the one that used to say nothing.
+    // `application/x-www-form-urlencoded` is a safelisted content type, so
+    // this POST has no preflight: it reaches Cognito and is executed even when
+    // the browser then refuses to let us read the answer for want of a CORS
+    // header. The code is spent either way. So the first thing anyone does —
+    // reload, with `?code=` still in the address bar — comes back here, to a
+    // single-use code Cognito has already seen, and lands on `invalid_grant`.
+    // Without this line that second screen would carry the same sentence over
+    // an empty console, and the reader would conclude the sentence was lying.
+    console.error(
+      'scambio del codice rifiutato:',
+      r.status,
+      await r.text().catch(() => ''),
+    );
+    return false;
+  }
 
   const j = (await r.json()) as {
     id_token: string;

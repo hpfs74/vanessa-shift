@@ -157,8 +157,8 @@ niente.
 | Passkey rifiutata o annullata | Resta sulla pagina di Cognito, che lo dice da sé. |
 | Telefono nuovo | Codice via email, poi registra la passkey. |
 | Cognito rifiuta l'accesso (utente disabilitato, client non autorizzato) | Il motivo torna nella query string e il cancello lo mostra, invece di rimandare alla stessa pagina che l'ha appena rifiutato. |
-| Si entra, ma il servizio rifiuta le chiamate lo stesso | Dopo un rinnovo e una seconda 401, il cancello si ferma e lo dice: non è qualcosa che possa sistemare lei. Non un altro Face ID. |
-| L'accesso non si completa mai (lo scambio del codice fallisce) | Al secondo viaggio verso la pagina di accesso il cancello si ferma e dice che è un problema di configurazione. Il motivo è nella console del browser. |
+| Si entra, ma il servizio rifiuta le chiamate lo stesso | Un rinnovo silenzioso; se anche il giro dopo viene rifiutato, il cancello si ferma e lo dice: non è qualcosa che possa sistemare lei. Non un altro Face ID. Contano i giri, non le chiamate: due richieste rifiutate insieme sono un rifiuto solo. |
+| L'accesso non si completa mai (lo scambio del codice fallisce) | Un secondo tentativo, perché una connessione che cade sulla via del ritorno si cura da sé. Se anche quello non produce una sessione il cancello si ferma: dice di ricaricare, e che se il messaggio ricompare è un problema di configurazione. Il motivo è nella console del browser, su tutti e tre i modi in cui lo scambio può fallire. |
 
 Le ultime tre righe sono la ragione per cui questa tabella non è solo documentazione: **ognuna
 delle tre è un giro infinito senza una parola sullo schermo, se la riga non c'è.** Sono state

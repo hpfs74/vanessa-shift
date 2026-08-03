@@ -505,17 +505,22 @@ JSON, e lo stesso verso `/foto/leggi` con un corpo minuscolo → qualsiasi cosa 
 `https://vanessa.matteo.cool`: è cross-origin e vuole un `Access-Control-Allow-Origin` da
 Cognito. I client pubblici lo ricevono, ma la combinazione dominio personalizzato + Managed
 Login v2 non è qualcosa su cui `jsdom` con un `fetch` finto abbia un'opinione. Se fallisce: Face
-ID riesce, il browser torna con `?code=`, `fetch` viene rifiutato per CORS, il cancello tratta
-il caso come «nessun codice» — di proposito, perché una connessione che cade sulla via del
-ritorno è il caso ordinario. Il breaker non lo vede: quello conta i 401 di `api.ts`, e qui
-all'API non si arriva mai.
+ID riesce, il browser torna con `?code=`, e lo scambio del codice non produce una sessione. Il
+breaker non lo vede: quello conta i 401 di `api.ts`, e qui all'API non si arriva mai.
 
 **Quello che lei vede, se succede, è comunque una frase.** Il cancello conta i viaggi verso
-`/oauth2/authorize` e dal secondo si ferma: dice che l'accesso non si completa e che è un
-problema di configurazione, non qualcosa che ha sbagliato lei. Il motivo vero — quale
-intestazione CORS manchi — resta solo nella console del browser, ed è per questo che la frase
-manda lì. Quindi questa voce non è un guasto muto: è una cosa da verificare perché se è rotta
-l'app non si usa affatto, non perché sia difficile accorgersene.
+`/oauth2/authorize`: il primo che torna a mani vuote si ripete, perché una connessione caduta
+sulla via del ritorno è il caso ordinario e un secondo tentativo la cura da sé; se anche il
+secondo non produce una sessione, si ferma. Dice di ricaricare, e che se il messaggio ricompare
+è un problema di configurazione e non qualcosa che ha sbagliato lei. Ricaricare è una mossa
+vera: se il guasto era transitorio l'URL ha ancora `?code=` e il codice non era mai arrivato a
+Cognito, quindi il secondo scambio riesce. Se invece è il CORS, il codice è stato consumato lo
+stesso — il `POST` allo `/oauth2/token` non ha preflight, quindi parte e viene eseguito anche
+quando il browser poi nasconde la risposta — e la ricarica ricade su `invalid_grant`, con lo
+stesso messaggio e il motivo scritto in console. Ci finisce in console su tutti e tre i modi in
+cui lo scambio può fallire, non solo su quello. Quindi questa voce non è un guasto muto: è una
+cosa da verificare perché se è rotta l'app non si usa affatto, non perché sia difficile
+accorgersene.
 
 **4. Che `useCognitoProvidedValues: true` da solo basti** perché Managed Login serva qualcosa.
 La documentazione AWS indica `CreateManagedLoginBranding` come il requisito e questo flag come

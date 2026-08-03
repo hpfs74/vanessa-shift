@@ -135,6 +135,19 @@ describe('completaAccesso', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // The redirect count is documented as having one meaning — a round trip
+  // that produced nothing — and the gate is built on that. A refusal is a
+  // round trip that produced an answer, and it has its own sentence, so
+  // leaving the count standing would give it a second meaning and make the
+  // comments that assert the first one false.
+  it('clears the redirect count on a refusal too, which has its own message', async () => {
+    sessionStorage.setItem('giriAccesso', '2');
+
+    await completaAccesso(new URL('https://esempio.test/?error=access_denied')).catch(() => {});
+
+    expect(giriDiAccesso()).toBe(0);
+  });
+
   it('falls back to the error code when Cognito sends no description', async () => {
     const rifiuto = await completaAccesso(
       new URL('https://esempio.test/?error=invalid_scope'),

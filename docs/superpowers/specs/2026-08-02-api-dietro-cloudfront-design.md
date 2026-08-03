@@ -148,6 +148,11 @@ quegli stati: adesso ha motivo di emetterli. Il rifiuto dell'origine sarebbe sta
 strada che si percorre davvero, e un 403 da CloudFront può arrivare anche dall'origine foto se
 una firma non torna. Da qui due mosse:
 
+> **La seconda metà della frase sopra non vale.** Nessuna firma esiste: l'OAC è stato tolto e la
+> Function URL è rimasta su `NONE` (avviso in cima). Le due mosse restano giuste per il primo
+> motivo, che basta da solo — un 403 dall'origine dell'API su una strada percorsa davvero
+> tornerebbe al browser come `index.html` con un 200.
+
 - il rifiuto dell'origine risponde **401** e non 403. CloudFront il 401 non lo riscrive, quindi
   la collisione non si presenta; ed è anche lo stato più giusto dei due, perché alla richiesta
   mancava una credenziale, non le è stata negata una risorsa per cui era identificata;

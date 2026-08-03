@@ -390,42 +390,37 @@ aws cognito-idp admin-create-user \
   --user-attributes Name=email,Value=vanessa@esempio.it Name=email_verified,Value=true
 ```
 
-Tre cose sorprendono, se non si sa già:
+**Non arriva nessuna email, e non c'è nessuna password temporanea.** È la cosa che sorprende, e
+va letta prima di andare a cercare in posta: l'utente nasce **`CONFIRMED`**, non
+`FORCE_CHANGE_PASSWORD`. Il motivo è che il pool ha `EMAIL_OTP` fra i primi fattori — ce l'ha di
+proposito, perché una passkey non si registra su un account che non esiste ancora — e il comando
+sopra non passa `--temporary-password`. Cognito allora crea un account già usabile, **senza
+password**, e non ha niente da spedire.
 
-- **La password temporanea dura 24 ore.** Un utente creato che non completa la sfida sotto
-  entro un giorno ha la password morta, e va riemessa con lo stesso comando qui sopra più
-  `--message-action RESEND` in coda:
+Quindi non c'è la scadenza di 24 ore, non c'è `--message-action RESEND` da usare, e non c'è
+nessuna sfida `NEW_PASSWORD_REQUIRED` da completare al posto suo. Chi crea l'utente ha finito
+qui.
 
-  ```bash
-  aws cognito-idp admin-create-user \
-    --region eu-south-1 \
-    --user-pool-id "$(aws cloudformation describe-stacks --stack-name VanessaAccesso \
-        --query "Stacks[0].Outputs[?OutputKey=='IdPool'].OutputValue" --output text)" \
-    --username vanessa@esempio.it \
-    --user-attributes Name=email,Value=vanessa@esempio.it Name=email_verified,Value=true \
-    --message-action RESEND
-  ```
+Se invece si passa `--temporary-password`, si torna nel giro classico: email di invito, password
+valida un giorno (`UnusedAccountValidityDays: 1`), e la sfida `NEW_PASSWORD_REQUIRED` che
+pretende una password di almeno 32 caratteri con tutte e quattro le classi. Non serve, e per una
+persona sola è solo un passaggio in più da sbagliare.
 
-  Senza `RESEND`, Cognito rifiuta con `UsernameExistsException` perché l'utente esiste già.
-  `RESEND` manda una nuova email con una nuova password temporanea, esattamente come la prima
-  volta. `admin-set-user-password` è un'alternativa che funziona, ma **non manda nessuna
-  notifica**: la password nuova va comunicata a mano a chi deve completare la sfida sotto.
-- **Subito dopo la creazione (o la riemissione), la sfida `NEW_PASSWORD_REQUIRED` pretende una
-  password sostitutiva di almeno 32 caratteri, con tutte e quattro le classi.** Non c'è un
-  comando CLI per soddisfarla: si fa dalla pagina di Managed Login, con lo username e la
-  password temporanea appena arrivata via email — ed è **chi ha appena eseguito il comando** a
-  completarla lì per lì, non Vanessa. Il gestore di password va tenuto **aperto in quel
-  momento**, non riaperto dopo per salvarci qualcosa già scelto al volo. Non va confuso col
-  primo accesso di Vanessa, sotto: sono due passi separati, in due momenti diversi, di solito
-  fatti da due persone diverse.
-- **Il reset della password è solo da amministratore.** `accountRecovery` è `NONE`: non c'è un
-  "password dimenticata" nella pagina di login. Una password persa si recupera entrando col
-  codice via email, oppure la resetta chi ha le credenziali AWS dell'account
-  (`admin-set-user-password`).
+Due cose restano vere e vale la pena sapere:
 
-Poi, separatamente: il primo accesso di Vanessa dal telefono, col codice una-tantum via email —
-da lì si registra la passkey. Ogni dispositivo nuovo rifà lo stesso giro: codice via email, poi
-passkey su quel dispositivo.
+- **Una password non esiste finché qualcuno non la mette.** `PASSWORD` è fra i primi fattori
+  perché Cognito lo pretende, non perché sia la strada normale. Chi ne vuole una la imposta con
+  `admin-set-user-password --permanent`, che però **non manda nessuna notifica**: va comunicata a
+  mano. Il pool ne pretende almeno 32 caratteri con maiuscole, minuscole, numeri e simboli,
+  quindi va generata da un gestore di password e conservata lì, mai digitata a memoria.
+- **Il reset è solo da amministratore.** `accountRecovery` è `NONE`: non c'è nessun «password
+  dimenticata» nella pagina di accesso. Chi resta fuori rientra col codice via email, oppure
+  glielo risolve chi ha le credenziali AWS dell'account.
+
+Il primo accesso lo fa lei, dal telefono: apre l'app, scrive la sua email, chiede il **codice
+una-tantum via email** — quella sì che arriva, ed è il primo momento in cui Cognito scrive a
+qualcuno — e da lì registra la passkey. Ogni dispositivo nuovo rifà lo stesso giro: codice via
+email, poi passkey su quel dispositivo.
 
 ### Le due origini, e perché una sola delle due è protetta
 

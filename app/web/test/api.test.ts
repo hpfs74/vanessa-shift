@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../src/api.js';
-import { sessioneRifiutata } from '../src/auth.js';
 
 /** The message, whatever the failure was. */
 async function messageOf(promise: Promise<unknown>): Promise<string> {
@@ -170,15 +169,20 @@ describe('the 401 circuit breaker', () => {
   // must not be mistaken for a real, session-confirming answer. If it were,
   // two of them in a row would reset the breaker's marker between them, and
   // a genuine second 401 right after would still read as attempt one:
-  // reloading forever instead of ever reaching the login.
-  it('two HTML refusals in a row do not confirm the session; a second real 401 then reaches the login', async () => {
+  // reloading forever instead of ever tripping the breaker.
+  it('two HTML refusals in a row do not confirm the session; a real 401 after them still trips the breaker', async () => {
     vi.stubGlobal('location', { reload: vi.fn() });
     localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
     localStorage.setItem('refresh', 'un-refresh-token');
 
-    // A first 401 already happened elsewhere: the breaker has spent its one
-    // free retry, and the refresh token is kept for it.
-    sessioneRifiutata();
+    // A first 401 already happened in the cycle before this one: the breaker
+    // spent its one free retry there and kept the refresh token. It has to
+    // come from a *different* module instance, because `sessioneRifiutata`
+    // allows one reload per document — the page this test is standing in
+    // reloaded after that 401, and `api` below is the page that came back.
+    // Storage survives the reset, as it survives a reload.
+    vi.resetModules();
+    (await import('../src/auth.js')).sessioneRifiutata();
     expect(sessionStorage.getItem('riprovaSessione')).not.toBeNull();
     expect(localStorage.getItem('refresh')).toBe('un-refresh-token');
 
@@ -202,8 +206,10 @@ describe('the 401 circuit breaker', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
     await expect(api.paySettings()).rejects.toThrow();
 
-    // A genuine second consecutive failure: everything is gone now, which
-    // sends her to a fresh login instead of a third reload.
+    // The second cycle's refusal: everything is gone now, the refresh token
+    // included. What the breaker does from here — the mark that stops the
+    // gate — is `auth.test.ts`'s business; this test's job is that the two
+    // HTML refusals in the middle did not reset the count.
     expect(localStorage.getItem('refresh')).toBeNull();
     expect(sessionStorage.getItem('riprovaSessione')).toBeNull();
   });

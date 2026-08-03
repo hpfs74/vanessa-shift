@@ -182,28 +182,67 @@ describe('sessioneRifiutata', () => {
     return spy;
   };
 
-  it('on the first 401 keeps the refresh token and clears only the ID token', () => {
+  /** A cycle of the breaker is a page: the reload ends one and starts the
+   *  next. A fresh module instance is how that is spelt here, because the
+   *  guard that allows one reload per document lives in module scope on
+   *  purpose — it has to die with the page. `localStorage` and
+   *  `sessionStorage` are untouched by the reset, which is exactly what a
+   *  reload does to them, so the state that must carry over does. */
+  const nuovoGiro = () => {
+    vi.resetModules();
+    return import('../src/auth.js');
+  };
+
+  it('on the first 401 keeps the refresh token and clears only the ID token', async () => {
     const ricarica = reload();
     localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
     localStorage.setItem('refresh', 'un-refresh-token');
 
-    sessioneRifiutata();
+    (await nuovoGiro()).sessioneRifiutata();
 
     expect(localStorage.getItem('sessione')).toBeNull();
     expect(localStorage.getItem('refresh')).toBe('un-refresh-token');
     expect(ricarica).toHaveBeenCalledOnce();
   });
 
-  // The circuit breaker: a renewed token that *also* comes back 401 means
-  // the refresh token itself is no good, not just the ID token — so the
-  // second consecutive call clears everything instead of reloading forever.
-  it('on a second consecutive 401 clears everything, breaking the loop', () => {
+  // `location.reload()` queues a navigation and returns: the handlers of the
+  // requests already in flight keep running, and if the ID token died they
+  // all come back 401. She saved two days in a row on the calendar, each tap
+  // its own request — one refusal arriving twice, not two turns of the loop.
+  // Counted as two, this spent the whole breaker at once and left her with
+  // "chiudi la pagina e riprova più tardi" over an expired token that a
+  // silent renewal was about to fix, with the refresh token thrown away.
+  it('treats a second 401 arriving before the reload as the same refusal, not the next one', async () => {
     const ricarica = reload();
     localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
     localStorage.setItem('refresh', 'un-refresh-token');
 
-    sessioneRifiutata();
-    sessioneRifiutata();
+    const { sessioneRifiutata: rifiuta, accessoInterrotto: interrotto } = await nuovoGiro();
+    rifiuta();
+    rifiuta();
+    rifiuta();
+
+    // The refresh token is what the next page renews with: it has to still be
+    // there, and the breaker must not have latched.
+    expect(localStorage.getItem('refresh')).toBe('un-refresh-token');
+    expect(interrotto()).toBe(false);
+    // And one navigation, not three.
+    expect(ricarica).toHaveBeenCalledOnce();
+  });
+
+  // The circuit breaker: a renewed token that *also* comes back 401 means
+  // the refresh token itself is no good, not just the ID token — so the
+  // second cycle clears everything instead of reloading forever.
+  it('on a 401 in the next cycle clears everything, breaking the loop', async () => {
+    const ricarica = reload();
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
+    localStorage.setItem('refresh', 'un-refresh-token');
+
+    (await nuovoGiro()).sessioneRifiutata();
+    // The page reloaded, the gate renewed, and the renewed token is refused
+    // too.
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'rinnovato', scade: 9e12 }));
+    (await nuovoGiro()).sessioneRifiutata();
 
     expect(localStorage.getItem('sessione')).toBeNull();
     expect(localStorage.getItem('refresh')).toBeNull();
@@ -216,43 +255,49 @@ describe('sessioneRifiutata', () => {
   // that followed reset the counter, the next call 401'd for the reason that
   // was never about the token, and she was asked for Face ID every few
   // seconds with nothing on the screen.
-  it('leaves a mark that esci() does not clear, so the fresh login does not start the loop again', () => {
+  it('leaves a mark that esci() does not clear, so the fresh login does not start the loop again', async () => {
     reload();
     localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
     localStorage.setItem('refresh', 'un-refresh-token');
 
-    sessioneRifiutata();
-    // Not after the first one: the ordinary case is a renewal that works, and
-    // stopping here would take that away.
+    (await nuovoGiro()).sessioneRifiutata();
+    // Not after the first cycle: the ordinary case is a renewal that works,
+    // and stopping here would take that away.
     expect(accessoInterrotto()).toBe(false);
 
-    sessioneRifiutata();
+    (await nuovoGiro()).sessioneRifiutata();
     expect(accessoInterrotto()).toBe(true);
 
-    // And it survives the logout the second call itself performed, plus any
+    // And it survives the logout the second cycle itself performed, plus any
     // later one.
     esci();
     expect(accessoInterrotto()).toBe(true);
   });
 
-  it('a call that finally works clears that mark too, or the app stays stuck for the whole tab', () => {
+  // A unit-level guarantee, not a way out for her: once the mark is on, the
+  // gate throws before `App` is mounted, so no call goes out and nothing can
+  // confirm anything. The way out is closing the tab, which is what the
+  // message says. This exists so the mark cannot outlive a session that is
+  // demonstrably working — the one window being the race between `setItem`
+  // and the navigation.
+  it('is cleared by a call that succeeds, so the mark cannot outlive a working session', async () => {
     reload();
-    sessioneRifiutata();
-    sessioneRifiutata();
+    (await nuovoGiro()).sessioneRifiutata();
+    (await nuovoGiro()).sessioneRifiutata();
     expect(accessoInterrotto()).toBe(true);
 
     sessioneConfermata();
     expect(accessoInterrotto()).toBe(false);
   });
 
-  it('a confirmed session resets the breaker, so the next 401 is treated as a first one again', () => {
+  it('a confirmed session resets the breaker, so the next 401 is treated as a first one again', async () => {
     const ricarica = reload();
     localStorage.setItem('refresh', 'un-refresh-token');
 
-    sessioneRifiutata(); // first 401: marker set, refresh token kept
+    (await nuovoGiro()).sessioneRifiutata(); // first 401: marker set, refresh token kept
     sessioneConfermata(); // a call succeeded in between: marker cleared
     localStorage.setItem('sessione', JSON.stringify({ idToken: 'nuovo', scade: 9e12 }));
-    sessioneRifiutata(); // an unrelated, later 401: treated as first again
+    (await nuovoGiro()).sessioneRifiutata(); // an unrelated, later 401: treated as first again
 
     expect(localStorage.getItem('sessione')).toBeNull();
     expect(localStorage.getItem('refresh')).toBe('un-refresh-token');

@@ -70,13 +70,17 @@ describe('when the sign-in works and the calls are refused anyway', () => {
   // for as long as she keeps looking at it, and never a word on the screen.
   it('stops instead of asking for Face ID again, and says so', async () => {
     const assign = finestraSu('https://vanessa.test/');
+
+    // Two 401s in two cycles, each with its own page: `sessioneRifiutata`
+    // allows one per document on purpose, so two calls in a row are one
+    // refusal arriving twice and do not fire the breaker. A fresh module
+    // instance is a fresh page; storage carries over, as a reload leaves it.
+    for (const _ of [1, 2]) {
+      vi.resetModules();
+      (await import('../src/auth.js')).sessioneRifiutata();
+    }
+
     const avvia = await caricaAvvio();
-    const { sessioneRifiutata } = await import('../src/auth.js');
-
-    // Two consecutive 401s: the breaker has fired and thrown everything away.
-    sessioneRifiutata();
-    sessioneRifiutata();
-
     await avvia(radice);
 
     expect(assign).not.toHaveBeenCalled();

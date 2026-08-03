@@ -20,6 +20,24 @@ const CHIAVE_RIPROVATO = 'riprovaSessione';
  *  so closing the tab is enough to start over. */
 const CHIAVE_INTERROTTO = 'accessoInterrotto';
 
+/** One turn of the breaker per document, because one cycle *is* one document.
+ *
+ *  `location.reload()` queues a navigation, it does not stop anything: the
+ *  script keeps running and so do the handlers of every request already in
+ *  flight. Two of them coming back 401 within that window are one refusal
+ *  arriving twice, not two turns of the loop — she tapped two days in a row
+ *  on the calendar and each tap is its own `saveShift`. Counted as two, an
+ *  expired ID token spent the whole breaker at once: `esci()` threw away the
+ *  refresh token that would have renewed silently, `CHIAVE_INTERROTTO` went
+ *  on, and the gate told her it was not something she could fix — the wrong
+ *  sentence, on precisely the failure the session design promises to hide.
+ *
+ *  A module variable and not a stored one, deliberately: it has to die with
+ *  the page, so that the reload it queued starts the next cycle with a clean
+ *  one. What must survive the reload is in `sessionStorage`, where it already
+ *  was. */
+let ricaricaAccodata = false;
+
 /** Config baked in at build time: none of it is secret. */
 const POOL_DOMAIN = import.meta.env.VITE_LOGIN_DOMAIN ?? '';
 const CLIENT_ID = import.meta.env.VITE_CLIENT_ID ?? '';
@@ -73,8 +91,16 @@ export function esci(): void {
  *  a real login — unless the 401 was never about the session at all, in which
  *  case that login succeeds and the call after it is refused just the same.
  *  `CHIAVE_INTERROTTO` is what tells the gate to stop there and say something
- *  instead of going round again. */
+ *  instead of going round again.
+ *
+ *  "Again" means after the reload, never within it: see `ricaricaAccodata`. */
 export function sessioneRifiutata(): void {
+  // Every later 401 in this document belongs to the refusal already being
+  // handled: the reload is queued, the answers still landing were sent with
+  // the same dead token.
+  if (ricaricaAccodata) return;
+  ricaricaAccodata = true;
+
   if (sessionStorage.getItem(CHIAVE_RIPROVATO)) {
     esci();
     // After `esci()`, which clears the retry marker but not this one. The

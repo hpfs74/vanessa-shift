@@ -58,6 +58,10 @@ Una volta che il client id è nel repository, i deploy successivi non hanno più
 d'ordine: `cd infra && npx cdk deploy --all --require-approval never` distribuisce i tre stack
 insieme, e `npm run deploy` builda con il valore già presente.
 
+Alla fine di questa sequenza ci sono l'infrastruttura e una pagina di accesso, ma **nessun
+utente**: non c'è registrazione, e l'account si crea a mano. Il passo successivo è
+**[Creare l'utente](#creare-lutente)**, più sotto.
+
 #### Tre cose che il dominio di accesso pretende, e che nessun altro stack pretende
 
 Il dominio personalizzato del pool è la risorsa più capricciosa del progetto. Non c'è niente da
@@ -283,6 +287,22 @@ nel frontend) devono restare coerenti, e un test le controlla: `infra/test/auth-
 verifica che il relying party id sia un suffisso registrabile del dominio di accesso,
 `web/test/config.test.ts` che il valore committato punti sotto `vanessa.matteo.cool`.
 
+### La pagina di accesso è Managed Login, e ha un aspetto diverso dall'Hosted UI
+
+Il dominio è configurato su `ManagedLoginVersion` 2. **Non è una scelta estetica:** la
+documentazione AWS dice che «passkey sign-in isn't available in the classic hosted UI», e la
+versione classica è quella che Cognito userebbe di default. Con quella, il dominio giusto
+servirebbe comunque una pagina che la passkey non la offre mai.
+
+La conseguenza visibile è che la pagina di accesso **non è quella vecchia di Cognito**: Managed
+Login ha un impaginato diverso, più moderno, con il tema chiaro/scuro. Se sembra una pagina mai
+vista, è quella giusta.
+
+Insieme al dominio c'è una **risorsa di branding** (`AWS::Cognito::ManagedLoginBranding`) con i
+valori predefiniti di Cognito. Serve perché Managed Login non serve niente a un app client che
+non ne ha uno, e Cognito lo crea da sé solo per i client creati dalla console — il nostro lo crea
+CloudFormation. Non c'è niente da personalizzare lì: è un prerequisito, non una decorazione.
+
 **Una password esiste comunque.** L'API di Cognito la dichiara obbligatoria — non si può
 togliere — anche se non è la strada normale per entrare. Il pavimento della sicurezza dell'app è
 la sua forza, non il volto: lo stack impone almeno 32 caratteri con tutte e quattro le classi
@@ -303,6 +323,9 @@ rientrare da un telefono nuovo o perso — spiegata per esteso in
 `docs/superpowers/specs/2026-08-02-autenticazione-passkey-design.md`.
 
 ### Creare l'utente
+
+Il passo che segue **[Primo deploy](#primo-deploy--e-ogni-volta-che-vanessaaccesso-viene-ricreato)**:
+lì finisce l'infrastruttura, qui comincia l'unico account che esiste.
 
 Non c'è registrazione: l'utente si crea a mano, con l'AWS CLI.
 

@@ -205,6 +205,38 @@ describe('login domain', () => {
     });
   });
 
+  it('runs managed login, not the classic hosted UI, or the passkey is not offered', () => {
+    // Not a styling choice. AWS: "passkey sign-in isn't available in the
+    // classic hosted UI", and the choice-based factors are "only available to
+    // user pools with managed login domains". The CDK default is the classic
+    // hosted UI (version 1), so leaving this off is the same defect as the
+    // wrong domain: a login page that never offers the passkey.
+    auth.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
+      ManagedLoginVersion: 2,
+    });
+  });
+
+  it('has a branding style, without which managed login serves nothing at all', () => {
+    // Cognito attaches a default style only to app clients created in the
+    // console. This one is created by CloudFormation, which calls
+    // `CreateUserPoolClient`: "managed login isn't available for an app client
+    // created with an AWS SDK until you create one with a
+    // CreateManagedLoginBranding request". So the style is a prerequisite for
+    // the page existing, not a decoration on it.
+    const styles = Object.values(auth.findResources('AWS::Cognito::ManagedLoginBranding'));
+    expect(styles).toHaveLength(1);
+    const [style] = styles;
+    expect(style.Properties.UseCognitoProvidedValues).toBe(true);
+    // Cognito's own values, so `Settings` and `Assets` must be absent — the
+    // API rejects the combination.
+    expect(style.Properties.Settings).toBeUndefined();
+    expect(style.Properties.Assets).toBeUndefined();
+    // Tied to our client, not to some other one: a style bound elsewhere
+    // leaves this client exactly as unserved as no style at all.
+    const [clientLogicalId] = Object.keys(auth.findResources('AWS::Cognito::UserPoolClient'));
+    expect(style.Properties.ClientId).toEqual({ Ref: clientLogicalId });
+  });
+
   it('points DNS at the pool domain, which Cognito does not do for us', () => {
     // Cognito serves a custom domain from a CloudFront distribution of its
     // own and leaves the record to us: without it the hostname resolves to

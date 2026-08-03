@@ -639,9 +639,14 @@ describe('readPhoto', () => {
   });
 
   it('checks the token before the body size, not after', async () => {
-    // The 429 and 413 tests each prove the token check runs before one other
-    // step; this one pins it against the step right after it, requireImage:
-    // an oversized body from a caller with no token is still a 401, not a 413.
+    // The test right above proves the token check runs before the quota
+    // step: no token, and `consumePhotoQuota` is never called. This one pins
+    // it against `requireImage`, the step in between — an oversized body from
+    // a caller with no token is a 401, not the 413 `requireImage` would give.
+    //
+    // The 429 and 413 tests prove nothing about this ordering, though they
+    // sit nearby and look as if they might: both pass a verifier that lets
+    // every caller through, so neither one ever exercises the token check.
     const { repo, calls } = fakeRepo();
     const h = readPhotoWith(
       repo,

@@ -9,7 +9,9 @@ import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import {
   AccountRecovery,
+  CfnManagedLoginBranding,
   FeaturePlan,
+  ManagedLoginVersion,
   OAuthScope,
   PasskeyUserVerification,
   UserPool,
@@ -132,6 +134,30 @@ export class AuthStack extends Stack {
           props.loginCertificateArn,
         ),
       },
+      // Load-bearing, not a look. The default is the classic hosted UI, and
+      // AWS is explicit that "passkey sign-in isn't available in the classic
+      // hosted UI" — the choice-based factors are "only available to user
+      // pools with managed login domains". Left at the default, the custom
+      // domain above buys a correctly-scoped relying party id and a login
+      // page that still never offers the passkey.
+      managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN,
+    });
+
+    // Managed login refuses to serve a client that has no branding style, and
+    // one is not created for us: Cognito attaches a default style only to app
+    // clients made in the console. Ours is made by CloudFormation, which calls
+    // `CreateUserPoolClient` — and per AWS, "managed login isn't available for
+    // an app client created with an AWS SDK until you create one with a
+    // CreateManagedLoginBranding request". So this resource is what makes the
+    // login page exist at all, not what makes it pretty.
+    //
+    // `useCognitoProvidedValues` takes Cognito's own defaults, and requires
+    // that `settings` and `assets` be omitted — there is nothing to design
+    // here, only a style that has to be present.
+    new CfnManagedLoginBranding(this, 'StileAccesso', {
+      userPoolId: pool.userPoolId,
+      clientId: client.userPoolClientId,
+      useCognitoProvidedValues: true,
     });
 
     const zone = HostedZone.fromHostedZoneAttributes(this, 'Zona', {

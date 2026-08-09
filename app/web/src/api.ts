@@ -1,6 +1,6 @@
 /** The only place that talks to the network. */
 
-import type { PhotoReading, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import type { PhotoReading, IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
 
 import { sessioneConfermata, sessioneRifiutata, sessioneValida } from './auth.js';
 
@@ -98,13 +98,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await r.json()) as T;
 }
 
+/** Everything `GET /config` answers. One call: the three pieces are read
+ *  together on the API side too. */
+export interface ConfigSnapshot {
+  pay: PaySettings;
+  profile: Profile;
+  quota: { used: number };
+}
+
 export interface Api {
   shifts(from: IsoDate, to: IsoDate): Promise<RemoteShift[]>;
   saveShift(shift: RemoteShift): Promise<void>;
   deleteShift(date: IsoDate): Promise<void>;
   saveShifts(shifts: readonly { date: IsoDate; code: ShiftCode }[]): Promise<void>;
+  config(): Promise<ConfigSnapshot>;
   paySettings(): Promise<PaySettings>;
   savePaySettings(p: PaySettings): Promise<void>;
+  saveProfile(p: Profile): Promise<void>;
   readPhoto(image: string): Promise<PhotoReading>;
 }
 
@@ -138,12 +148,25 @@ export const api: Api = {
   async saveShifts(shifts) {
     await request('/shifts', { method: 'PUT', body: JSON.stringify({ shifts }) });
   },
+  async config() {
+    return await request<ConfigSnapshot>('/config');
+  },
   async paySettings() {
-    const r = await request<{ pay: PaySettings }>('/config');
-    return r.pay;
+    // Not `this.config()`: the methods are handed around detached in places,
+    // and a `this` that turns out undefined fails far from here.
+    return (await request<ConfigSnapshot>('/config')).pay;
   },
   async savePaySettings(p) {
-    await request('/config', { method: 'PUT', body: JSON.stringify(p) });
+    // Both shapes at once. The updated handler sees `pay` and uses the
+    // envelope; one not yet updated reads the same fields off the top level.
+    // A deploy replaces the bundle and the Lambda as independent resources,
+    // so for a moment the new bundle can be talking to the old handler — and
+    // `requirePaySettings` would read every absent field as null and write a
+    // row of nulls over her rates.
+    await request('/config', { method: 'PUT', body: JSON.stringify({ ...p, pay: p }) });
+  },
+  async saveProfile(p) {
+    await request('/config', { method: 'PUT', body: JSON.stringify({ profile: p }) });
   },
   async readPhoto(image) {
     const body = JSON.stringify({ image });

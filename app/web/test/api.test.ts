@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
 import { api } from '../src/api.js';
 
 /** The message, whatever the failure was. */
@@ -128,6 +129,66 @@ describe('the API calls', () => {
     const message = await messageOf(api.paySettings());
     expect(message).not.toMatch(/token|JSON/);
     expect(message).toMatch(/a mano/);
+  });
+});
+
+describe('config', () => {
+  it('reads pay, profile and quota in one call', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response({ pay: EMPTY_PAY_SETTINGS, profile: EMPTY_PROFILE, quota: { used: 2 } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const snapshot = await api.config();
+
+    expect(snapshot.quota.used).toBe(2);
+    expect(snapshot.profile).toEqual(EMPTY_PROFILE);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/config');
+  });
+
+  it('keeps paySettings working off the same response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        response({ pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 9.8 }, profile: EMPTY_PROFILE, quota: { used: 0 } }),
+      ),
+    );
+
+    expect((await api.paySettings()).hourlyRate).toBe(9.8);
+  });
+});
+
+describe('saveProfile', () => {
+  it('sends the profile inside its own envelope', async () => {
+    // The envelope is what tells the API to write one row and leave the
+    // other alone.
+    const fetchMock = vi.fn().mockResolvedValue(response({ profile: EMPTY_PROFILE }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.saveProfile({ ...EMPTY_PROFILE, firstName: 'Vanessa' });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(String(init.body))).toEqual({
+      profile: { ...EMPTY_PROFILE, firstName: 'Vanessa' },
+    });
+  });
+});
+
+describe('savePaySettings', () => {
+  it('sends the pay settings inside their envelope, and also at the top level', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ pay: EMPTY_PAY_SETTINGS }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.savePaySettings({ ...EMPTY_PAY_SETTINGS, hourlyRate: 10 });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    const sent = JSON.parse(String(init.body));
+    // The envelope: what the updated handler reads.
+    expect(sent).toMatchObject({ pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 10 } });
+    // The same fields, also at the top level: what a not-yet-updated handler
+    // reads, during the window where the bundle and the Lambda deploy apart.
+    expect(sent.hourlyRate).toBe(10);
   });
 });
 

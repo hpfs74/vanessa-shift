@@ -1,8 +1,8 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IsoDate, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, romeToday } from '@vanessa/core';
 
 import {
   getConfigWith,
@@ -18,6 +18,7 @@ function fakeRepo() {
   const shifts = new Map<string, ShiftRecord>();
   const quota = new Map<string, number>();
   let pay = EMPTY_PAY_SETTINGS;
+  let profile = EMPTY_PROFILE;
   const calls: string[] = [];
 
   const repo: Repo = {
@@ -47,6 +48,14 @@ function fakeRepo() {
       calls.push('savePaySettings');
       pay = p;
     },
+    async readProfile() {
+      calls.push('readProfile');
+      return profile;
+    },
+    async saveProfile(p) {
+      calls.push('saveProfile');
+      profile = p;
+    },
     async consumePhotoQuota(date, max) {
       calls.push(`consumePhotoQuota(${date},${max})`);
       const used = (quota.get(date) ?? 0) + 1;
@@ -54,8 +63,12 @@ function fakeRepo() {
       quota.set(date, used);
       return true;
     },
+    async readPhotoQuota(date) {
+      calls.push(`readPhotoQuota(${date})`);
+      return quota.get(date) ?? 0;
+    },
   };
-  return { repo, shifts, quota, calls, pay: () => pay };
+  return { repo, shifts, quota, calls, pay: () => pay, profile: () => profile };
 }
 
 function event(p: Partial<APIGatewayProxyEventV2>): APIGatewayProxyEventV2 {
@@ -340,11 +353,47 @@ describe('PUT /shifts (bulk)', () => {
 });
 
 describe('GET /config', () => {
+  // Fake timers only apply to the one test below; a leaked clock would
+  // affect `romeToday()` in every other test in this file.
+  afterEach(() => vi.useRealTimers());
+
   it('on an empty table returns empty settings, not an error', async () => {
     const r: any = await getConfigWith(f.repo)();
     expect(r.statusCode).toBe(200);
     expect(body(r).pay.hourlyRate).toBeNull();
     expect(body(r).pay.thirteenthAccrual).toBeCloseTo(1 / 12, 10);
+  });
+
+  it('carries pay, profile and the quota spent today', async () => {
+    f.quota.set(romeToday(), 3);
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r)).toEqual({
+      pay: EMPTY_PAY_SETTINGS,
+      profile: EMPTY_PROFILE,
+      quota: { used: 3 },
+    });
+  });
+
+  it('does not send the daily maximum', async () => {
+    // MAX_READINGS_PER_DAY lives in `core`, which `web` imports. Sending it
+    // too would be the same number in two places, and eventually two values.
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).quota).toEqual({ used: 0 });
+  });
+
+  // Regression: both sides of the test above used to call the same
+  // `romeToday()`, so seeding the quota under `romeToday()` and reading it
+  // back under `romeToday()` would pass identically even if the handler
+  // were reverted to the Lambda's own UTC clock, `today()` — except during
+  // the 1-2h window after midnight Rome time where the two dates disagree.
+  // This pins the clock inside that window and seeds the quota under Rome's
+  // date, which `today()` (UTC-based on the Lambda) would not find.
+  it("reads the quota under Rome's day, not the Lambda's UTC one", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-09T23:30:00Z')); // Rome is already the 10th
+    f.quota.set('2026-08-10', 3);
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).quota.used).toBe(3);
   });
 });
 
@@ -395,6 +444,85 @@ describe('PUT /config', () => {
       event({ body: JSON.stringify({ hourlyRate: 'ten' }) }),
     );
     expect(r.statusCode).toBe(400);
+  });
+
+  it('saves a profile without touching the pay settings', async () => {
+    // This proves routing: a body naming only `profile` reaches
+    // `saveProfile` and leaves `savePaySettings` uncalled. It runs against
+    // `fakeRepo`, where `pay` and `profile` are separate bindings that
+    // cannot be conflated — it would pass even if `createRepo` wrote both
+    // to the same row. The guarantee that the two land on separate rows is
+    // proved by 'writes the profile beside the pay settings, not over them'
+    // in repo.test.ts; do not delete that test as redundant with this one.
+    await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 9.8 } }) }),
+    );
+    await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ profile: { firstName: 'Vanessa' } }) }),
+    );
+
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).pay.hourlyRate).toBe(9.8);
+    expect(body(r).profile.firstName).toBe('Vanessa');
+  });
+
+  it('saves both when both are sent', async () => {
+    await putConfigWith(f.repo)(
+      event({
+        body: JSON.stringify({
+          pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 10 },
+          profile: { lastName: 'Rossi' },
+        }),
+      }),
+    );
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).pay.hourlyRate).toBe(10);
+    expect(body(r).profile.lastName).toBe('Rossi');
+  });
+
+  it('still accepts a bare PaySettings body', async () => {
+    // The shape this route received before the profile existed. A phone with
+    // a cached bundle keeps sending it after a deploy, and this is a failure
+    // that would never show up in development.
+    await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ ...EMPTY_PAY_SETTINGS, hourlyRate: 8.5 }) }),
+    );
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).pay.hourlyRate).toBe(8.5);
+    expect(f.profile()).toEqual(EMPTY_PROFILE);
+  });
+
+  it('refuses a profile that is not an object', async () => {
+    const r: any = await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ profile: 'Vanessa' }) }),
+    );
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('refuses an unknown contract kind', async () => {
+    const r: any = await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ profile: { contractKind: 'stagionale' } }) }),
+    );
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('rejects the whole write when one half is invalid, leaving the valid half unwritten', async () => {
+    await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 7 } }) }),
+    );
+
+    const r: any = await putConfigWith(f.repo)(
+      event({
+        body: JSON.stringify({
+          pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 11 },
+          profile: { contractKind: 'stagionale' },
+        }),
+      }),
+    );
+
+    expect(r.statusCode).toBe(400);
+    // The 400 says nothing was accepted: the pay row must still read 7, not 11.
+    expect(f.pay().hourlyRate).toBe(7);
   });
 });
 

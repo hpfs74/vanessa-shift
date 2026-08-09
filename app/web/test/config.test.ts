@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { CLIENT_ID_SHAPE, LOGIN_DOMAIN_SHAPE } from '../env-shapes.js';
+import { CLIENT_ID_SHAPE, LOGIN_DOMAIN_SHAPE, versioneDelBuild } from '../env-shapes.js';
 
 function leggiEnv(file: string): Record<string, string> {
   // `import.meta.dirname`, not `new URL(file, import.meta.url)`: vite rewrites
@@ -97,5 +97,27 @@ describe('VITE_CLIENT_ID', () => {
     expect(CLIENT_ID_SHAPE.test('4f7g2h9k1m3n5p8q0r2s4t6u8v')).toBe(true);
     expect(CLIENT_ID_SHAPE.test('4F7G2H9K1M3N5P8Q0R2S4T6U8V')).toBe(false);
     expect(CLIENT_ID_SHAPE.test('4f7g2h9k1m3n5p8q0r2s4t6u8')).toBe(false);
+  });
+});
+
+describe('versioneDelBuild', () => {
+  it('takes the short commit from the pipeline', () => {
+    expect(versioneDelBuild({ GITHUB_SHA: 'abcdef1234567890' })).toBe('abcdef1');
+  });
+
+  it('falls back to dev when there is no commit', () => {
+    // A local build has no GITHUB_SHA, and `dev` is the honest answer.
+    expect(versioneDelBuild({})).toBe('dev');
+    expect(versioneDelBuild({ GITHUB_SHA: '' })).toBe('dev');
+  });
+});
+
+describe('__APP_VERSION__', () => {
+  it('is a non-empty string in the bundle', () => {
+    // Shape only, never the value: GITHUB_SHA is set inside GitHub Actions,
+    // where this same suite runs, so asserting 'dev' here would pass on a
+    // laptop and fail the deploy.
+    expect(typeof __APP_VERSION__).toBe('string');
+    expect(__APP_VERSION__.length).toBeGreaterThan(0);
   });
 });

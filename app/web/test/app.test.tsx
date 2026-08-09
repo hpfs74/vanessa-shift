@@ -2,8 +2,8 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DayEntry, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS } from '@vanessa/core';
+import type { DayEntry, IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
 
 import { App } from '../src/App.js';
 import { weekHours, weeksOfMonth } from '../src/Calendar.js';
@@ -15,6 +15,7 @@ function fakeApi(initial: RemoteShift[] = [], settings: PaySettings = EMPTY_PAY_
   const deleted: IsoDate[] = [];
   const bulk: { date: IsoDate; code: ShiftCode }[][] = [];
   let current = settings;
+  let currentProfile: Profile = EMPTY_PROFILE;
   const api: Api = {
     shifts: async () => [...shifts.values()],
     saveShift: async (s) => {
@@ -29,9 +30,13 @@ function fakeApi(initial: RemoteShift[] = [], settings: PaySettings = EMPTY_PAY_
       bulk.push([...entries]);
       for (const e of entries) shifts.set(e.date, { date: e.date, code: e.code });
     },
+    config: async () => ({ pay: current, profile: currentProfile, quota: { used: 0 } }),
     paySettings: async () => current,
     savePaySettings: async (p) => {
       current = p;
+    },
+    saveProfile: async (p) => {
+      currentProfile = p;
     },
     readPhoto: async () => {
       throw new Error('not used in these tests');
@@ -542,8 +547,10 @@ describe('while the data is still loading', () => {
       saveShift: never,
       deleteShift: never,
       saveShifts: never,
+      config: never,
       paySettings: never,
       savePaySettings: never,
+      saveProfile: never,
       readPhoto: never,
     };
   }
@@ -664,5 +671,47 @@ describe('pay view', () => {
 
     await user.clear(screen.getByLabelText(/Tariffa oraria/));
     await waitFor(() => expect(settings().hourlyRate).toBeNull());
+  });
+});
+
+describe('profilo', () => {
+  it('opens from the header and goes back', async () => {
+    // The bottom bar stays at five: on 375px a sixth tab drops each one to
+    // 62px, and the labels do not fit. The profile is opened twice a year.
+    const user = userEvent.setup();
+    render(<App api={fakeApi().api} today={JAN} />);
+    await user.click(await screen.findByRole('button', { name: 'Profilo' }));
+    expect(await screen.findByRole('heading', { name: 'Profilo' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    expect(screen.queryByRole('heading', { name: 'Profilo' })).not.toBeInTheDocument();
+  });
+
+  it('leaves the bottom bar at five sections', async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi().api} today={JAN} />);
+    await user.click(await screen.findByRole('button', { name: 'Profilo' }));
+    const bar = screen.getByRole('navigation', { name: 'Sezioni' });
+    expect(bar.querySelectorAll('button')).toHaveLength(5);
+  });
+
+  it('tapping a tab while the profile is open closes it and switches the view', async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi().api} today={JAN} />);
+    await user.click(await screen.findByRole('button', { name: 'Profilo' }));
+    expect(await screen.findByRole('heading', { name: 'Profilo' })).toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole('navigation', { name: 'Sezioni' })).getByRole('button', {
+        name: /Riepilogo/,
+      }),
+    );
+
+    expect(screen.queryByRole('heading', { name: 'Profilo' })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('navigation', { name: 'Sezioni' })).getByRole('button', {
+        name: /Riepilogo/,
+      }),
+    ).toHaveAttribute('aria-current', 'true');
   });
 });

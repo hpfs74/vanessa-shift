@@ -45,7 +45,13 @@ input, select, textarea, button { font: inherit; font-size: 16px; }
   padding-bottom: calc(4.6rem + env(safe-area-inset-bottom));
 }
 
-header { padding-top: env(safe-area-inset-top); }
+header {
+  padding-top: env(safe-area-inset-top);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.profilo-apri { min-width: 44px; min-height: 44px; }
 h1 { font-size: 1.2rem; margin: 0 0 0.5rem; color: var(--navy); }
 h2 { font-size: 1.05rem; margin: 1rem 0 0.5rem; color: var(--navy); }
 h3 {
@@ -286,6 +292,27 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
 .photo-cell.t-L { background: var(--L); }
 /* The model wasn't sure: it's shown, not blocked. */
 .photo-cell.unsure .code { text-decoration: underline dashed; text-underline-offset: 2px; }
+
+/* --- profilo --- */
+.profilo-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.profilo dl > div,
+.profilo dl {
+  margin: 0 0 1rem;
+}
+
+.profilo dt {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.profilo dd {
+  margin: 0 0 0.5rem;
+}
 
 @media (min-width: 30rem) {
   .app { padding: 1rem; padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }

@@ -111,6 +111,7 @@ aws cognito-idp delete-user-pool-domain \
 | **Scambi** | saldo favori e saldo ore per collega, come il foglio Scambi. |
 | **Riepilogo** | due grafici ad anello (ore per turno, giorni per codice), ore per mese a barre, tabella per codice. |
 | **Stipendio** | parametri e simulazione mensile. |
+| **Profilo** | dall'icona in alto a destra, non dalla barra in basso: account, dati personali, contratto, i parametri di paga in sola lettura, versione e letture della foto di oggi. |
 
 ## Ore effettive
 
@@ -125,6 +126,25 @@ settimana, totali del mese, riepilogo, simulazione stipendio e differenza ore de
 
 **Su questo l'app si discosta dal foglio Excel**, che deriva sempre le ore dalla sigla e non
 ha un campo per l'eccezione: sugli stessi dati i due possono dare totali diversi.
+
+## Il corpo di `/config`
+
+`PUT /api/config` accetta `{ pay }`, `{ profile }`, o tutti e due, e scrive **solo le chiavi
+che riceve**. I due finiscono su righe diverse della tabella (`sk = PAY` e `sk = PROFILE`), ed
+è questo che permette a una rotta sola di servirli entrambi: salvare il profilo non può
+azzerare la tariffa oraria, perché non tocca quella riga.
+
+Un corpo **senza** nessuna delle due chiavi si legge come un `PaySettings` nudo — la forma che
+questa rotta riceveva prima che il profilo esistesse. Non è compatibilità per gusto: la app è un
+bundle in cache su un telefono, e dopo un deploy può continuare a mandare la forma vecchia per
+un po'. Toglierlo produce un errore che in sviluppo non si vedrebbe mai.
+
+`GET /api/config` restituisce `{ pay, profile, quota: { used } }`. Il massimo giornaliero non
+viaggia: `MAX_READINGS_PER_DAY` sta in `core`, che il frontend importa già.
+
+Le **ore settimanali da contratto** si mostrano e basta: nessun conteggio le legge. Collegarle
+alle ore lavorate vuol dire decidere cosa fare di mesi iniziati a metà, festivi, malattia e
+ferie — e di queste ultime il modello dati non sa niente. È una spec sua.
 
 ## Colori dei grafici
 

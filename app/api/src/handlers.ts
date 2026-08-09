@@ -9,7 +9,7 @@ import {
   romeToday,
   validateReading,
 } from '@vanessa/core';
-import type { IsoDate } from '@vanessa/core';
+import type { IsoDate, PaySettings, Profile } from '@vanessa/core';
 
 import type { Repo } from './repo.js';
 import { createRepo } from './repo.js';
@@ -24,7 +24,9 @@ import {
   requireFromCloudFront,
   requireHoursOverride,
   requireImage,
+  requireObject,
   requirePaySettings,
+  requireProfile,
   requireRange,
   requireShiftCode,
   requireShiftList,
@@ -94,17 +96,59 @@ export function getConfigWith(repo: Repo) {
   return (event?: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
     handle(async () => {
       requireFromCloudFront(event?.headers);
-      return ok({ pay: await repo.readPaySettings() });
+      // Three independent reads: one round trip, not three.
+      // The quota row is keyed by Rome's day, because that is the day
+      // `readPhotoWith` consumes it under — the reader has to use the same
+      // clock as the writer, or the two disagree for an hour or two after
+      // midnight while the Lambda's own clock (UTC) is still on yesterday.
+      const [pay, profile, used] = await Promise.all([
+        repo.readPaySettings(),
+        repo.readProfile(),
+        repo.readPhotoQuota(romeToday()),
+      ]);
+      // The daily maximum is not here on purpose: `MAX_READINGS_PER_DAY`
+      // lives in `core`, which the frontend imports.
+      return ok({ pay, profile, quota: { used } });
     });
 }
 
+/** Writes only what it was given, and the two halves land on separate rows.
+ *
+ *  A body carrying neither key is the bare `PaySettings` this route took
+ *  before the profile existed. It keeps working because the app is a cached
+ *  bundle on a phone: after a deploy it may well send the old shape for a
+ *  while, and that is a failure nobody would see in development. */
 export function putConfigWith(repo: Repo) {
   return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
     handle(async () => {
       requireFromCloudFront(event.headers);
-      const pay = requirePaySettings(parseJson(event.body));
-      await repo.savePaySettings(pay);
-      return ok({ pay });
+      const body = parseJson(event.body);
+      const hasPay = 'pay' in body;
+      const hasProfile = 'profile' in body;
+
+      if (!hasPay && !hasProfile) {
+        const pay = requirePaySettings(body);
+        await repo.savePaySettings(pay);
+        return ok({ pay });
+      }
+
+      // Both halves are validated before either is written: a 400 has to mean
+      // nothing was accepted, and a partial write (valid pay, invalid
+      // profile) would leave the pay row changed under a response that says
+      // otherwise.
+      const pay = hasPay ? requirePaySettings(requireObject(body.pay, 'pay')) : undefined;
+      const profile = hasProfile ? requireProfile(requireObject(body.profile, 'profile')) : undefined;
+
+      const written: { pay?: PaySettings; profile?: Profile } = {};
+      if (pay) {
+        await repo.savePaySettings(pay);
+        written.pay = pay;
+      }
+      if (profile) {
+        await repo.saveProfile(profile);
+        written.profile = profile;
+      }
+      return ok(written);
     });
 }
 

@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IsoDate, ShiftCode } from '@vanessa/core';
 import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, romeToday } from '@vanessa/core';
@@ -353,11 +353,47 @@ describe('PUT /shifts (bulk)', () => {
 });
 
 describe('GET /config', () => {
+  // Fake timers only apply to the one test below; a leaked clock would
+  // affect `romeToday()` in every other test in this file.
+  afterEach(() => vi.useRealTimers());
+
   it('on an empty table returns empty settings, not an error', async () => {
     const r: any = await getConfigWith(f.repo)();
     expect(r.statusCode).toBe(200);
     expect(body(r).pay.hourlyRate).toBeNull();
     expect(body(r).pay.thirteenthAccrual).toBeCloseTo(1 / 12, 10);
+  });
+
+  it('carries pay, profile and the quota spent today', async () => {
+    f.quota.set(romeToday(), 3);
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r)).toEqual({
+      pay: EMPTY_PAY_SETTINGS,
+      profile: EMPTY_PROFILE,
+      quota: { used: 3 },
+    });
+  });
+
+  it('does not send the daily maximum', async () => {
+    // MAX_READINGS_PER_DAY lives in `core`, which `web` imports. Sending it
+    // too would be the same number in two places, and eventually two values.
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).quota).toEqual({ used: 0 });
+  });
+
+  // Regression: both sides of the test above used to call the same
+  // `romeToday()`, so seeding the quota under `romeToday()` and reading it
+  // back under `romeToday()` would pass identically even if the handler
+  // were reverted to the Lambda's own UTC clock, `today()` — except during
+  // the 1-2h window after midnight Rome time where the two dates disagree.
+  // This pins the clock inside that window and seeds the quota under Rome's
+  // date, which `today()` (UTC-based on the Lambda) would not find.
+  it("reads the quota under Rome's day, not the Lambda's UTC one", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-09T23:30:00Z')); // Rome is already the 10th
+    f.quota.set('2026-08-10', 3);
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).quota.used).toBe(3);
   });
 });
 
@@ -409,28 +445,7 @@ describe('PUT /config', () => {
     );
     expect(r.statusCode).toBe(400);
   });
-});
 
-describe('GET /config', () => {
-  it('carries pay, profile and the quota spent today', async () => {
-    f.quota.set(romeToday(), 3);
-    const r: any = await getConfigWith(f.repo)(event({}));
-    expect(body(r)).toEqual({
-      pay: EMPTY_PAY_SETTINGS,
-      profile: EMPTY_PROFILE,
-      quota: { used: 3 },
-    });
-  });
-
-  it('does not send the daily maximum', async () => {
-    // MAX_READINGS_PER_DAY lives in `core`, which `web` imports. Sending it
-    // too would be the same number in two places, and eventually two values.
-    const r: any = await getConfigWith(f.repo)(event({}));
-    expect(body(r).quota).toEqual({ used: 0 });
-  });
-});
-
-describe('PUT /config', () => {
   it('saves a profile without touching the pay settings', async () => {
     // The whole reason one route may serve both. `savePaySettings` does a
     // whole-item Put: if the two shared a row, saving a surname would have

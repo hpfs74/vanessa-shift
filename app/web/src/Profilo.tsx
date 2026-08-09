@@ -16,7 +16,7 @@ import { CONTRACT_KINDS, EMPTY_PROFILE, MAX_READINGS_PER_DAY } from '@vanessa/co
 
 import type { Api, ConfigSnapshot } from './api.js';
 import { claimsOf } from './claims.js';
-import { sessioneValida } from './auth.js';
+import { sessioneValida, urlRegistrazionePasskey } from './auth.js';
 import { PAY_FIELDS } from './payFields.js';
 
 export interface ProfiloProps {
@@ -45,6 +45,23 @@ export function Profilo({ api, onClose }: ProfiloProps) {
   const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Senza configurazione di accesso il link non si puo' costruire: si nasconde
+  // invece di mostrarne uno rotto. E' lo stesso stato in cui l'app non
+  // entrerebbe affatto, quindi in pratica non si vede mai.
+  let linkPasskey: string | null = null;
+  try {
+    linkPasskey = urlRegistrazionePasskey();
+  } catch {
+    linkPasskey = null;
+  }
+
+  // Cognito rimanda qui con `?result=invalid_session` quando la pagina delle
+  // passkey non accetta la sessione — succede se il cookie e' scaduto fra
+  // l'apertura dell'app e il tocco sul link. Senza questa riga il ritorno e'
+  // muto e sembra che il link non abbia fatto niente.
+  const sessioneRifiutataDaCognito =
+    new URLSearchParams(location.search).get('result') === 'invalid_session';
 
   useEffect(() => {
     let alive = true;
@@ -93,6 +110,13 @@ export function Profilo({ api, onClose }: ProfiloProps) {
         </p>
       )}
 
+      {sessioneRifiutataDaCognito && (
+        <p className="error" role="alert">
+          La sessione non è stata accettata: il Face ID non è stato aggiunto. Riprova dal link
+          qui sotto.
+        </p>
+      )}
+
       <h3>Account</h3>
       <dl>
         <dt>Email</dt>
@@ -107,6 +131,17 @@ export function Profilo({ api, onClose }: ProfiloProps) {
             : '–'}
         </dd>
       </dl>
+
+      {/* Un link e non un pulsante: porta fuori dall'app, sulla pagina di
+          Cognito, e il tasto indietro deve funzionare come su un link. */}
+      {linkPasskey && (
+        <p className="note">
+          <a href={linkPasskey}>Aggiungi Face ID su questo telefono</a>
+          <br />
+          Va rifatto su ogni telefono: la passkey resta su quello dove è stata creata. Finché
+          non c'è, si entra sempre col codice via email.
+        </p>
+      )}
 
       <h3>Dati personali</h3>
       <div className="settings">

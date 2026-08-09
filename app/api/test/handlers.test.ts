@@ -447,9 +447,13 @@ describe('PUT /config', () => {
   });
 
   it('saves a profile without touching the pay settings', async () => {
-    // The whole reason one route may serve both. `savePaySettings` does a
-    // whole-item Put: if the two shared a row, saving a surname would have
-    // to rewrite the hourly rate, and one dropped field would zero it.
+    // This proves routing: a body naming only `profile` reaches
+    // `saveProfile` and leaves `savePaySettings` uncalled. It runs against
+    // `fakeRepo`, where `pay` and `profile` are separate bindings that
+    // cannot be conflated — it would pass even if `createRepo` wrote both
+    // to the same row. The guarantee that the two land on separate rows is
+    // proved by 'writes the profile beside the pay settings, not over them'
+    // in repo.test.ts; do not delete that test as redundant with this one.
     await putConfigWith(f.repo)(
       event({ body: JSON.stringify({ pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 9.8 } }) }),
     );

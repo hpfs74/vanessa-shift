@@ -7,7 +7,6 @@ import {
   MAX_READINGS_PER_DAY,
   RowNotFound,
   romeToday,
-  today,
   validateReading,
 } from '@vanessa/core';
 import type { IsoDate, PaySettings, Profile } from '@vanessa/core';
@@ -98,10 +97,14 @@ export function getConfigWith(repo: Repo) {
     handle(async () => {
       requireFromCloudFront(event?.headers);
       // Three independent reads: one round trip, not three.
+      // The quota row is keyed by Rome's day, because that is the day
+      // `readPhotoWith` consumes it under — the reader has to use the same
+      // clock as the writer, or the two disagree for an hour or two after
+      // midnight while the Lambda's own clock (UTC) is still on yesterday.
       const [pay, profile, used] = await Promise.all([
         repo.readPaySettings(),
         repo.readProfile(),
-        repo.readPhotoQuota(today()),
+        repo.readPhotoQuota(romeToday()),
       ]);
       // The daily maximum is not here on purpose: `MAX_READINGS_PER_DAY`
       // lives in `core`, which the frontend imports.

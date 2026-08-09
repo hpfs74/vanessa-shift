@@ -2,7 +2,7 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { IsoDate, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, today } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, romeToday } from '@vanessa/core';
 
 import {
   getConfigWith,
@@ -413,7 +413,7 @@ describe('PUT /config', () => {
 
 describe('GET /config', () => {
   it('carries pay, profile and the quota spent today', async () => {
-    f.quota.set(today(), 3);
+    f.quota.set(romeToday(), 3);
     const r: any = await getConfigWith(f.repo)(event({}));
     expect(body(r)).toEqual({
       pay: EMPTY_PAY_SETTINGS,

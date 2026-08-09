@@ -24,9 +24,9 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -46,7 +46,7 @@ jobs:
 
       # Il generatore Python non viene distribuito, ma vive nello stesso
       # repository: se lo si rompe, si deve sapere qui e non fra sei mesi.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -70,9 +70,9 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -94,7 +94,7 @@ jobs:
       # l'accesso. Rende pero' inutile un jolly scritto sui nomi, che non
       # combacerebbe mai.
       - name: Ottieni credenziali temporanee da AWS
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::495133941005:role/vanessa-shift-deploy
           aws-region: eu-south-1

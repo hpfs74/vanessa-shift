@@ -6,6 +6,8 @@
 import type { DayEntry, IsoDate, PaySettings } from '@vanessa/core';
 import { MONTH_NAMES, monthHours, monthPay, sumPay } from '@vanessa/core';
 
+import { PAY_FIELDS } from './payFields.js';
+
 export interface PayProps {
   year: number;
   shifts: ReadonlyMap<IsoDate, DayEntry>;
@@ -17,15 +19,6 @@ const euro = (v: number | null): string =>
   v == null
     ? '–'
     : new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(v);
-
-const FIELDS: { key: keyof PaySettings; label: string; isPercentage: boolean }[] = [
-  { key: 'hourlyRate', label: 'Tariffa oraria lorda (€)', isPercentage: false },
-  { key: 'saturdayPremium', label: 'Maggiorazione sabato (%)', isPercentage: true },
-  { key: 'sundayPremium', label: 'Maggiorazione domenica (%)', isPercentage: true },
-  { key: 'holidayPremium', label: 'Maggiorazione festivo (%)', isPercentage: true },
-  { key: 'thirteenthAccrual', label: 'Rateo 13a (%)', isPercentage: true },
-  { key: 'netRatio', label: 'Coefficiente netto/lordo (%)', isPercentage: true },
-];
 
 export function Pay({ year, shifts, settings, onChange }: PayProps) {
   const months = MONTH_NAMES.map((_, i) => {
@@ -55,7 +48,7 @@ export function Pay({ year, shifts, settings, onChange }: PayProps) {
       </p>
 
       <div className="settings">
-        {FIELDS.map(({ key, label, isPercentage }) => (
+        {PAY_FIELDS.map(({ key, label, isPercentage }) => (
           <label key={key}>
             <span>{label}</span>
             <input

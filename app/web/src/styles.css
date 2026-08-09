@@ -287,6 +287,27 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
 /* The model wasn't sure: it's shown, not blocked. */
 .photo-cell.unsure .code { text-decoration: underline dashed; text-underline-offset: 2px; }
 
+/* --- profilo --- */
+.profilo-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.profilo dl > div,
+.profilo dl {
+  margin: 0 0 1rem;
+}
+
+.profilo dt {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.profilo dd {
+  margin: 0 0 0.5rem;
+}
+
 @media (min-width: 30rem) {
   .app { padding: 1rem; padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
   h1 { font-size: 1.35rem; }

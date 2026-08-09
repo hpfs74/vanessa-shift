@@ -2,7 +2,7 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { IsoDate, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, today } from '@vanessa/core';
 
 import {
   getConfigWith,
@@ -68,7 +68,7 @@ function fakeRepo() {
       return quota.get(date) ?? 0;
     },
   };
-  return { repo, shifts, quota, calls, pay: () => pay };
+  return { repo, shifts, quota, calls, pay: () => pay, profile: () => profile };
 }
 
 function event(p: Partial<APIGatewayProxyEventV2>): APIGatewayProxyEventV2 {
@@ -406,6 +406,83 @@ describe('PUT /config', () => {
   it('rejects non-numeric values', async () => {
     const r: any = await putConfigWith(f.repo)(
       event({ body: JSON.stringify({ hourlyRate: 'ten' }) }),
+    );
+    expect(r.statusCode).toBe(400);
+  });
+});
+
+describe('GET /config', () => {
+  it('carries pay, profile and the quota spent today', async () => {
+    f.quota.set(today(), 3);
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r)).toEqual({
+      pay: EMPTY_PAY_SETTINGS,
+      profile: EMPTY_PROFILE,
+      quota: { used: 3 },
+    });
+  });
+
+  it('does not send the daily maximum', async () => {
+    // MAX_READINGS_PER_DAY lives in `core`, which `web` imports. Sending it
+    // too would be the same number in two places, and eventually two values.
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).quota).toEqual({ used: 0 });
+  });
+});
+
+describe('PUT /config', () => {
+  it('saves a profile without touching the pay settings', async () => {
+    // The whole reason one route may serve both. `savePaySettings` does a
+    // whole-item Put: if the two shared a row, saving a surname would have
+    // to rewrite the hourly rate, and one dropped field would zero it.
+    await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 9.8 } }) }),
+    );
+    await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ profile: { firstName: 'Vanessa' } }) }),
+    );
+
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).pay.hourlyRate).toBe(9.8);
+    expect(body(r).profile.firstName).toBe('Vanessa');
+  });
+
+  it('saves both when both are sent', async () => {
+    await putConfigWith(f.repo)(
+      event({
+        body: JSON.stringify({
+          pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 10 },
+          profile: { lastName: 'Rossi' },
+        }),
+      }),
+    );
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).pay.hourlyRate).toBe(10);
+    expect(body(r).profile.lastName).toBe('Rossi');
+  });
+
+  it('still accepts a bare PaySettings body', async () => {
+    // The shape this route received before the profile existed. A phone with
+    // a cached bundle keeps sending it after a deploy, and this is a failure
+    // that would never show up in development.
+    await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ ...EMPTY_PAY_SETTINGS, hourlyRate: 8.5 }) }),
+    );
+    const r: any = await getConfigWith(f.repo)(event({}));
+    expect(body(r).pay.hourlyRate).toBe(8.5);
+    expect(f.profile()).toEqual(EMPTY_PROFILE);
+  });
+
+  it('refuses a profile that is not an object', async () => {
+    const r: any = await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ profile: 'Vanessa' }) }),
+    );
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('refuses an unknown contract kind', async () => {
+    const r: any = await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ profile: { contractKind: 'stagionale' } }) }),
     );
     expect(r.statusCode).toBe(400);
   });

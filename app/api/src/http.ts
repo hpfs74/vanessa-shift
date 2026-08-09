@@ -8,10 +8,12 @@
 
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 
-import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import type { ContractKind, IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
 import {
   MAX_DAY_HOURS,
+  MAX_WEEKLY_HOURS,
   daysBetween,
+  isContractKind,
   isIsoDate,
   isShiftCode,
   isSwapKind,
@@ -174,6 +176,54 @@ export function optionalText(v: unknown, field: string, max = 200): string | nul
   if (typeof v !== 'string') throw new InvalidInput(`${field}: deve essere testo`);
   if (v.length > max) throw new InvalidInput(`${field}: massimo ${max} caratteri`);
   return v;
+}
+
+export function requireObject(v: unknown, field: string): Record<string, unknown> {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    throw new InvalidInput(`${field}: deve essere un oggetto`);
+  }
+  return v as Record<string, unknown>;
+}
+
+export function requireWeeklyHours(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v !== 'number' || !Number.isFinite(v)) {
+    throw new InvalidInput('weeklyHours: deve essere un numero');
+  }
+  if (v < 0 || v > MAX_WEEKLY_HOURS) {
+    throw new InvalidInput(`weeklyHours: attese fra 0 e ${MAX_WEEKLY_HOURS}`);
+  }
+  return v;
+}
+
+/** Every field is optional: the profile is filled in over time, from papers
+ *  that are not all in the same drawer. Two fields are not free text, and
+ *  `optionalText` alone would let them through wrong. */
+export function requireProfile(b: Record<string, unknown>): Profile {
+  let contractKind: ContractKind | null = null;
+  const kind = b.contractKind;
+  if (kind !== null && kind !== undefined && kind !== '') {
+    if (!isContractKind(kind)) {
+      throw new InvalidInput('contractKind: tipo di contratto sconosciuto');
+    }
+    contractKind = kind;
+  }
+
+  const hired = b.hiredOn;
+  return {
+    firstName: optionalText(b.firstName, 'firstName', 100),
+    lastName: optionalText(b.lastName, 'lastName', 100),
+    employer: optionalText(b.employer, 'employer', 200),
+    hiredOn: hired === null || hired === undefined || hired === ''
+      ? null
+      : requireDate(hired, 'hiredOn'),
+    contractKind,
+    ccnlLevel: optionalText(b.ccnlLevel, 'ccnlLevel', 20),
+    jobTitle: optionalText(b.jobTitle, 'jobTitle', 100),
+    weeklyHours: requireWeeklyHours(b.weeklyHours),
+    workplace: optionalText(b.workplace, 'workplace', 200),
+    ward: optionalText(b.ward, 'ward', 200),
+  };
 }
 
 /** Two megabytes. A properly resized image weighs less than one: past this

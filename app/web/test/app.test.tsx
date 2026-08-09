@@ -2,8 +2,8 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DayEntry, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS } from '@vanessa/core';
+import type { DayEntry, IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
 
 import { App } from '../src/App.js';
 import { weekHours, weeksOfMonth } from '../src/Calendar.js';
@@ -15,6 +15,7 @@ function fakeApi(initial: RemoteShift[] = [], settings: PaySettings = EMPTY_PAY_
   const deleted: IsoDate[] = [];
   const bulk: { date: IsoDate; code: ShiftCode }[][] = [];
   let current = settings;
+  let currentProfile: Profile = EMPTY_PROFILE;
   const api: Api = {
     shifts: async () => [...shifts.values()],
     saveShift: async (s) => {
@@ -29,9 +30,13 @@ function fakeApi(initial: RemoteShift[] = [], settings: PaySettings = EMPTY_PAY_
       bulk.push([...entries]);
       for (const e of entries) shifts.set(e.date, { date: e.date, code: e.code });
     },
+    config: async () => ({ pay: current, profile: currentProfile, quota: { used: 0 } }),
     paySettings: async () => current,
     savePaySettings: async (p) => {
       current = p;
+    },
+    saveProfile: async (p) => {
+      currentProfile = p;
     },
     readPhoto: async () => {
       throw new Error('not used in these tests');
@@ -542,8 +547,10 @@ describe('while the data is still loading', () => {
       saveShift: never,
       deleteShift: never,
       saveShifts: never,
+      config: never,
       paySettings: never,
       savePaySettings: never,
+      saveProfile: never,
       readPhoto: never,
     };
   }

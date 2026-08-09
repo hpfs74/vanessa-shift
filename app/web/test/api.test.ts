@@ -176,16 +176,19 @@ describe('saveProfile', () => {
 });
 
 describe('savePaySettings', () => {
-  it('sends the pay settings inside their envelope', async () => {
+  it('sends the pay settings inside their envelope, and also at the top level', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ pay: EMPTY_PAY_SETTINGS }));
     vi.stubGlobal('fetch', fetchMock);
 
     await api.savePaySettings({ ...EMPTY_PAY_SETTINGS, hourlyRate: 10 });
 
     const init = fetchMock.mock.calls[0][1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({
-      pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 10 },
-    });
+    const sent = JSON.parse(String(init.body));
+    // The envelope: what the updated handler reads.
+    expect(sent).toMatchObject({ pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 10 } });
+    // The same fields, also at the top level: what a not-yet-updated handler
+    // reads, during the window where the bundle and the Lambda deploy apart.
+    expect(sent.hourlyRate).toBe(10);
   });
 });
 

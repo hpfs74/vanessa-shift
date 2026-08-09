@@ -157,9 +157,13 @@ export const api: Api = {
     return (await request<ConfigSnapshot>('/config')).pay;
   },
   async savePaySettings(p) {
-    // The envelope, not a bare body: it names which of the two rows to write.
-    // The API still accepts the old bare shape, for bundles cached on a phone.
-    await request('/config', { method: 'PUT', body: JSON.stringify({ pay: p }) });
+    // Both shapes at once. The updated handler sees `pay` and uses the
+    // envelope; one not yet updated reads the same fields off the top level.
+    // A deploy replaces the bundle and the Lambda as independent resources,
+    // so for a moment the new bundle can be talking to the old handler — and
+    // `requirePaySettings` would read every absent field as null and write a
+    // row of nulls over her rates.
+    await request('/config', { method: 'PUT', body: JSON.stringify({ ...p, pay: p }) });
   },
   async saveProfile(p) {
     await request('/config', { method: 'PUT', body: JSON.stringify({ profile: p }) });

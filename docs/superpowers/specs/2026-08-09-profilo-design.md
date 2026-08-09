@@ -194,8 +194,13 @@ quale build ha in mano.
 | Sessione scaduta mentre è aperta | Come ovunque nell'app: 401, rinnovo silenzioso, si riprova. Vedi la spec dell'autenticazione. |
 
 Il salvataggio del profilo è **una scrittura sola e ripetibile**, come tutte le altre scritture
-dell'app. Ritentare non raddoppia niente, e questo è ciò che permette al 401 di curarsi con un
-ricaricamento senza perdere quello che stava scrivendo.
+dell'app: ritentare non raddoppia niente. Ma l'idempotenza non basta a evitare una perdita qui.
+Ogni altra schermata scrive a ogni interazione, quindi non c'è mai niente di non salvato quando
+arriva un 401; il Profilo è invece la prima schermata dell'app a raggruppare più campi in un
+salvataggio unico. `sessioneRifiutata()` ricarica la pagina su un 401, e il ricaricamento
+cancella quello che c'era nei campi prima che l'idempotenza abbia modo di aiutare. È un rischio
+accettato, non risolto: basso, dato il margine di rinnovo e una sessione che dura l'intera
+giornata, ed è la ragione per cui il Profilo si apre due volte l'anno e non resta aperto a lungo.
 
 ## Cosa cambia nel codice
 

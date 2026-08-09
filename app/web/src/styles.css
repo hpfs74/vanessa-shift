@@ -45,7 +45,13 @@ input, select, textarea, button { font: inherit; font-size: 16px; }
   padding-bottom: calc(4.6rem + env(safe-area-inset-bottom));
 }
 
-header { padding-top: env(safe-area-inset-top); }
+header {
+  padding-top: env(safe-area-inset-top);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.profilo-apri { min-width: 44px; min-height: 44px; }
 h1 { font-size: 1.2rem; margin: 0 0 0.5rem; color: var(--navy); }
 h2 { font-size: 1.05rem; margin: 1rem 0 0.5rem; color: var(--navy); }
 h3 {

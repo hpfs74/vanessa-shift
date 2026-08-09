@@ -16,6 +16,7 @@ import { BulkEntry } from './BulkEntry.js';
 import { Calendar } from './Calendar.js';
 import { DayEditor } from './DayEditor.js';
 import { Pay } from './Pay.js';
+import { Profilo } from './Profilo.js';
 import { Summary } from './Summary.js';
 import { Swaps } from './Swaps.js';
 import { api as realApi, type Api, type RemoteShift } from './api.js';
@@ -58,6 +59,7 @@ export function App({
   const [editing, setEditing] = useState<IsoDate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profilo, setProfilo] = useState(false);
 
   const reload = useCallback(async () => {
     const [s, p] = await Promise.all([
@@ -168,6 +170,14 @@ export function App({
     <div className="app">
       <header>
         <h1>Turni di Vanessa</h1>
+        <button
+          type="button"
+          className="profilo-apri"
+          aria-label="Profilo"
+          onClick={() => setProfilo(true)}
+        >
+          ☺
+        </button>
       </header>
 
       {error && (
@@ -176,66 +186,70 @@ export function App({
         </p>
       )}
 
-      <main>
-        {/* Finche' i dati non sono arrivati nessuna vista puo' dire la verita':
-            un riepilogo a zero durante il caricamento sembra un anno vuoto,
-            non un anno non ancora letto. Vale per tutte le viste, non solo
-            per il calendario. */}
-        {loading && <p className="waiting">Carico i turni…</p>}
+      {profilo && <Profilo api={api} onClose={() => setProfilo(false)} />}
 
-        {!loading && view === 'calendar' && (
-          <>
-            <div className="month-nav">
-              <button
-                type="button"
-                aria-label="Mese precedente"
-                disabled={month === 1}
-                onClick={() => setMonth((m) => Math.max(1, m - 1))}
-              >
-                ‹
-              </button>
-              <h2>
-                {MONTH_NAMES[month - 1]} {YEAR}
-              </h2>
-              <button
-                type="button"
-                aria-label="Mese successivo"
-                disabled={month === 12}
-                onClick={() => setMonth((m) => Math.min(12, m + 1))}
-              >
-                ›
-              </button>
-            </div>
+      {!profilo && (
+        <main>
+          {/* Finche' i dati non sono arrivati nessuna vista puo' dire la verita':
+              un riepilogo a zero durante il caricamento sembra un anno vuoto,
+              non un anno non ancora letto. Vale per tutte le viste, non solo
+              per il calendario. */}
+          {loading && <p className="waiting">Carico i turni…</p>}
 
-            <Calendar
+          {!loading && view === 'calendar' && (
+            <>
+              <div className="month-nav">
+                <button
+                  type="button"
+                  aria-label="Mese precedente"
+                  disabled={month === 1}
+                  onClick={() => setMonth((m) => Math.max(1, m - 1))}
+                >
+                  ‹
+                </button>
+                <h2>
+                  {MONTH_NAMES[month - 1]} {YEAR}
+                </h2>
+                <button
+                  type="button"
+                  aria-label="Mese successivo"
+                  disabled={month === 12}
+                  onClick={() => setMonth((m) => Math.min(12, m + 1))}
+                >
+                  ›
+                </button>
+              </div>
+
+              <Calendar
+                year={YEAR}
+                month={month}
+                shifts={entries}
+                swapped={new Set(records.filter((r) => r.originalCode).map((r) => r.date))}
+                today={today}
+                selected={editing}
+                onPick={setEditing}
+              />
+            </>
+          )}
+
+          {!loading && view === 'bulk' && (
+            <BulkEntry
               year={YEAR}
               month={month}
-              shifts={entries}
-              swapped={new Set(records.filter((r) => r.originalCode).map((r) => r.date))}
-              today={today}
-              selected={editing}
-              onPick={setEditing}
+              onMonthChange={setMonth}
+              existing={codes}
+              onSave={saveBulk}
+              onReadPhoto={api.readPhoto}
             />
-          </>
-        )}
+          )}
 
-        {!loading && view === 'bulk' && (
-          <BulkEntry
-            year={YEAR}
-            month={month}
-            onMonthChange={setMonth}
-            existing={codes}
-            onSave={saveBulk}
-            onReadPhoto={api.readPhoto}
-          />
-        )}
-
-        {!loading && view === 'swaps' && <Swaps days={records} />}
-        {!loading && view === 'summary' && <Summary year={YEAR} shifts={entries} />}
-        {!loading && view === 'pay' && (
-          <Pay year={YEAR} shifts={entries} settings={settings} onChange={changeSettings} />
-        )}
-      </main>
+          {!loading && view === 'swaps' && <Swaps days={records} />}
+          {!loading && view === 'summary' && <Summary year={YEAR} shifts={entries} />}
+          {!loading && view === 'pay' && (
+            <Pay year={YEAR} shifts={entries} settings={settings} onChange={changeSettings} />
+          )}
+        </main>
+      )}
 
       {editing && (
         <DayEditor

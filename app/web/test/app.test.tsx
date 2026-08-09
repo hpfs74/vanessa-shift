@@ -673,3 +673,25 @@ describe('pay view', () => {
     await waitFor(() => expect(settings().hourlyRate).toBeNull());
   });
 });
+
+describe('profilo', () => {
+  it('opens from the header and goes back', async () => {
+    // The bottom bar stays at five: on 375px a sixth tab drops each one to
+    // 62px, and the labels do not fit. The profile is opened twice a year.
+    const user = userEvent.setup();
+    render(<App api={fakeApi().api} today={JAN} />);
+    await user.click(await screen.findByRole('button', { name: 'Profilo' }));
+    expect(await screen.findByRole('heading', { name: 'Profilo' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    expect(screen.queryByRole('heading', { name: 'Profilo' })).not.toBeInTheDocument();
+  });
+
+  it('leaves the bottom bar at five sections', async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi().api} today={JAN} />);
+    await user.click(await screen.findByRole('button', { name: 'Profilo' }));
+    const bar = screen.getByRole('navigation', { name: 'Sezioni' });
+    expect(bar.querySelectorAll('button')).toHaveLength(5);
+  });
+});

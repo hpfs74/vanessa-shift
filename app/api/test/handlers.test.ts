@@ -501,6 +501,25 @@ describe('PUT /config', () => {
     );
     expect(r.statusCode).toBe(400);
   });
+
+  it('rejects the whole write when one half is invalid, leaving the valid half unwritten', async () => {
+    await putConfigWith(f.repo)(
+      event({ body: JSON.stringify({ pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 7 } }) }),
+    );
+
+    const r: any = await putConfigWith(f.repo)(
+      event({
+        body: JSON.stringify({
+          pay: { ...EMPTY_PAY_SETTINGS, hourlyRate: 11 },
+          profile: { contractKind: 'stagionale' },
+        }),
+      }),
+    );
+
+    expect(r.statusCode).toBe(400);
+    // The 400 says nothing was accepted: the pay row must still read 7, not 11.
+    expect(f.pay().hourlyRate).toBe(7);
+  });
 });
 
 describe('responses', () => {

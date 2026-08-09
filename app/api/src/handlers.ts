@@ -132,14 +132,19 @@ export function putConfigWith(repo: Repo) {
         return ok({ pay });
       }
 
+      // Both halves are validated before either is written: a 400 has to mean
+      // nothing was accepted, and a partial write (valid pay, invalid
+      // profile) would leave the pay row changed under a response that says
+      // otherwise.
+      const pay = hasPay ? requirePaySettings(requireObject(body.pay, 'pay')) : undefined;
+      const profile = hasProfile ? requireProfile(requireObject(body.profile, 'profile')) : undefined;
+
       const written: { pay?: PaySettings; profile?: Profile } = {};
-      if (hasPay) {
-        const pay = requirePaySettings(requireObject(body.pay, 'pay'));
+      if (pay) {
         await repo.savePaySettings(pay);
         written.pay = pay;
       }
-      if (hasProfile) {
-        const profile = requireProfile(requireObject(body.profile, 'profile'));
+      if (profile) {
         await repo.saveProfile(profile);
         written.profile = profile;
       }

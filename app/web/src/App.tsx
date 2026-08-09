@@ -269,6 +269,7 @@ export function App({
             type="button"
             aria-current={view === v.id}
             onClick={() => {
+              setProfilo(false);
               setView(v.id);
               setEditing(null);
             }}

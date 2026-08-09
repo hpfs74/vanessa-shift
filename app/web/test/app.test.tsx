@@ -694,4 +694,24 @@ describe('profilo', () => {
     const bar = screen.getByRole('navigation', { name: 'Sezioni' });
     expect(bar.querySelectorAll('button')).toHaveLength(5);
   });
+
+  it('tapping a tab while the profile is open closes it and switches the view', async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi().api} today={JAN} />);
+    await user.click(await screen.findByRole('button', { name: 'Profilo' }));
+    expect(await screen.findByRole('heading', { name: 'Profilo' })).toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole('navigation', { name: 'Sezioni' })).getByRole('button', {
+        name: /Riepilogo/,
+      }),
+    );
+
+    expect(screen.queryByRole('heading', { name: 'Profilo' })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('navigation', { name: 'Sezioni' })).getByRole('button', {
+        name: /Riepilogo/,
+      }),
+    ).toHaveAttribute('aria-current', 'true');
+  });
 });

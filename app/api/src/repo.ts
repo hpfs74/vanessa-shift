@@ -211,10 +211,14 @@ export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo
       // Absent fields are left out rather than written as null, as `itemOf`
       // does for a shift. Zero is a real answer and must survive: test for
       // null, not for falsiness.
-      const item: Record<string, unknown> = { pk: CONFIG_PK, sk: PROFILE_SK };
+      const item: Record<string, unknown> = {};
       for (const [field, value] of Object.entries(p)) {
         if (value != null) item[field] = value;
       }
+      // Assigned after the loop, not seeded before it: a field named `pk` or
+      // `sk` could otherwise overwrite the key `Object.entries` iterates over.
+      item.pk = CONFIG_PK;
+      item.sk = PROFILE_SK;
       await doc.send(new PutCommand({ TableName: table, Item: item }));
     },
 

@@ -108,6 +108,22 @@ Vanessa legga dal telefono, una volta sola.
 
 Ogni dispositivo nuovo ripete il giro: codice via email, poi passkey su quel dispositivo.
 
+**«Da lì si registra la passkey» non succede da solo, ed è costato una settimana.** La frase qui
+sopra dava per scontato che dopo il codice via email Cognito proponesse di creare la passkey. Non
+lo fa, e la documentazione AWS è esplicita sul perché: *«Amazon Cognito doesn't prompt users to
+set up a passkey when they have already signed up and not set up a passkey, or if you created
+their account as an administrator.»* L'account di Vanessa è creato con `admin-create-user` —
+è la procedura che questo stesso repository prescrive — quindi ricade in quel caso per sempre.
+
+E una passkey non si può **usare** prima di averla **registrata**. Il risultato è che il pool può
+essere configurato alla perfezione — e lo era: relying party id giusto, `required`, Managed Login
+v2, `ALLOW_USER_AUTH`, `WEB_AUTHN` fra i primi fattori — e si entra comunque sempre col codice via
+email. Nessun test lo vede, perché non c'è niente di rotto.
+
+La registrazione sta dietro una pagina a parte di Managed Login, `/passkeys/add`, e ci si arriva
+solo se l'applicazione ci manda. Nel profilo c'è ora il link. Va aperto **da ogni telefono**:
+la passkey resta su quello dove è stata creata.
+
 ## Quanto dura una sessione
 
 **Circa un giorno.**

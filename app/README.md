@@ -439,8 +439,33 @@ Due cose restano vere e vale la pena sapere:
 
 Il primo accesso lo fa lei, dal telefono: apre l'app, scrive la sua email, chiede il **codice
 una-tantum via email** — quella sì che arriva, ed è il primo momento in cui Cognito scrive a
-qualcuno — e da lì registra la passkey. Ogni dispositivo nuovo rifà lo stesso giro: codice via
-email, poi passkey su quel dispositivo.
+qualcuno. Ogni dispositivo nuovo rifà lo stesso giro.
+
+#### La passkey non si registra da sola, e per una settimana non si è registrata affatto
+
+Questa riga diceva «e da lì registra la passkey», dando per scontato che dopo il codice via email
+Cognito lo proponesse. **Non lo propone**, e AWS lo scrive senza giri di parole: Cognito non
+chiede di impostare una passkey a chi ha già un account e non ne ha una, né a chi è stato creato
+**da un amministratore**. Vanessa è tutte e due le cose, perché `admin-create-user` è la procedura
+che questo stesso file prescrive poche righe più su.
+
+Siccome una passkey non si può *usare* prima di averla *registrata*, il risultato è che si entra
+sempre col codice via email — con il pool configurato alla perfezione. Ed era configurato alla
+perfezione: relying party id giusto, `required`, Managed Login v2, `ALLOW_USER_AUTH`, `WEB_AUTHN`
+fra i primi fattori. Non c'era niente di rotto da cercare: mancava un passo che nessuno faceva.
+
+La registrazione sta su una pagina a parte di Managed Login, e ci si arriva solo se qualcosa ci
+manda:
+
+```
+https://auth.vanessa.matteo.cool/passkeys/add?client_id=<IdClient>&redirect_uri=https%3A%2F%2Fvanessa.matteo.cool%2F
+```
+
+Cognito autorizza quella pagina con il **cookie di sessione** lasciato dall'accesso, non con un
+token: quindi prima si entra col codice via email, e poi si apre il link **dallo stesso browser**.
+Nell'app il link sta nel **Profilo**, blocco *Account*, ed è da lì che conviene usarlo.
+
+**Va rifatto su ogni telefono**: la passkey resta sul dispositivo dove è stata creata.
 
 ### Le due origini, e perché una sola delle due è protetta
 

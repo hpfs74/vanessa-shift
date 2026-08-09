@@ -212,6 +212,36 @@ function assicuraConfigurata(): void {
   }
 }
 
+/** Where a passkey gets registered.
+ *
+ *  It exists because Cognito will not do it on its own. AWS is explicit:
+ *  "Amazon Cognito doesn't prompt users to set up a passkey when they have
+ *  already signed up and not set up a passkey, or if you created their
+ *  account as an administrator." Vanessa's account was created with
+ *  `admin-create-user`, exactly as the README instructs, so she is in that
+ *  state permanently — nothing will ever offer her the setup.
+ *
+ *  And a passkey cannot be *used* before it is *registered*, so the pool can
+ *  be configured perfectly and sign-in still falls back to the email code
+ *  forever. It did, for a week, with every setting correct.
+ *
+ *  This page is the only way in. It is not `/oauth2/authorize`: she is
+ *  already signed in when she gets here, and sending her there would just
+ *  sign her in again. Cognito authorises the page from the session cookie
+ *  the sign-in left in the browser, which is why there is no token here and
+ *  nothing to attach — and why it only works from a browser that has signed
+ *  in. One passkey per device, so this is a link she uses again on a new
+ *  phone, not once forever.
+ */
+export function urlRegistrazionePasskey(): string {
+  assicuraConfigurata();
+  const u = new URL(`${POOL_DOMAIN}/passkeys/add`);
+  u.searchParams.set('client_id', CLIENT_ID);
+  // The app's own root, which is the one callback URL the client allows.
+  u.searchParams.set('redirect_uri', `${location.origin}/`);
+  return u.toString();
+}
+
 export async function iniziaAccesso(): Promise<void> {
   assicuraConfigurata();
   const { verifier, challenge } = await verifierEsfida();

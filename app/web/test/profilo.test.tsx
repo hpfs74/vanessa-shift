@@ -7,6 +7,18 @@ import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
 import { Profilo } from '../src/Profilo.js';
 import type { Api } from '../src/api.js';
 
+/** `auth.ts` reads the login config into module constants at import time, and
+ *  in tests `VITE_CLIENT_ID` is deliberately empty — so the real
+ *  `urlRegistrazionePasskey` throws and the link would never render here.
+ *  The URL's own shape is proved in `passkey.test.ts`; what this file needs
+ *  is only that the screen renders whatever link it is handed.
+ *  `sessioneValida` returns null, which is what it does here anyway with no
+ *  session in `localStorage`. */
+vi.mock('../src/auth.js', () => ({
+  sessioneValida: () => null,
+  urlRegistrazionePasskey: () => 'https://auth.esempio.it/passkeys/add?client_id=x',
+}));
+
 function fakeApi(over: Partial<Api> = {}): Api {
   return {
     config: async () => ({
@@ -89,5 +101,26 @@ describe('Profilo', () => {
     render(<Profilo api={fakeApi()} onClose={onClose} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Indietro' }));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('registrazione della passkey', () => {
+  it('offers a link to add Face ID on this device', async () => {
+    // Cognito never prompts an admin-created account to set one up, so this
+    // link is the only route to a passkey. Without it every sign-in stays on
+    // the email code, which is what happened in production.
+    render(<Profilo api={fakeApi()} onClose={() => {}} />);
+    const link = await screen.findByRole('link', { name: /Face ID/i });
+    expect(link).toHaveAttribute('href', expect.stringContaining('/passkeys/add'));
+  });
+
+  it('says why it came back when the session was not accepted', async () => {
+    // Cognito bounces an unauthenticated visit to /passkeys/add straight back
+    // with ?result=invalid_session. Silence there looks like the tap did
+    // nothing at all.
+    window.history.replaceState({}, '', '/?result=invalid_session');
+    render(<Profilo api={fakeApi()} onClose={() => {}} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/non.*accettat|scadut/i);
+    window.history.replaceState({}, '', '/');
   });
 });

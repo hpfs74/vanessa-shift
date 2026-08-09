@@ -11,8 +11,8 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 
-import type { IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS, parseIso } from '@vanessa/core';
+import type { IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, isContractKind, isIsoDate, parseIso } from '@vanessa/core';
 
 export interface ShiftRecord {
   date: IsoDate;
@@ -27,6 +27,12 @@ export interface ShiftRecord {
 
 export const CONFIG_PK = 'CONFIG';
 export const CONFIG_SK = 'PAY';
+
+/** The profile lives beside the pay settings, on its own row. Two rows is
+ *  what lets one PUT write either without reading the other: a whole-item
+ *  Put of the pay settings cannot lose a surname, and the reverse cannot
+ *  zero an hourly rate. */
+export const PROFILE_SK = 'PROFILE';
 
 /** The counter of photo readings, one row per day. */
 export const QUOTA_PK = 'QUOTA#FOTO';
@@ -47,10 +53,14 @@ export interface Repo {
   saveShifts(shifts: readonly ShiftRecord[]): Promise<void>;
   readPaySettings(): Promise<PaySettings>;
   savePaySettings(p: PaySettings): Promise<void>;
+  readProfile(): Promise<Profile>;
+  saveProfile(p: Profile): Promise<void>;
   /** Consumes a photo reading for that day. `false` if the cap has already
    *  been reached. The condition and the increment are the same operation:
    *  two simultaneous requests at the boundary must not both go through. */
   consumePhotoQuota(date: IsoDate, max: number): Promise<boolean>;
+  /** How many photo readings today has already spent. */
+  readPhotoQuota(date: IsoDate): Promise<number>;
 }
 
 /** DynamoDB writes at most 25 items per BatchWrite call. */
@@ -177,6 +187,37 @@ export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo
       );
     },
 
+    async readProfile() {
+      const r = await doc.send(
+        new GetCommand({ TableName: table, Key: { pk: CONFIG_PK, sk: PROFILE_SK } }),
+      );
+      if (!r.Item) return EMPTY_PROFILE;
+      const text = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+      return {
+        firstName: text(r.Item.firstName),
+        lastName: text(r.Item.lastName),
+        employer: text(r.Item.employer),
+        hiredOn: isIsoDate(r.Item.hiredOn) ? r.Item.hiredOn : null,
+        contractKind: isContractKind(r.Item.contractKind) ? r.Item.contractKind : null,
+        ccnlLevel: text(r.Item.ccnlLevel),
+        jobTitle: text(r.Item.jobTitle),
+        weeklyHours: typeof r.Item.weeklyHours === 'number' ? r.Item.weeklyHours : null,
+        workplace: text(r.Item.workplace),
+        ward: text(r.Item.ward),
+      };
+    },
+
+    async saveProfile(p) {
+      // Absent fields are left out rather than written as null, as `itemOf`
+      // does for a shift. Zero is a real answer and must survive: test for
+      // null, not for falsiness.
+      const item: Record<string, unknown> = { pk: CONFIG_PK, sk: PROFILE_SK };
+      for (const [field, value] of Object.entries(p)) {
+        if (value != null) item[field] = value;
+      }
+      await doc.send(new PutCommand({ TableName: table, Item: item }));
+    },
+
     async consumePhotoQuota(date, max) {
       const { year, month, day } = parseIso(date);
       const expires = Math.floor(Date.UTC(year, month - 1, day + QUOTA_TTL_DAYS) / 1000);
@@ -202,6 +243,14 @@ export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo
         if ((e as { name?: string }).name === 'ConditionalCheckFailedException') return false;
         throw e;
       }
+    },
+
+    async readPhotoQuota(date) {
+      const r = await doc.send(
+        new GetCommand({ TableName: table, Key: { pk: QUOTA_PK, sk: date } }),
+      );
+      // No row means no reading yet today, which is the normal morning case.
+      return typeof r.Item?.count === 'number' ? r.Item.count : 0;
     },
   };
 }

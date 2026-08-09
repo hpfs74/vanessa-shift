@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 
-import { QUOTA_PK, createRepo } from '../src/repo.js';
+import type { IsoDate } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
+
+import { CONFIG_PK, CONFIG_SK, PROFILE_SK, QUOTA_PK, createRepo } from '../src/repo.js';
 
 /** Part of DynamoDB's reserved-word list: the words an attribute of this table
  *  could plausibly be called. `count` is on it, and an unescaped reserved word
@@ -158,5 +161,103 @@ describe('consumePhotoQuota', () => {
     await expect(createRepo('tabella', doc).consumePhotoQuota('2026-08-02', 10)).rejects.toThrow(
       'rete',
     );
+  });
+});
+
+/** A fake that stores items by key, which is all Get and Put need. The
+ *  quota fake above models `ADD` and a condition instead, and neither fake
+ *  is a superset of the other. */
+function fakeItems() {
+  const items = new Map<string, Record<string, unknown>>();
+  const doc = {
+    async send(cmd: { input: Record<string, any>; constructor: { name: string } }) {
+      const key = `${cmd.input.Key?.pk ?? cmd.input.Item?.pk}#${
+        cmd.input.Key?.sk ?? cmd.input.Item?.sk
+      }`;
+      if (cmd.input.Item) {
+        items.set(key, cmd.input.Item);
+        return {};
+      }
+      return { Item: items.get(key) };
+    },
+  };
+  return { doc: doc as unknown as DynamoDBDocumentClient, items };
+}
+
+describe('profile', () => {
+  it('reads an empty profile when nothing was ever saved', async () => {
+    const { doc } = fakeItems();
+    const repo = createRepo('tabella', doc);
+    expect(await repo.readProfile()).toEqual(EMPTY_PROFILE);
+  });
+
+  it('saves and reads a profile back', async () => {
+    const { doc } = fakeItems();
+    const repo = createRepo('tabella', doc);
+    const p = {
+      ...EMPTY_PROFILE,
+      firstName: 'Vanessa',
+      hiredOn: '2021-03-12' as IsoDate,
+      contractKind: 'indeterminato' as const,
+      weeklyHours: 24,
+    };
+    await repo.saveProfile(p);
+    expect(await repo.readProfile()).toEqual(p);
+  });
+
+  it('leaves unset fields out of the item instead of storing nulls', async () => {
+    // Same convention as a shift's optional attributes: an attribute that is
+    // not there reads unambiguously as "not set".
+    const { doc, items } = fakeItems();
+    const repo = createRepo('tabella', doc);
+    await repo.saveProfile({ ...EMPTY_PROFILE, firstName: 'Vanessa' });
+    const item = items.get(`${CONFIG_PK}#${PROFILE_SK}`)!;
+    expect(item.firstName).toBe('Vanessa');
+    expect('lastName' in item).toBe(false);
+    expect('weeklyHours' in item).toBe(false);
+  });
+
+  it('keeps zero weekly hours, which is a real answer', async () => {
+    const { doc } = fakeItems();
+    const repo = createRepo('tabella', doc);
+    await repo.saveProfile({ ...EMPTY_PROFILE, weeklyHours: 0 });
+    expect((await repo.readProfile()).weeklyHours).toBe(0);
+  });
+
+  it('drops a stored value that is no longer a declared contract kind', async () => {
+    // Whatever is in the table was written by an older version, or by hand.
+    // The type promises two values, so anything else reads as unset.
+    const { doc, items } = fakeItems();
+    items.set(`${CONFIG_PK}#${PROFILE_SK}`, {
+      pk: CONFIG_PK,
+      sk: PROFILE_SK,
+      contractKind: 'stagionale',
+    });
+    const repo = createRepo('tabella', doc);
+    expect((await repo.readProfile()).contractKind).toBeNull();
+  });
+
+  it('writes the profile beside the pay settings, not over them', async () => {
+    const { doc, items } = fakeItems();
+    const repo = createRepo('tabella', doc);
+    await repo.savePaySettings({ ...EMPTY_PAY_SETTINGS, hourlyRate: 9.8 });
+    await repo.saveProfile({ ...EMPTY_PROFILE, firstName: 'Vanessa' });
+    expect(items.get(`${CONFIG_PK}#${CONFIG_SK}`)!.hourlyRate).toBe(9.8);
+    expect(items.get(`${CONFIG_PK}#${PROFILE_SK}`)!.firstName).toBe('Vanessa');
+  });
+});
+
+describe('readPhotoQuota', () => {
+  it('is zero before the first reading of the day', async () => {
+    const { doc } = fakeItems();
+    const repo = createRepo('tabella', doc);
+    expect(await repo.readPhotoQuota('2026-08-09')).toBe(0);
+  });
+
+  it('reports what the counter row holds', async () => {
+    const { doc, items } = fakeItems();
+    items.set(`${QUOTA_PK}#2026-08-09`, { pk: QUOTA_PK, sk: '2026-08-09', count: 3 });
+    const repo = createRepo('tabella', doc);
+    expect(await repo.readPhotoQuota('2026-08-09')).toBe(3);
   });
 });

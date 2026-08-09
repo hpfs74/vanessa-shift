@@ -2,7 +2,7 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { IsoDate, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
 
 import {
   getConfigWith,
@@ -18,6 +18,7 @@ function fakeRepo() {
   const shifts = new Map<string, ShiftRecord>();
   const quota = new Map<string, number>();
   let pay = EMPTY_PAY_SETTINGS;
+  let profile = EMPTY_PROFILE;
   const calls: string[] = [];
 
   const repo: Repo = {
@@ -47,12 +48,24 @@ function fakeRepo() {
       calls.push('savePaySettings');
       pay = p;
     },
+    async readProfile() {
+      calls.push('readProfile');
+      return profile;
+    },
+    async saveProfile(p) {
+      calls.push('saveProfile');
+      profile = p;
+    },
     async consumePhotoQuota(date, max) {
       calls.push(`consumePhotoQuota(${date},${max})`);
       const used = (quota.get(date) ?? 0) + 1;
       if (used > max) return false;
       quota.set(date, used);
       return true;
+    },
+    async readPhotoQuota(date) {
+      calls.push(`readPhotoQuota(${date})`);
+      return quota.get(date) ?? 0;
     },
   };
   return { repo, shifts, quota, calls, pay: () => pay };

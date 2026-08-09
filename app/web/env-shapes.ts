@@ -27,3 +27,15 @@ export const CLIENT_ID_SHAPE = /^[a-z0-9]{26}$/;
  *  empty or mistyped one just as well without going stale when the domain
  *  moves. */
 export const LOGIN_DOMAIN_SHAPE = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+
+/** The commit a bundle was built from, for when she says "it does not work"
+ *  and nobody knows which build she is holding.
+ *
+ *  It takes the env as an argument rather than reading `process.env` itself
+ *  so a test can pin it. Asserting on the ambient value would be a trap:
+ *  `GITHUB_SHA` is set inside GitHub Actions, and the pipeline runs this
+ *  same suite. */
+export function versioneDelBuild(env: Record<string, string | undefined>): string {
+  const sha = env.GITHUB_SHA;
+  return sha ? sha.slice(0, 7) : 'dev';
+}

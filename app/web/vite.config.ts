@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import process from 'node:process';
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 
@@ -6,7 +7,7 @@ import { defineConfig, loadEnv, type Plugin } from 'vite';
 // without importing this file — see the comment there. Extensionless on
 // purpose: vite bundles its own config with esbuild, which resolves `.ts`
 // from a bare specifier but does not remap a written-out `.js` back to it.
-import { CLIENT_ID_SHAPE, LOGIN_DOMAIN_SHAPE } from './env-shapes';
+import { CLIENT_ID_SHAPE, LOGIN_DOMAIN_SHAPE, versioneDelBuild } from './env-shapes';
 
 // Node's own global `localStorage` (behind `--experimental-webstorage` on
 // some Node versions, unflagged on newer ones) shadows jsdom's per-window
@@ -50,6 +51,9 @@ export default defineConfig(({ command, mode }) => ({
   // The `command === 'build'` check is load-bearing, not tidiness: see the
   // comment on `richiedeConfigAccesso` above.
   plugins: [react(), ...(command === 'build' ? [richiedeConfigAccesso(mode)] : [])],
+  define: {
+    __APP_VERSION__: JSON.stringify(versioneDelBuild(process.env)),
+  },
   resolve: {
     alias: {
       '@vanessa/core': fileURLToPath(new URL('../core/src/index.ts', import.meta.url)),

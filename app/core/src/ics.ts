@@ -99,7 +99,6 @@ export function icsDelMese(
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
     `PRODID:-//${DOMINIO}//turni//IT`,
-    'METHOD:PUBLISH',
     `X-WR-CALNAME:${testo(NOME_CALENDARIO)}`,
   ];
 

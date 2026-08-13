@@ -43,7 +43,6 @@ solo, e non trascina con sé altri undici mesi.
 BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//vanessa.matteo.cool//turni//IT
-METHOD:PUBLISH
 X-WR-CALNAME:Turni di Vanessa
 BEGIN:VEVENT
 UID:turno-2026-08-13@vanessa.matteo.cool

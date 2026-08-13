@@ -715,3 +715,26 @@ describe('profilo', () => {
     ).toHaveAttribute('aria-current', 'true');
   });
 });
+
+describe('esportazione nel calendario', () => {
+  it('offers the export on a month with shifts in it', async () => {
+    const f = fakeApi([{ date: '2026-01-05', code: 'M' }]);
+    render(<App api={f.api} today={JAN} />);
+    expect(await screen.findByRole('button', { name: 'Esporta nel calendario' })).toBeEnabled();
+  });
+
+  it('disables it on a month with nothing to export', async () => {
+    // An empty file imports with no error and no effect, which looks exactly
+    // like a broken export. Better to say there is nothing to send.
+    render(<App api={fakeApi().api} today={JAN} />);
+    expect(await screen.findByRole('button', { name: 'Esporta nel calendario' })).toBeDisabled();
+  });
+
+  it('treats a month of Libero as nothing to export', async () => {
+    // `L` has no hours, so it produces no event: a month of Libero and an
+    // empty month are the same case.
+    const f = fakeApi([{ date: '2026-01-05', code: 'L' }]);
+    render(<App api={f.api} today={JAN} />);
+    expect(await screen.findByRole('button', { name: 'Esporta nel calendario' })).toBeDisabled();
+  });
+});

@@ -164,7 +164,7 @@ telefono impostato su un altro fuso il turno si legge comunque alle 07:00 locali
 turno che comincia alle 07:00. Sui pomeriggi non c'è, e non è una dimenticanza: dodici ore prima
 delle 13:00 è l'una di notte.
 
-### Se dopo aver riesportato compaiono i doppioni
+### Se dopo aver riesportato compaiono i doppioni, o non cambia niente
 
 Ogni evento ha un identificatore costruito dalla data — `turno-2026-08-13@vanessa.matteo.cool` —
 che non cambia fra un'esportazione e l'altra, ed è la condizione perché Calendario aggiorni gli
@@ -175,6 +175,15 @@ in `localStorage`, per mese e per dispositivo.
 È la condizione necessaria, non la garanzia: come iOS si comporta all'importazione non è
 verificabile senza il telefono. **Se i doppioni arrivano lo stesso**, si cancellano gli eventi di
 quel mese dal calendario e si reimporta il file. Non c'è niente da sistemare nell'app.
+
+C'è anche il guasto opposto, silenzioso: `SEQUENCE` riparte da zero ogni volta che `localStorage`
+è vuoto su questo dispositivo — non solo passando a un telefono diverso, ma anche cancellando i
+dati del sito, aprendo una scheda privata, o partendo da un profilo del browser nuovo sullo stesso
+telefono. Un file con `SEQUENCE:0` che arriva su un calendario che per quegli eventi ha già una
+`SEQUENCE` più alta è, per il client, una versione **più vecchia** dell'evento che ha già, e la
+ignora: nessun errore, nessun doppione, e il turno che si era corretto resta quello di prima.
+**Se dopo aver riesportato non cambia niente**, è questo il sospetto numero uno, e il rimedio è lo
+stesso di sopra: si cancellano gli eventi di quel mese dal calendario e si reimporta il file.
 
 ### Quello che non fa
 

@@ -7,3 +7,4 @@ export * from './summary.js';
 export * from './bulk.js';
 export * from './photo.js';
 export * from './profile.js';
+export * from './ics.js';

@@ -29,17 +29,25 @@ const mese = (giorni: Record<string, DayEntry>): ReadonlyMap<IsoDate, DayEntry> 
 
 /** jsdom has no object URLs and does not navigate, so the two browser calls
  *  are stubbed and inspected. What is being tested is what we hand the
- *  browser, which is the only part we control. */
+ *  browser, which is the only part we control.
+ *
+ *  `vi.spyOn` needs a real method to replace, and jsdom's `URL` has neither
+ *  method yet, so a no-op is assigned first. Spying on the real `URL`
+ *  constructor (rather than `vi.stubGlobal`-ing a spread copy of it) keeps
+ *  `new URL()` working for any other code in the module graph: spreading a
+ *  constructor copies its own enumerable properties, which for a built-in is
+ *  next to nothing, so the copy is not usable as a constructor. */
 function browserFinto() {
   const creati: Blob[] = [];
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: (b: Blob) => {
-      creati.push(b);
-      return 'blob:finto';
-    },
-    revokeObjectURL: () => {},
+  if (typeof URL.createObjectURL !== 'function') {
+    URL.createObjectURL = () => '';
+    URL.revokeObjectURL = () => {};
+  }
+  vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => {
+    creati.push(b as Blob);
+    return 'blob:finto';
   });
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   return { creati, click };
 }
@@ -48,10 +56,9 @@ describe('esportaMese', () => {
   beforeEach(() => localStorage.clear());
   afterEach(async () => {
     // esportaMese defers URL.revokeObjectURL to the next tick; flush that
-    // tick before restoring the stub, or it fires against the real
-    // (unstubbed) URL, which jsdom does not implement.
+    // tick before restoring the spy, so the deferred call still hits the
+    // mocked implementation rather than the bare no-op stub underneath it.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 

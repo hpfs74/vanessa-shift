@@ -184,9 +184,10 @@ prende la sveglia) si prova senza aprire una pagina.
 
 ### Niente piegatura delle righe
 
-RFC 5545 vuole le righe piegate a 75 ottetti. Qui **non si implementa**, e non è una svista: la
-riga più lunga che usciamo è `SUMMARY:Pomeriggio lungo (P1)`, ventinove caratteri. Codice
-irraggiungibile è codice che nessun test può coprire, ed è peggio di codice assente.
+RFC 5545 vuole le righe piegate a 75 ottetti. Qui **non si implementa**, e non è una svista: le
+righe più lunghe che usciamo sono `UID:turno-2026-08-13@vanessa.matteo.cool` e
+`PRODID:-//vanessa.matteo.cool//turni//IT`, quaranta caratteri entrambe — ben sotto il limite.
+Codice irraggiungibile è codice che nessun test può coprire, ed è peggio di codice assente.
 
 Il commento sul punto dice cosa lo cambierebbe: mettere le note libere in `DESCRIPTION` — testo
 scritto da lei, di lunghezza qualsiasi — richiederebbe la piegatura subito.

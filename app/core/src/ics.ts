@@ -131,8 +131,10 @@ export function icsDelMese(
 
   righe.push('END:VCALENDAR');
   // CRLF, and a trailing one: the standard asks for it and strict parsers
-  // enforce it. No 75-octet folding — the longest line we emit is
-  // `SUMMARY:Pomeriggio lungo (P1)`. Putting free text in a DESCRIPTION on
-  // the event would need folding immediately.
+  // enforce it. No 75-octet folding — the longest lines we emit are
+  // `UID:turno-2026-08-13@vanessa.matteo.cool` and
+  // `PRODID:-//vanessa.matteo.cool//turni//IT`, both 40 characters, well
+  // under the limit. Putting free text in a DESCRIPTION on the event would
+  // need folding immediately.
   return righe.join('\r\n') + '\r\n';
 }

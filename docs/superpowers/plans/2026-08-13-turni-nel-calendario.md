@@ -18,7 +18,7 @@ Spec: `docs/superpowers/specs/2026-08-13-turni-nel-calendario-design.md`.
 - `app/infra/**` e `.github/workflows/deploy.yml` **non si toccano in nessun task**.
 - **Nessuna dipendenza npm nuova.**
 - Le righe del file `.ics` finiscono con **CRLF**, che lo standard pretende.
-- **Niente piegatura delle righe a 75 ottetti**, deliberatamente: la riga più lunga prodotta è `SUMMARY:Pomeriggio lungo (P1)`, ventinove caratteri. Codice irraggiungibile è codice che nessun test copre.
+- **Niente piegatura delle righe a 75 ottetti**, deliberatamente: le righe più lunghe prodotte sono `UID:turno-2026-08-13@vanessa.matteo.cool` e `PRODID:-//vanessa.matteo.cool//turni//IT`, quaranta caratteri entrambe. Codice irraggiungibile è codice che nessun test copre.
 - I comandi si lanciano dalla cartella `app/`.
 - Test mirato: `npx vitest run --root <pkg> <pkg>/test/<file>`. Suite intera: `npm test`.
 - **Prima di ogni commit: `npm test` E `npm run typecheck`.** `npm test` non fa typecheck — vitest toglie i tipi — quindi da solo non vede un'interfaccia allargata che rompe un finto oggetto scritto a mano.

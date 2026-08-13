@@ -41,7 +41,12 @@ export function esportaMese(
   const a = document.createElement('a');
   a.href = url;
   a.download = `turni-${year}-${mese}.ics`;
+  // Firefox has historically required the anchor to be in the document for
+  // the download to start, and Safari's behaviour has moved between
+  // versions — attached-clicked-removed is the version every browser agrees on.
+  document.body.append(a);
   a.click();
+  a.remove();
   // Revoked on the next tick, not now: revoking synchronously can pull the
   // blob out from under a download that has not started reading it.
   setTimeout(() => URL.revokeObjectURL(url), 0);

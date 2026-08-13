@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { DayEntry, IsoDate } from '../src/index.js';
-import { contaTurniEsportabili, icsDelMese } from '../src/index.js';
+import { contaTurniEsportabili, escapeIcsText, icsDelMese } from '../src/index.js';
 
 /** A fixed instant, so DTSTAMP is the same on every run. A test that depends
  *  on the clock it runs at is not a test. */
@@ -137,5 +137,39 @@ describe('contaTurniEsportabili', () => {
   it('is zero for a month of Libero, exactly as for an empty one', () => {
     expect(contaTurniEsportabili(2026, 8, mese({ '2026-08-04': { code: 'L' } }))).toBe(0);
     expect(contaTurniEsportabili(2026, 8, mese({}))).toBe(0);
+  });
+});
+
+describe('escapeIcsText', () => {
+  it('escapes a backslash, with backslash first so the order is correct', () => {
+    // If we escape semicolon before backslash, `a\b;c` would become `a\\b\;c`,
+    // which is wrong: the backslash is not escaped. Backslash-first gives `a\\b\;c`.
+    expect(escapeIcsText('a\\b;c')).toBe('a\\\\b\\;c');
+  });
+
+  it('escapes a semicolon', () => {
+    expect(escapeIcsText('before;after')).toBe('before\\;after');
+  });
+
+  it('escapes a comma', () => {
+    expect(escapeIcsText('before,after')).toBe('before\\,after');
+  });
+
+  it('escapes a newline to a literal backslash-n', () => {
+    expect(escapeIcsText('before\nafter')).toBe('before\\nafter');
+  });
+
+  it('escapes a carriage return + newline to a literal backslash-n', () => {
+    expect(escapeIcsText('before\r\nafter')).toBe('before\\nafter');
+  });
+
+  it('passes a plain string through unchanged', () => {
+    expect(escapeIcsText('plain text with spaces')).toBe('plain text with spaces');
+  });
+
+  it('escapes multiple special characters in the correct order', () => {
+    // Order matters: backslash first, then the other three.
+    // A value like `a\;,b\n` should become `a\\;\,b\\n`.
+    expect(escapeIcsText('a\\;,b\n')).toBe('a\\\\\\;\\,b\\n');
   });
 });

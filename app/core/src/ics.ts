@@ -18,14 +18,21 @@ const DOMINIO = 'vanessa.matteo.cool';
 const NOME_CALENDARIO = 'Turni di Vanessa';
 
 /** RFC 5545 escaping for a TEXT value. The backslash goes first, or it would
- *  escape the escapes added after it. */
-function testo(v: string): string {
+ *  escape the escapes added after it.
+ *
+ *  Exported so its escaping rules can be tested: no current real data
+ *  (shift descriptions, codes, calendar name) contains `\`, `;`, `,`, or
+ *  newlines, so the escape logic is otherwise unreachable and unverifiable. */
+export function escapeIcsText(v: string): string {
   return v
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
     .replace(/\r?\n/g, '\\n');
 }
+
+/** Alias for backwards compatibility within this module. */
+const testo = escapeIcsText;
 
 /** `2026-08-13` + `07:00` -> `20260813T070000`, with no zone: see the spec. */
 function dataOra(d: IsoDate, hhmm: string): string {
@@ -44,6 +51,9 @@ function istante(now: Date): string {
  *  01:00, which is a roster waking up the person who works it. */
 function iniziaLaMattina(s: Shift): boolean {
   // Zero-padded HH:MM compares correctly as a string.
+  // The `s.start !== ''` check is defensive: turniDelMese already filters out
+  // shifts with no start time, so this condition is unreachable, but it
+  // documents the invariant that we only compare times that exist.
   return s.start !== '' && s.start < '12:00';
 }
 

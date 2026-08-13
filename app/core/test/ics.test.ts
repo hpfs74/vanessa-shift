@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import type { DayEntry, IsoDate } from '../src/index.js';
-import { contaTurniEsportabili, escapeIcsText, icsDelMese } from '../src/index.js';
+import { contaTurniEsportabili, icsDelMese } from '../src/index.js';
+// Import test-only helper directly from its source, not from the public API.
+import { escapeIcsText } from '../src/ics.js';
 
 /** A fixed instant, so DTSTAMP is the same on every run. A test that depends
  *  on the clock it runs at is not a test. */

@@ -106,7 +106,7 @@ aws cognito-idp delete-user-pool-domain \
 
 | Vista | Cosa fa |
 |-------|---------|
-| **Calendario** | griglia mensile, CRUD completo del giorno: turno, turno originale, collega, tipo di scambio, note. Il puntino accanto al codice segnala uno scambio. |
+| **Calendario** | griglia mensile, CRUD completo del giorno: turno, turno originale, collega, tipo di scambio, note. Il puntino accanto al codice segnala uno scambio. Da qui si esporta il mese nel calendario del telefono. |
 | **Carica** | leggi il mese da una foto del foglio, oppure scrivi la sequenza dei codici. In entrambi i casi mostra quali giorni sovrascriverebbe **prima** di salvare. |
 | **Scambi** | saldo favori e saldo ore per collega, come il foglio Scambi. |
 | **Riepilogo** | due grafici ad anello (ore per turno, giorni per codice), ore per mese a barre, tabella per codice. |
@@ -145,6 +145,47 @@ viaggia: `MAX_READINGS_PER_DAY` sta in `core`, che il frontend importa già.
 Le **ore settimanali da contratto** si mostrano e basta: nessun conteggio le legge. Collegarle
 alle ore lavorate vuol dire decidere cosa fare di mesi iniziati a metà, festivi, malattia e
 ferie — e di queste ultime il modello dati non sa niente. È una spec sua.
+
+## I turni nel calendario dell'iPhone
+
+Il pulsante **Esporta nel calendario**, nella vista Calendario, scarica il mese che si sta
+guardando come file `.ics`. Su iPhone il file finisce in *File*, e da lì si apre in Calendario.
+
+Il pulsante è spento quando non c'è niente da esportare. Un mese di soli `L` conta come vuoto:
+`Libero` non ha orari, quindi non diventa un evento.
+
+**Gli orari non hanno fuso.** Escono come `20260813T070000`, senza `Z` e senza `TZID`: lo standard
+la chiama ora *fluttuante* e il telefono la legge nel proprio fuso. Le sette del mattino restano le
+sette del mattino, senza conversioni e quindi senza aritmetica sull'ora legale — che è il pezzo che
+si sbaglia in modo invisibile e si scopre rotto l'ultima domenica di marzo. Il prezzo è che su un
+telefono impostato su un altro fuso il turno si legge comunque alle 07:00 locali.
+
+**La sveglia sta solo sui turni del mattino**, dodici ore prima: le 19:00 della sera prima per un
+turno che comincia alle 07:00. Sui pomeriggi non c'è, e non è una dimenticanza: dodici ore prima
+delle 13:00 è l'una di notte.
+
+### Se dopo aver riesportato compaiono i doppioni
+
+Ogni evento ha un identificatore costruito dalla data — `turno-2026-08-13@vanessa.matteo.cool` —
+che non cambia fra un'esportazione e l'altra, ed è la condizione perché Calendario aggiorni gli
+eventi invece di aggiungerli una seconda volta. In più `SEQUENCE` cresce a ogni esportazione, ed è
+il numero che i client guardano per capire che un evento è una versione più nuova. Il contatore sta
+in `localStorage`, per mese e per dispositivo.
+
+È la condizione necessaria, non la garanzia: come iOS si comporta all'importazione non è
+verificabile senza il telefono. **Se i doppioni arrivano lo stesso**, si cancellano gli eventi di
+quel mese dal calendario e si reimporta il file. Non c'è niente da sistemare nell'app.
+
+### Quello che non fa
+
+Non è un calendario sottoscritto che si aggiorna da solo. Una sottoscrizione di iOS non sa
+autenticarsi — niente OAuth, niente passkey, niente header — quindi l'indirizzo dovrebbe funzionare
+senza accesso e portare un segreto nell'URL, e chiunque avesse quel link leggerebbe i turni per
+sempre. Un'app che si è chiusa col volto non apre una porta laterale sui dati che protegge. Il
+ragionamento per esteso sta in `docs/superpowers/specs/2026-08-13-turni-nel-calendario-design.md`.
+
+Non esporta le ore corrette a mano: l'app sa che la **durata** è cambiata, non **quale estremo** si
+è spostato. Il calendario porta gli orari del turno, la correzione resta nel cartellino.
 
 ## Colori dei grafici
 

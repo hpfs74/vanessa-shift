@@ -31,9 +31,6 @@ export function escapeIcsText(v: string): string {
     .replace(/\r?\n/g, '\\n');
 }
 
-/** Alias for backwards compatibility within this module. */
-const testo = escapeIcsText;
-
 /** `2026-08-13` + `07:00` -> `20260813T070000`, with no zone: see the spec. */
 function dataOra(d: IsoDate, hhmm: string): string {
   return `${d.replace(/-/g, '')}T${hhmm.replace(':', '')}00`;
@@ -42,7 +39,7 @@ function dataOra(d: IsoDate, hhmm: string): string {
 /** `DTSTAMP` is the one field that is a real instant, so it is the one field
  *  in UTC. */
 function istante(now: Date): string {
-  return `${now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}`;
+  return now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
 /** The alarm goes on the shifts that start in the morning, and only those.
@@ -99,7 +96,7 @@ export function icsDelMese(
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
     `PRODID:-//${DOMINIO}//turni//IT`,
-    `X-WR-CALNAME:${testo(NOME_CALENDARIO)}`,
+    `X-WR-CALNAME:${escapeIcsText(NOME_CALENDARIO)}`,
   ];
 
   for (const { date, s } of turniDelMese(year, month, days)) {
@@ -113,7 +110,7 @@ export function icsDelMese(
       `SEQUENCE:${sequence}`,
       `DTSTART:${dataOra(date, s.start)}`,
       `DTEND:${dataOra(date, s.end)}`,
-      `SUMMARY:${testo(titolo)}`,
+      `SUMMARY:${escapeIcsText(titolo)}`,
     );
     if (iniziaLaMattina(s)) {
       righe.push(
@@ -122,7 +119,7 @@ export function icsDelMese(
         'ACTION:DISPLAY',
         // Required by ACTION:DISPLAY, and it is the text of the notification.
         // This is the alarm's DESCRIPTION, not the event's, which stays absent.
-        `DESCRIPTION:${testo(titolo)}`,
+        `DESCRIPTION:${escapeIcsText(titolo)}`,
         'END:VALARM',
       );
     }

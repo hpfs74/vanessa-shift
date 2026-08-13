@@ -123,6 +123,58 @@ describe('icsDelMese', () => {
     expect(out).toContain('DTSTART:20260813T070000');
     expect(out).toContain('DTEND:20260813T130000');
   });
+
+  it('keeps every line under the 75-octet fold limit, for every shift code at once', () => {
+    // Passes today with a wide margin (see the comment in ics.ts). The point
+    // of the test is to fail the day that margin disappears — free text in a
+    // DESCRIPTION, say — turning "we decided not to fold" from a comment
+    // nobody re-reads back into something the suite actually checks.
+    const out = icsDelMese(
+      2026,
+      8,
+      mese({
+        '2026-08-01': { code: 'L' },
+        '2026-08-02': { code: 'M' },
+        '2026-08-03': { code: 'M1' },
+        '2026-08-04': { code: 'P' },
+        '2026-08-05': { code: 'P1' },
+      }),
+      0,
+      ORA,
+    );
+    for (const riga of out.split('\r\n')) {
+      expect(new TextEncoder().encode(riga).length, riga).toBeLessThanOrEqual(75);
+    }
+  });
+
+  it('produces exactly this document for a single-day month', () => {
+    // Every other test here is toContain, which cannot catch a stray
+    // property, a duplicated line, or a BEGIN/END nesting error. This one
+    // pins the whole structure at once.
+    const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code: 'M' } }), 0, ORA);
+    expect(out).toBe(
+      [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//vanessa.matteo.cool//turni//IT',
+        'X-WR-CALNAME:Turni di Vanessa',
+        'BEGIN:VEVENT',
+        'UID:turno-2026-08-13@vanessa.matteo.cool',
+        'DTSTAMP:20260813T101500Z',
+        'SEQUENCE:0',
+        'DTSTART:20260813T070000',
+        'DTEND:20260813T130000',
+        'SUMMARY:Mattina (M)',
+        'BEGIN:VALARM',
+        'TRIGGER:-PT12H',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:Mattina (M)',
+        'END:VALARM',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n') + '\r\n',
+    );
+  });
 });
 
 describe('contaTurniEsportabili', () => {

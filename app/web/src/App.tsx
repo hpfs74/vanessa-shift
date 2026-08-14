@@ -7,6 +7,7 @@ import type { DayEntry, DayRecord, IsoDate, PaySettings, ShiftCode } from '@vane
 import {
   EMPTY_PAY_SETTINGS,
   MONTH_NAMES,
+  contaTurniEsportabili,
   knownColleagues,
   parseIso,
   today as realToday,
@@ -20,6 +21,7 @@ import { Profilo } from './Profilo.js';
 import { Summary } from './Summary.js';
 import { Swaps } from './Swaps.js';
 import { api as realApi, type Api, type RemoteShift } from './api.js';
+import { esportaMese } from './esportaTurni.js';
 
 const YEAR = 2026;
 
@@ -91,6 +93,13 @@ export function App({
     }
     return m;
   }, [days]);
+
+  // Libero produces no event, so a month of Libero and an empty month are the
+  // same case: nothing to send.
+  const daEsportare = useMemo(
+    () => contaTurniEsportabili(YEAR, month, entries),
+    [month, entries],
+  );
 
   /** The bulk screen only ever sets codes, so it compares codes. */
   const codes = useMemo(() => {
@@ -219,6 +228,15 @@ export function App({
                   ›
                 </button>
               </div>
+
+              <button
+                type="button"
+                className="esporta"
+                disabled={daEsportare === 0}
+                onClick={() => esportaMese(YEAR, month, entries)}
+              >
+                Esporta nel calendario
+              </button>
 
               <Calendar
                 year={YEAR}

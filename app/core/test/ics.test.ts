@@ -1,0 +1,229 @@
+import { describe, expect, it } from 'vitest';
+
+import type { DayEntry, IsoDate } from '../src/index.js';
+import { contaTurniEsportabili, icsDelMese } from '../src/index.js';
+// Import test-only helper directly from its source, not from the public API.
+import { escapeIcsText } from '../src/ics.js';
+
+/** A fixed instant, so DTSTAMP is the same on every run. A test that depends
+ *  on the clock it runs at is not a test. */
+const ORA = new Date('2026-08-13T10:15:00.000Z');
+
+const mese = (giorni: Record<string, DayEntry>): ReadonlyMap<IsoDate, DayEntry> =>
+  new Map(Object.entries(giorni) as [IsoDate, DayEntry][]);
+
+describe('icsDelMese', () => {
+  it('wraps the events in a calendar', () => {
+    const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code: 'M' } }), 0, ORA);
+    expect(out.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
+    expect(out.endsWith('END:VCALENDAR\r\n')).toBe(true);
+    expect(out).toContain('VERSION:2.0');
+  });
+
+  it('ends every line with CRLF, which the standard requires', () => {
+    // A lone \n is the kind of thing a lenient parser forgives and a strict
+    // one rejects, and the strict one is the phone.
+    const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code: 'M' } }), 0, ORA);
+    expect(out).not.toMatch(/[^\r]\n/);
+  });
+
+  it('turns a morning into a timed event with the shift hours', () => {
+    const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code: 'M' } }), 0, ORA);
+    expect(out).toContain('DTSTART:20260813T070000');
+    expect(out).toContain('DTEND:20260813T130000');
+    expect(out).toContain('SUMMARY:Mattina (M)');
+  });
+
+  it('writes times with no Z and no TZID, so the phone reads them locally', () => {
+    // Floating time: no conversion, therefore no daylight-saving arithmetic
+    // and no hand-written VTIMEZONE to get subtly wrong.
+    const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code: 'M' } }), 0, ORA);
+    expect(out).toMatch(/DTSTART:\d{8}T\d{6}\r\n/);
+    expect(out).not.toContain('TZID');
+    expect(out).not.toContain('VTIMEZONE');
+  });
+
+  it('stamps every event with the instant it was built', () => {
+    const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code: 'M' } }), 0, ORA);
+    expect(out).toContain('DTSTAMP:20260813T101500Z');
+  });
+
+  it('skips Libero, which has no hours to put on a clock', () => {
+    const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code: 'L' } }), 0, ORA);
+    expect(out).not.toContain('BEGIN:VEVENT');
+  });
+
+  it('gives the same day the same UID every time it is exported', () => {
+    // This is the whole of what separates an update from a duplicate.
+    const giorni = mese({ '2026-08-13': { code: 'M' } });
+    const primo = icsDelMese(2026, 8, giorni, 0, ORA);
+    const secondo = icsDelMese(2026, 8, giorni, 1, new Date('2026-09-01T08:00:00.000Z'));
+    expect(primo).toContain('UID:turno-2026-08-13@vanessa.matteo.cool');
+    expect(secondo).toContain('UID:turno-2026-08-13@vanessa.matteo.cool');
+  });
+
+  it('carries the sequence it was given', () => {
+    const giorni = mese({ '2026-08-13': { code: 'M' } });
+    expect(icsDelMese(2026, 8, giorni, 0, ORA)).toContain('SEQUENCE:0');
+    expect(icsDelMese(2026, 8, giorni, 3, ORA)).toContain('SEQUENCE:3');
+  });
+
+  it('puts the alarm on the shifts that start in the morning', () => {
+    for (const code of ['M', 'M1'] as const) {
+      const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code } }), 0, ORA);
+      expect(out, code).toContain('BEGIN:VALARM');
+      expect(out, code).toContain('TRIGGER:-PT12H');
+    }
+  });
+
+  it('leaves the afternoons without one, or it would ring at one in the morning', () => {
+    // Twelve hours before a 13:00 start is 01:00. An alarm that wakes a shift
+    // worker to tell her about an afternoon shift is worse than no alarm.
+    for (const code of ['P', 'P1'] as const) {
+      const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code } }), 0, ORA);
+      expect(out, code).not.toContain('BEGIN:VALARM');
+    }
+  });
+
+  it('produces no events for a month with nothing worked in it', () => {
+    expect(icsDelMese(2026, 8, mese({}), 0, ORA)).not.toContain('BEGIN:VEVENT');
+    expect(icsDelMese(2026, 8, mese({ '2026-08-13': { code: 'L' } }), 0, ORA)).not.toContain(
+      'BEGIN:VEVENT',
+    );
+  });
+
+  it('only exports the month it was asked for', () => {
+    const out = icsDelMese(
+      2026,
+      8,
+      mese({ '2026-07-31': { code: 'M' }, '2026-08-01': { code: 'M' }, '2026-09-01': { code: 'M' } }),
+      0,
+      ORA,
+    );
+    expect(out).toContain('UID:turno-2026-08-01@');
+    expect(out).not.toContain('UID:turno-2026-07-31@');
+    expect(out).not.toContain('UID:turno-2026-09-01@');
+  });
+
+  it('puts the days in order', () => {
+    const out = icsDelMese(
+      2026,
+      8,
+      mese({ '2026-08-20': { code: 'M' }, '2026-08-03': { code: 'P' } }),
+      0,
+      ORA,
+    );
+    expect(out.indexOf('turno-2026-08-03')).toBeLessThan(out.indexOf('turno-2026-08-20'));
+  });
+
+  it('ignores an hours override, which says how long and not which end moved', () => {
+    // The calendar answers "when am I working". The override answers "what
+    // did I actually do", and the two are different questions.
+    const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code: 'M', hoursOverride: 4 } }), 0, ORA);
+    expect(out).toContain('DTSTART:20260813T070000');
+    expect(out).toContain('DTEND:20260813T130000');
+  });
+
+  it('keeps every line under the 75-octet fold limit, for every shift code at once', () => {
+    // Passes today with a wide margin (see the comment in ics.ts). The point
+    // of the test is to fail the day that margin disappears — free text in a
+    // DESCRIPTION, say — turning "we decided not to fold" from a comment
+    // nobody re-reads back into something the suite actually checks.
+    const out = icsDelMese(
+      2026,
+      8,
+      mese({
+        '2026-08-01': { code: 'L' },
+        '2026-08-02': { code: 'M' },
+        '2026-08-03': { code: 'M1' },
+        '2026-08-04': { code: 'P' },
+        '2026-08-05': { code: 'P1' },
+      }),
+      0,
+      ORA,
+    );
+    for (const riga of out.split('\r\n')) {
+      expect(new TextEncoder().encode(riga).length, riga).toBeLessThanOrEqual(75);
+    }
+  });
+
+  it('produces exactly this document for a single-day month', () => {
+    // Every other test here is toContain, which cannot catch a stray
+    // property, a duplicated line, or a BEGIN/END nesting error. This one
+    // pins the whole structure at once.
+    const out = icsDelMese(2026, 8, mese({ '2026-08-13': { code: 'M' } }), 0, ORA);
+    expect(out).toBe(
+      [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//vanessa.matteo.cool//turni//IT',
+        'X-WR-CALNAME:Turni di Vanessa',
+        'BEGIN:VEVENT',
+        'UID:turno-2026-08-13@vanessa.matteo.cool',
+        'DTSTAMP:20260813T101500Z',
+        'SEQUENCE:0',
+        'DTSTART:20260813T070000',
+        'DTEND:20260813T130000',
+        'SUMMARY:Mattina (M)',
+        'BEGIN:VALARM',
+        'TRIGGER:-PT12H',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:Mattina (M)',
+        'END:VALARM',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n') + '\r\n',
+    );
+  });
+});
+
+describe('contaTurniEsportabili', () => {
+  it('counts the days that will become events', () => {
+    expect(
+      contaTurniEsportabili(
+        2026,
+        8,
+        mese({ '2026-08-03': { code: 'M' }, '2026-08-04': { code: 'L' }, '2026-08-05': { code: 'P' } }),
+      ),
+    ).toBe(2);
+  });
+
+  it('is zero for a month of Libero, exactly as for an empty one', () => {
+    expect(contaTurniEsportabili(2026, 8, mese({ '2026-08-04': { code: 'L' } }))).toBe(0);
+    expect(contaTurniEsportabili(2026, 8, mese({}))).toBe(0);
+  });
+});
+
+describe('escapeIcsText', () => {
+  it('escapes a backslash, with backslash first so the order is correct', () => {
+    // If we escape semicolon before backslash, `a\b;c` would become `a\\b\;c`,
+    // which is wrong: the backslash is not escaped. Backslash-first gives `a\\b\;c`.
+    expect(escapeIcsText('a\\b;c')).toBe('a\\\\b\\;c');
+  });
+
+  it('escapes a semicolon', () => {
+    expect(escapeIcsText('before;after')).toBe('before\\;after');
+  });
+
+  it('escapes a comma', () => {
+    expect(escapeIcsText('before,after')).toBe('before\\,after');
+  });
+
+  it('escapes a newline to a literal backslash-n', () => {
+    expect(escapeIcsText('before\nafter')).toBe('before\\nafter');
+  });
+
+  it('escapes a carriage return + newline to a literal backslash-n', () => {
+    expect(escapeIcsText('before\r\nafter')).toBe('before\\nafter');
+  });
+
+  it('passes a plain string through unchanged', () => {
+    expect(escapeIcsText('plain text with spaces')).toBe('plain text with spaces');
+  });
+
+  it('escapes multiple special characters in the correct order', () => {
+    // Order matters: backslash first, then the other three.
+    // A value like `a\;,b\n` should become `a\\;\,b\\n`.
+    expect(escapeIcsText('a\\;,b\n')).toBe('a\\\\\\;\\,b\\n');
+  });
+});

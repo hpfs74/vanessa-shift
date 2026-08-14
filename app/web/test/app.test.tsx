@@ -715,3 +715,63 @@ describe('profilo', () => {
     ).toHaveAttribute('aria-current', 'true');
   });
 });
+
+describe('esportazione nel calendario', () => {
+  it('offers the export on a month with shifts in it', async () => {
+    const f = fakeApi([{ date: '2026-01-05', code: 'M' }]);
+    render(<App api={f.api} today={JAN} />);
+    expect(await screen.findByRole('button', { name: 'Esporta nel calendario' })).toBeEnabled();
+  });
+
+  it('disables it on a month with nothing to export', async () => {
+    // An empty file imports with no error and no effect, which looks exactly
+    // like a broken export. Better to say there is nothing to send.
+    render(<App api={fakeApi().api} today={JAN} />);
+    expect(await screen.findByRole('button', { name: 'Esporta nel calendario' })).toBeDisabled();
+  });
+
+  it('treats a month of Libero as nothing to export', async () => {
+    // `L` has no hours, so it produces no event: a month of Libero and an
+    // empty month are the same case.
+    const f = fakeApi([{ date: '2026-01-05', code: 'L' }]);
+    render(<App api={f.api} today={JAN} />);
+    expect(await screen.findByRole('button', { name: 'Esporta nel calendario' })).toBeDisabled();
+  });
+
+  it('exports the month on screen, not the month it opened on', async () => {
+    // The button calls esportaMese(YEAR, month, entries) with the month held
+    // in state, not the month the app started on. If that ever regresses to
+    // a literal, the file downloaded here would be named for January instead
+    // of the February the user actually navigated to and is looking at.
+    const user = userEvent.setup();
+    // jsdom has neither object URLs nor a real download, so both are
+    // stubbed — the same gap esportaTurni.test.ts works around.
+    if (typeof URL.createObjectURL !== 'function') {
+      URL.createObjectURL = () => '';
+      URL.revokeObjectURL = () => {};
+    }
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:finto');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    // Real document.createElement, just with every <a> it makes recorded, so
+    // the anchor esportaMese builds is inspectable without disturbing what
+    // React itself creates while rendering.
+    const originalCreateElement = document.createElement.bind(document);
+    const anchors: HTMLAnchorElement[] = [];
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      const el = originalCreateElement(tag);
+      if (tag === 'a') anchors.push(el as HTMLAnchorElement);
+      return el;
+    });
+
+    const f = fakeApi([{ date: '2026-02-10', code: 'M' }]);
+    render(<App api={f.api} today={JAN} />);
+    await user.click(await screen.findByRole('button', { name: 'Mese successivo' }));
+    await user.click(await screen.findByRole('button', { name: 'Esporta nel calendario' }));
+
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0]!.download).toBe('turni-2026-02.ics');
+
+    vi.restoreAllMocks();
+  });
+});

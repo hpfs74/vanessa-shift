@@ -2,13 +2,30 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DayEntry, IsoDate, MonthRoster, PaySettings, Profile, ShiftCode } from '@vanessa/core';
+import type {
+  DayEntry,
+  IsoDate,
+  MonthRoster,
+  PaySettings,
+  PhotoReading,
+  Profile,
+  ShiftCode,
+} from '@vanessa/core';
 import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
 
 import { App } from '../src/App.js';
 import { Calendar, weekHours, weeksOfMonth } from '../src/Calendar.js';
 import { DayEditor } from '../src/DayEditor.js';
 import type { Api, RemoteShift } from '../src/api.js';
+
+/** jsdom has neither canvas nor createImageBitmap, same as in
+ *  `photoImport.test.tsx`: this lets a test enter through the real file
+ *  input, the way Vanessa does, without the real resizing. */
+vi.mock('../src/image.js', () => ({
+  MAX_EDGE: 2576,
+  scaleFor: () => 1,
+  resize: () => Promise.resolve('AAAA'),
+}));
 
 /** Only `roster` and `saveRoster` are worth swapping out from a test: every
  *  other call already has a positional parameter, and giving the roster pair
@@ -1012,6 +1029,83 @@ describe('App and the roster', () => {
     resolvers.get(9)!(null);
     await waitFor(() => expect(rosterResolved).toContain(9));
     expect(screen.getByRole('button', { name: /^1 Ottobre/ })).toHaveAccessibleName(
+      /collega con te/,
+    );
+  });
+});
+
+describe('saving a roster from a different month than the one on screen', () => {
+  // A photo's month can be read differently than the month she happens to be
+  // looking at — the "Mese" selector on the import screen exists for exactly
+  // that. `App.saveRoster`'s `r.month === month` guard is the only thing
+  // standing between a save like that and repainting whatever calendar is
+  // currently open with somebody else's month.
+  it('does not let it overwrite the month she is currently viewing', async () => {
+    const user = userEvent.setup();
+    const shifts = new Map<IsoDate, RemoteShift>([['2026-10-01', { date: '2026-10-01', code: 'P' }]]);
+    const savedRosters: MonthRoster[] = [];
+
+    const octoberRoster: MonthRoster = {
+      year: 2026,
+      month: 10,
+      people: [{ name: 'Giulia', row: 3, codes: ['P', ...Array<string>(30).fill('')] }],
+    };
+    const septemberReading: PhotoReading = {
+      month: 9,
+      year: 2026,
+      found: true,
+      foundName: 'Vanessa',
+      foundRow: 5,
+      days: Array.from({ length: 30 }, (_, i) => ({
+        day: i + 1,
+        code: i === 0 ? ('M' as ShiftCode) : null,
+        confident: true,
+      })),
+    };
+    const septemberRoster: MonthRoster = {
+      year: 2026,
+      month: 9,
+      people: [{ name: 'Marta', row: 2, codes: ['M', ...Array<string>(29).fill('')] }],
+    };
+
+    const api: Api = {
+      shifts: async () => [...shifts.values()],
+      saveShift: async () => {},
+      deleteShift: async () => {},
+      saveShifts: async (entries) => {
+        for (const e of entries) shifts.set(e.date, { date: e.date, code: e.code });
+      },
+      config: async () => ({ pay: EMPTY_PAY_SETTINGS, profile: EMPTY_PROFILE, quota: { used: 0 } }),
+      paySettings: async () => EMPTY_PAY_SETTINGS,
+      savePaySettings: async () => {},
+      saveProfile: async () => {},
+      roster: async (_y, m) => (m === 10 ? octoberRoster : null),
+      saveRoster: async (r) => {
+        savedRosters.push(r);
+      },
+      readPhoto: async () => ({ reading: septemberReading, roster: septemberRoster }),
+    };
+
+    render(<App api={api} initialMonth={10} today="2026-10-01" />);
+
+    // October's own roster is already on screen: Giulia's P overlaps her P.
+    expect(await screen.findByRole('button', { name: /^1 Ottobre/ })).toHaveAccessibleName(
+      /collega con te/,
+    );
+
+    const nav = () => within(screen.getByRole('navigation', { name: 'Sezioni' }));
+    await user.click(nav().getByRole('button', { name: /Carica/ }));
+    await user.upload(
+      screen.getByLabelText(/Leggi da una foto/i),
+      new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
+    );
+    await user.click(await screen.findByRole('button', { name: /^Salva \d+ giorni$/ }));
+    await waitFor(() => expect(savedRosters).toEqual([septemberRoster]));
+
+    await user.click(nav().getByRole('button', { name: /Calendario/ }));
+    // She is still looking at October: Marta's September roster must not
+    // have replaced Giulia's.
+    expect(await screen.findByRole('button', { name: /^1 Ottobre/ })).toHaveAccessibleName(
       /collega con te/,
     );
   });

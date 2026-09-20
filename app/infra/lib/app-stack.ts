@@ -62,7 +62,7 @@ export class AppStack extends Stack {
     // --- Data ---
     // Point-in-time recovery: the way back after damage. It was the only
     // safety net when the API was open to anyone; the API is now behind a JWT
-    // authorizer on all five routes, so this is no longer the last line — but
+    // authorizer on all seven routes, so this is no longer the last line — but
     // authentication does not undo a mistake made by someone signed in, which
     // is the case it was really for.
     const table = new TableV2(this, 'Tabella', {

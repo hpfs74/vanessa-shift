@@ -8,9 +8,11 @@
 
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 
-import type { ContractKind, IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
+import type { ContractKind, IsoDate, PaySettings, Profile, RosterPerson, ShiftCode } from '@vanessa/core';
 import {
   MAX_DAY_HOURS,
+  MAX_NAME_LENGTH,
+  MAX_ROSTER_PEOPLE,
   MAX_WEEKLY_HOURS,
   daysBetween,
   isContractKind,
@@ -18,7 +20,16 @@ import {
   isShiftCode,
   isSwapKind,
   isValidHours,
+  normaliseCode,
+  normaliseColleague,
 } from '@vanessa/core';
+
+// Re-exported rather than redeclared: `roster.ts`'s `validateRoster` (the
+// photo path) and this module's `requireRosterPeople` (the save path) must
+// agree on both caps, or a reading this lenient side accepted could still be
+// refused whole by the strict one — see the comment on `MAX_ROSTER_PEOPLE`
+// in core.
+export { MAX_ROSTER_PEOPLE };
 
 import { NotSignedIn } from './token.js';
 
@@ -183,6 +194,54 @@ export function requireObject(v: unknown, field: string): Record<string, unknown
     throw new InvalidInput(`${field}: deve essere un oggetto`);
   }
   return v as Record<string, unknown>;
+}
+
+export function requireYearMonth(
+  p: Record<string, string | undefined> | undefined,
+): { year: number; month: number } {
+  const year = Number(p?.year);
+  const month = Number(p?.month);
+  // Number(undefined) is NaN and Number('') is 0: both fail this.
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new InvalidInput('year: anno non valido');
+  }
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw new InvalidInput('month: mese fuori da 1-12');
+  }
+  return { year, month };
+}
+
+/** Strict, unlike `validateRoster`. That one judges what a model said it read
+ *  from a photograph; this one judges a body our own client has already
+ *  validated, where anything malformed is a bug worth hearing about. Both
+ *  caps still come from `@vanessa/core`, though: what the photo path already
+ *  accepted must never be the reason this one refuses the whole save. */
+export function requireRosterPeople(
+  b: Record<string, unknown>,
+  days: number,
+): RosterPerson[] {
+  const raw = b.people;
+  if (!Array.isArray(raw)) throw new InvalidInput('people: atteso un elenco');
+  if (raw.length > MAX_ROSTER_PEOPLE) {
+    throw new InvalidInput(`people: troppe persone, massimo ${MAX_ROSTER_PEOPLE}`);
+  }
+  return raw.map((v, i) => {
+    const p = requireObject(v, `people[${i}]`);
+    const text = optionalText(p.name, `people[${i}].name`, MAX_NAME_LENGTH);
+    // The photo path runs every name through `normaliseColleague` (roster.ts's
+    // `personOf`); this one must match, or the same field holds a trimmed name
+    // when it came from a photo and a raw one when it came from this form.
+    const name = text ? normaliseColleague(text) : '';
+    if (!name) throw new InvalidInput(`people[${i}].name: atteso un nome`);
+    if (!Array.isArray(p.codes) || p.codes.length !== days) {
+      throw new InvalidInput(`people[${i}].codes: attesi ${days} giorni`);
+    }
+    return {
+      name,
+      row: typeof p.row === 'number' && Number.isInteger(p.row) ? p.row : null,
+      codes: p.codes.map(normaliseCode),
+    };
+  });
 }
 
 export function requireWeeklyHours(v: unknown): number | null {

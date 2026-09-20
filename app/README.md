@@ -225,10 +225,10 @@ scorrere la pagina in orizzontale.
 ## Import da foto
 
 La foto del foglio affisso in reparto le arriva su WhatsApp — non la scatta lei — e l'app
-ne legge la sua riga.
+ne legge ogni riga.
 La foto viene ridimensionata sul telefono a 2576px di lato lungo — il massimo
 che il modello usa comunque — e spedita a una Lambda che chiede a Claude Sonnet
-4.6 su Bedrock quali sigle ci sono nella riga intestata a Vanessa. Una lettura
+4.6 su Bedrock quali sigle ci sono in ogni riga del foglio. Una lettura
 prende fra i 18 e i 25 secondi.
 
 Il ragionamento adattivo e' acceso e non e' un lusso: senza, il modello leggeva
@@ -261,7 +261,12 @@ rifiuti: la Function URL è su `authType: NONE` e risponde a chiunque. È che da
 qui sotto — quindi la richiesta parte senza token e la Lambda la rifiuta per
 prima cosa. Una lettura vera va provata in linea.
 
-Ogni lettura costa circa 0,09 €. L'endpoint è dietro lo stesso token verificato in
+Il costo di una lettura va rimisurato, non citato: la cifra che stava qui era presa con
+`MAX_TOKENS` a 8000 e una risposta di una sola riga, e questo ramo ha portato il tetto a 16000 e
+la risposta a un foglio intero — più righe, più `others`, oltre al `thinking: 'adaptive'` che
+sposta la spesa in modo imprevedibile fra ragionamento e risposta. L'immagine in ingresso non è
+cambiata, ma a dominare ora sono i token in uscita, e inventare un numero varrebbe meno di non
+averne nessuno. L'endpoint è dietro lo stesso token verificato in
 **Autenticazione** — la Lambda lo controlla per primo, prima della quota e prima di Bedrock —
 quindi le difese sotto fermano un chiamante già autenticato che esagera, non sostituiscono quel
 controllo: un **tetto di 10 letture al giorno** (contatore su DynamoDB, condizione e
@@ -279,6 +284,30 @@ PROVA_BEDROCK=1 FOTO_LUGLIO=~/vanessa-foto/luglio.jpeg \
   FOTO_AGOSTO=~/vanessa-foto/agosto.jpeg \
   npx vitest run --root api api/test/vision.integration.test.ts
 ```
+
+### I turni degli altri
+
+La lettura prende **tutte le righe** del foglio, non solo quella di Vanessa. La sua va nella
+griglia correggibile di sempre; le altre finiscono in un blocco richiudibile, in sola lettura, che
+dice quante persone ha letto.
+
+Le sigle degli altri si conservano **così come sono scritte**, anche quelle che l'app non conosce
+(`F`, `R`, `C`, `N1`). Dove la sigla è una delle cinque note, il calendario sa gli orari e può
+dire chi condivide le ore; dove non lo è, mostra la lettera e tace. Una sigla nuova non rompe
+l'import: è il motivo per cui non entrano in `ShiftCode`.
+
+Nel calendario il numero in un giorno conta **chi si sovrappone alle sue ore**, non chi c'è. `M`
+finisce quando `P` comincia: si danno il cambio, non si incontrano. Toccando il giorno, i nomi si
+dividono fra *Con te* e *Quel giorno*.
+
+**Se una riga risulta letta male**, non si corregge: si rifà la foto. La nuova lettura sostituisce
+il mese per intero — chi è sparito dal foglio sparisce dal calendario — mentre i suoi turni non si
+cancellano mai. Le due regole sono opposte perché i due dati lo sono: il suo è l'originale, il
+resto è la copia di un foglio che viene riemesso.
+
+**Cosa viene conservato.** Il turnario completo del reparto, con i nomi come stanno sul foglio.
+Sta dietro la passkey come tutto il resto, non lascia l'account, e **non entra nel file `.ics`**:
+quello si manda in giro per natura, e i turni di altri non devono viaggiarci dentro.
 
 ## Risorse AWS
 
@@ -656,9 +685,12 @@ Una tabella sola, chiave composta:
 |--------|------|------|
 | Turno | `TURNI#2026` | `2026-01-15` |
 | Parametri paga | `CONFIG` | `PAGA` |
+| Turnario | `ROSTER#<anno>` | `<MM>` |
 
 Le ore non si memorizzano: si derivano dal codice turno. Un giorno senza turno non esiste come
 item — l'assenza è l'assenza, non una riga vuota.
+
+`ROSTER#<anno>` / `<MM>` — il turnario del mese: una riga per persona, le sigle unite da virgole.
 
 ## Il generatore Python
 

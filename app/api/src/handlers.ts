@@ -1,4 +1,4 @@
-/** The four Lambda handlers. The repo is injected so they test without a network. */
+/** The six Lambda handlers. The repo is injected so they test without a network. */
 
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 
@@ -6,8 +6,10 @@ import {
   InvalidReading,
   MAX_READINGS_PER_DAY,
   RowNotFound,
+  daysInMonth,
   romeToday,
   validateReading,
+  validateRoster,
 } from '@vanessa/core';
 import type { IsoDate, PaySettings, Profile } from '@vanessa/core';
 
@@ -28,9 +30,11 @@ import {
   requirePaySettings,
   requireProfile,
   requireRange,
+  requireRosterPeople,
   requireShiftCode,
   requireShiftList,
   requireSwapKind,
+  requireYearMonth,
 } from './http.js';
 import type { Vision } from './vision.js';
 import { VisionFailed, createVision } from './vision.js';
@@ -210,7 +214,19 @@ export function readPhotoWith(
       }
 
       try {
-        return ok({ reading: validateReading(raw, year()) });
+        // `validateReading` speaks first, and on purpose: if her row fails the
+        // request fails exactly as it did before. `validateRoster` cannot
+        // throw a request away — at worst it yields an empty `people`. The
+        // month comes from the reading rather than a field of its own: the
+        // photo is one, and two sources for one month could disagree.
+        // `reading.foundName` — the same name off the same sheet, already
+        // validated — is passed through so a roster row that duplicates her
+        // in her own written form (not just a bare "Vanessa") is excluded too.
+        const reading = validateReading(raw, year());
+        return ok({
+          reading,
+          roster: validateRoster(raw, reading.year, reading.month, reading.foundName),
+        });
       } catch (e) {
         if (e instanceof RowNotFound) {
           return failure(
@@ -227,6 +243,29 @@ export function readPhotoWith(
     });
 }
 
+export function getRosterWith(repo: Repo) {
+  return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
+    handle(async () => {
+      requireFromCloudFront(event.headers);
+      const { year, month } = requireYearMonth(event.pathParameters);
+      return ok({ roster: await repo.readRoster(year, month) });
+    });
+}
+
+/** Separate from `PUT /shifts` deliberately: her shifts never delete, this
+ *  replaces the month wholesale. One handler holding both promises would be
+ *  a handler contradicting itself. */
+export function putRosterWith(repo: Repo) {
+  return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
+    handle(async () => {
+      requireFromCloudFront(event.headers);
+      const { year, month } = requireYearMonth(event.pathParameters);
+      const people = requireRosterPeople(parseJson(event.body), daysInMonth(year, month));
+      await repo.saveRoster({ year, month, people });
+      return ok({ saved: people.length });
+    });
+}
+
 // Production Lambda entry points.
 export const getShifts = (e: APIGatewayProxyEventV2) => getShiftsWith(repoFromEnvironment())(e);
 export const putShift = (e: APIGatewayProxyEventV2) => putShiftWith(repoFromEnvironment())(e);
@@ -235,3 +274,5 @@ export const getConfig = (e: APIGatewayProxyEventV2) => getConfigWith(repoFromEn
 export const putConfig = (e: APIGatewayProxyEventV2) => putConfigWith(repoFromEnvironment())(e);
 export const readPhoto = (e: APIGatewayProxyEventV2) =>
   readPhotoWith(repoFromEnvironment(), createVision())(e);
+export const getRoster = (e: APIGatewayProxyEventV2) => getRosterWith(repoFromEnvironment())(e);
+export const putRoster = (e: APIGatewayProxyEventV2) => putRosterWith(repoFromEnvironment())(e);

@@ -3,13 +3,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { DayEntry, DayRecord, IsoDate, PaySettings, ShiftCode } from '@vanessa/core';
+import type { DayEntry, DayRecord, IsoDate, MonthRoster, PaySettings, ShiftCode } from '@vanessa/core';
 import {
   EMPTY_PAY_SETTINGS,
   MONTH_NAMES,
   contaTurniEsportabili,
   knownColleagues,
   parseIso,
+  rosterOnDay,
   today as realToday,
 } from '@vanessa/core';
 
@@ -57,6 +58,7 @@ export function App({
   );
   const [view, setView] = useState<View>(initialView);
   const [days, setDays] = useState<Map<IsoDate, RemoteShift>>(new Map());
+  const [roster, setRoster] = useState<MonthRoster | null>(null);
   const [settings, setSettings] = useState<PaySettings>(EMPTY_PAY_SETTINGS);
   const [editing, setEditing] = useState<IsoDate | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +85,23 @@ export function App({
       alive = false;
     };
   }, [reload]);
+
+  // One month at a time, unlike her own shifts which load for the whole
+  // year: twelve months of grid is a large payload for something only ever
+  // looked at one month at a time. `alive` keeps a slow answer for a month
+  // she has since left from landing after the one she is now looking at.
+  useEffect(() => {
+    let alive = true;
+    api
+      .roster(YEAR, month)
+      .then((r) => alive && setRoster(r))
+      // A roster that will not load is not a reason to lose the calendar:
+      // her own shifts, hours and pay are unaffected by it.
+      .catch(() => alive && setRoster(null));
+    return () => {
+      alive = false;
+    };
+  }, [api, month]);
 
   // The views want the day as stored, not just its code: the hour override
   // has to reach the calendar, the summary and the pay simulation alike.
@@ -175,6 +194,17 @@ export function App({
     [api],
   );
 
+  /** Saves, and — only when the saved month is the one on screen — updates
+   *  the roster in hand directly instead of waiting for the effect above to
+   *  re-fire, so an import shows up in the calendar at once. */
+  const saveRoster = useCallback(
+    async (r: MonthRoster) => {
+      await api.saveRoster(r);
+      if (r.month === month) setRoster(r);
+    },
+    [api, month],
+  );
+
   return (
     <div className="app">
       <header>
@@ -244,6 +274,7 @@ export function App({
                 shifts={entries}
                 swapped={new Set(records.filter((r) => r.originalCode).map((r) => r.date))}
                 today={today}
+                roster={roster}
                 selected={editing}
                 onPick={setEditing}
               />
@@ -258,6 +289,7 @@ export function App({
               existing={codes}
               onSave={saveBulk}
               onReadPhoto={api.readPhoto}
+              onSaveRoster={saveRoster}
             />
           )}
 
@@ -274,6 +306,7 @@ export function App({
           date={editing}
           shift={days.get(editing) ?? null}
           colleagues={colleagues}
+          mates={rosterOnDay(roster, editing, days.get(editing)?.code ?? '')}
           onSave={(s) => void saveDay(s)}
           onDelete={() => void deleteDay(editing)}
           onClose={() => setEditing(null)}

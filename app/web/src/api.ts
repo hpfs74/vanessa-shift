@@ -1,6 +1,6 @@
 /** The only place that talks to the network. */
 
-import type { PhotoReading, IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
+import type { MonthRoster, PhotoReading, IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
 
 import { sessioneConfermata, sessioneRifiutata, sessioneValida } from './auth.js';
 
@@ -106,6 +106,16 @@ export interface ConfigSnapshot {
   quota: { used: number };
 }
 
+export interface PhotoRead {
+  reading: PhotoReading;
+  roster: MonthRoster;
+}
+
+/** Zero-padded, matching the sort key the month is stored under. */
+function mm(month: number): string {
+  return String(month).padStart(2, '0');
+}
+
 export interface Api {
   shifts(from: IsoDate, to: IsoDate): Promise<RemoteShift[]>;
   saveShift(shift: RemoteShift): Promise<void>;
@@ -115,7 +125,9 @@ export interface Api {
   paySettings(): Promise<PaySettings>;
   savePaySettings(p: PaySettings): Promise<void>;
   saveProfile(p: Profile): Promise<void>;
-  readPhoto(image: string): Promise<PhotoReading>;
+  roster(year: number, month: number): Promise<MonthRoster | null>;
+  saveRoster(r: MonthRoster): Promise<void>;
+  readPhoto(image: string): Promise<PhotoRead>;
 }
 
 export const api: Api = {
@@ -168,6 +180,16 @@ export const api: Api = {
   async saveProfile(p) {
     await request('/config', { method: 'PUT', body: JSON.stringify({ profile: p }) });
   },
+  async roster(year, month) {
+    const r = await request<{ roster: MonthRoster | null }>(`/roster/${year}/${mm(month)}`);
+    return r.roster;
+  },
+  async saveRoster(r) {
+    await request(`/roster/${r.year}/${mm(r.month)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ people: r.people }),
+    });
+  },
   async readPhoto(image) {
     const body = JSON.stringify({ image });
 
@@ -205,8 +227,12 @@ export const api: Api = {
       // that isn't really an answer) would confirm a session that was never
       // actually checked.
       sessioneConfermata();
-      const j = (await r.json()) as { reading: PhotoReading };
-      return j.reading;
+      const j = (await r.json()) as { reading: PhotoReading; roster?: MonthRoster };
+      // A deploy replaces the bundle and the Lambda as independent resources,
+      // so for a moment the new bundle can be talking to a handler that knows
+      // nothing about rosters. Her row is what matters: an absent roster is an
+      // empty one, not a failed reading.
+      return { reading: j.reading, roster: j.roster ?? { year: j.reading.year, month: j.reading.month, people: [] } };
     } catch {
       // A body that stops halfway, or that isn't the JSON expected: from here
       // it's the same failure as never having arrived.

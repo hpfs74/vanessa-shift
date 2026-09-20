@@ -134,6 +134,12 @@ button.wide { width: 100%; min-height: var(--tap); margin-top: 0.75rem; }
   display: inline-block; width: 4px; height: 4px; border-radius: 50%;
   background: var(--navy); vertical-align: super; margin-left: 1px;
 }
+.mates {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 0.9rem; height: 0.9rem; margin-left: 2px; padding: 0 2px;
+  border-radius: 999px; background: var(--navy); color: #fff;
+  font-size: 0.55rem; font-weight: 700; vertical-align: super;
+}
 .day.t-M { background: var(--M); }
 .day.t-M1 { background: var(--M1); }
 .day.t-P { background: var(--P); }
@@ -188,6 +194,26 @@ legend {
 .code-btn.on { outline: 2px solid var(--navy); outline-offset: 1px; }
 
 .toggle { min-height: var(--tap); text-align: left; padding: 0 0.6rem; color: var(--navy); }
+
+.mates-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.mates-list h3 {
+  font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.05em; margin: 0.3rem 0 0;
+}
+.mates-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.mates-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 0.8rem;
+}
+.mates-list li span:last-child {
+  min-width: 1.8rem; text-align: center; border-radius: 6px; padding: 0.1rem 0.3rem; font-weight: 700;
+}
+.mates-list .t-M { background: var(--M); }
+.mates-list .t-M1 { background: var(--M1); }
+.mates-list .t-P { background: var(--P); }
+.mates-list .t-P1 { background: var(--P1); }
+.mates-list .t-L { background: var(--L); }
 
 label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.78rem; color: var(--muted); }
 input, select, textarea {
@@ -294,6 +320,28 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
 .photo-cell.t-L { background: var(--L); }
 /* The model wasn't sure: it's shown, not blocked. */
 .photo-cell.unsure .code { text-decoration: underline dashed; text-underline-offset: 2px; }
+
+/* --- roster read from the same photo ---
+   Thirty-one cells do not fit a phone's width, and shrinking them to fit
+   would make them illegible; scrolling the row sideways beats that. */
+.roster-read { margin: 0.5rem 0; }
+.roster-grid { display: flex; flex-direction: column; gap: 2px; width: max-content; }
+.roster-row { display: flex; align-items: center; gap: 2px; }
+.roster-name {
+  flex: 0 0 5.5rem; font-size: 0.75rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.roster-cell {
+  display: flex; align-items: center; justify-content: center;
+  width: 1.6rem; height: 1.6rem; flex: 0 0 auto; font-size: 0.68rem;
+  border: 1px solid var(--border); border-radius: 4px; background: #fff;
+}
+.roster-cell.empty { background: var(--bg); color: var(--muted); }
+.roster-cell.t-M { background: var(--M); }
+.roster-cell.t-M1 { background: var(--M1); }
+.roster-cell.t-P { background: var(--P); }
+.roster-cell.t-P1 { background: var(--P1); }
+.roster-cell.t-L { background: var(--L); }
 
 /* --- profilo --- */
 .profilo-head {

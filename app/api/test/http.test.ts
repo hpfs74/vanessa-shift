@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import { EMPTY_PROFILE } from '@vanessa/core';
 
-import { InvalidInput, requireObject, requireProfile, requireWeeklyHours } from '../src/http.js';
+import {
+  InvalidInput,
+  MAX_ROSTER_PEOPLE,
+  requireObject,
+  requireProfile,
+  requireRosterPeople,
+  requireWeeklyHours,
+  requireYearMonth,
+} from '../src/http.js';
 
 describe('requireWeeklyHours', () => {
   it('reads a number', () => {
@@ -87,5 +95,67 @@ describe('requireProfile', () => {
 
   it('refuses text past its limit', () => {
     expect(() => requireProfile({ firstName: 'x'.repeat(101) })).toThrow(InvalidInput);
+  });
+});
+
+describe('requireYearMonth', () => {
+  it('reads the two path parameters', () => {
+    expect(requireYearMonth({ year: '2026', month: '09' })).toEqual({ year: 2026, month: 9 });
+  });
+
+  it('refuses a month outside the year', () => {
+    expect(() => requireYearMonth({ year: '2026', month: '13' })).toThrow(InvalidInput);
+    expect(() => requireYearMonth({ year: '2026', month: '0' })).toThrow(InvalidInput);
+  });
+
+  it('refuses what is not a year, including nothing at all', () => {
+    expect(() => requireYearMonth({ year: 'ciao', month: '9' })).toThrow(InvalidInput);
+    expect(() => requireYearMonth(undefined)).toThrow(InvalidInput);
+  });
+});
+
+describe('requireRosterPeople', () => {
+  const people = [{ name: 'Giulia', row: 3, codes: Array(30).fill('M') }];
+
+  it('accepts a well-formed body', () => {
+    expect(requireRosterPeople({ people }, 30)).toEqual(people);
+  });
+
+  it('normalises the codes on the way in', () => {
+    const r = requireRosterPeople({ people: [{ name: 'Giulia', row: null, codes: [' m1 ', ...Array(29).fill('')] }] }, 30);
+    expect(r[0]!.codes[0]).toBe('M1');
+  });
+
+  // The photo path (roster.ts's `personOf`) runs every name through
+  // `normaliseColleague`. This one must match it, or the same field holds a
+  // trimmed name when it came from a photo and a padded one from this form.
+  it('normalises the name on the way in, the same as the photo path does', () => {
+    const r = requireRosterPeople(
+      { people: [{ name: '  Giulia  ', row: null, codes: Array(30).fill('') }] },
+      30,
+    );
+    expect(r[0]!.name).toBe('Giulia');
+  });
+
+  // Strict here, unlike validateRoster: this body comes from our own client,
+  // which has already validated it. A malformed one is a bug, not a bad photo.
+  it('refuses a row that is not the length of the month', () => {
+    expect(() => requireRosterPeople({ people: [{ name: 'Giulia', row: 3, codes: ['M'] }] }, 30)).toThrow(
+      InvalidInput,
+    );
+  });
+
+  it('refuses a nameless person and a missing list', () => {
+    expect(() => requireRosterPeople({ people: [{ name: '  ', row: 3, codes: Array(30).fill('') }] }, 30)).toThrow(InvalidInput);
+    expect(() => requireRosterPeople({}, 30)).toThrow(InvalidInput);
+  });
+
+  it('caps how many people one month can hold', () => {
+    const many = Array.from({ length: MAX_ROSTER_PEOPLE + 1 }, (_, i) => ({
+      name: `P${i}`,
+      row: null,
+      codes: Array(30).fill(''),
+    }));
+    expect(() => requireRosterPeople({ people: many }, 30)).toThrow(InvalidInput);
   });
 });

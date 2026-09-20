@@ -2,7 +2,7 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IsoDate, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, romeToday } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, MAX_ROSTER_PEOPLE, romeToday } from '@vanessa/core';
 
 import {
   getConfigWith,
@@ -11,12 +11,15 @@ import {
   putShiftWith,
   putShiftsWith,
 } from '../src/handlers.js';
+import type { MonthRoster } from '@vanessa/core';
+
 import type { Repo, ShiftRecord } from '../src/repo.js';
 
 /** In-memory repo: the tests never touch the network. */
 function fakeRepo() {
   const shifts = new Map<string, ShiftRecord>();
   const quota = new Map<string, number>();
+  const rosters = new Map<string, MonthRoster>();
   let pay = EMPTY_PAY_SETTINGS;
   let profile = EMPTY_PROFILE;
   const calls: string[] = [];
@@ -67,8 +70,16 @@ function fakeRepo() {
       calls.push(`readPhotoQuota(${date})`);
       return quota.get(date) ?? 0;
     },
+    async readRoster(year, month) {
+      calls.push(`readRoster(${year},${month})`);
+      return rosters.get(`${year}#${month}`) ?? null;
+    },
+    async saveRoster(r) {
+      calls.push(`saveRoster(${r.year},${r.month})`);
+      rosters.set(`${r.year}#${r.month}`, r);
+    },
   };
-  return { repo, shifts, quota, calls, pay: () => pay, profile: () => profile };
+  return { repo, shifts, quota, rosters, calls, pay: () => pay, profile: () => profile };
 }
 
 function event(p: Partial<APIGatewayProxyEventV2>): APIGatewayProxyEventV2 {
@@ -862,5 +873,133 @@ describe('origin secret', () => {
       event({ queryStringParameters: { from: '2026-01-01', to: '2026-01-31' } }),
     );
     expect(r.statusCode).toBe(200);
+  });
+});
+
+import { getRosterWith, putRosterWith } from '../src/handlers.js';
+
+/** A reading of July with other rows attached. `julyReading()` is the helper
+ *  already in core's tests; here the shape is built inline to keep the two
+ *  suites independent. */
+function rawWithOthers(others: unknown) {
+  return {
+    month: 7,
+    year: 2026,
+    found: true,
+    foundName: 'Vanessa',
+    foundRow: 14,
+    days: Array.from({ length: 31 }, (_, i) => ({ day: i + 1, code: null, confident: true })),
+    others,
+  };
+}
+
+const readPhotoEvent = () =>
+  event({ body: JSON.stringify({ image: 'abc' }), headers: {} });
+
+describe('readPhoto and the roster', () => {
+  it('returns the roster beside the reading', async () => {
+    const raw = rawWithOthers([{ name: 'Giulia', row: 3, codes: Array(31).fill('M') }]);
+    const r: any = await readPhotoWith(f.repo, async () => raw, () => '2026-07-02', () => 2026, async () => {})(
+      readPhotoEvent(),
+    );
+    expect(body(r).reading.days).toHaveLength(31);
+    expect(body(r).roster.people[0].name).toBe('Giulia');
+  });
+
+  // The asymmetry, end to end: a roster that cannot be used must never take
+  // down a reading that can.
+  it('still answers 200 with the reading when the other rows are rubbish', async () => {
+    const r: any = await readPhotoWith(f.repo, async () => rawWithOthers('not an array'), () => '2026-07-02', () => 2026, async () => {})(
+      readPhotoEvent(),
+    );
+    expect(r.statusCode).toBe(200);
+    expect(body(r).roster.people).toEqual([]);
+  });
+
+  it('takes the roster month from the reading, not from a field of its own', async () => {
+    const raw = rawWithOthers([{ name: 'Giulia', row: 3, codes: Array(31).fill('M') }]);
+    // `today` deliberately falls in a different month (November) than the
+    // reading (July): were the handler to take the month from `today()`
+    // instead of `reading.month` — say, by parsing the quota date — this
+    // would answer 11, not 7, and the assertion below would catch it. A
+    // `today` that happened to share July would let that bug pass silently.
+    const r: any = await readPhotoWith(f.repo, async () => raw, () => '2026-11-02', () => 2026, async () => {})(
+      readPhotoEvent(),
+    );
+    expect(body(r).roster.month).toBe(7);
+  });
+
+  // The photo path and the save path must agree on both caps (I1), or a
+  // roster this lenient side accepted can still be refused whole by the
+  // strict `requireRosterPeople`. Proven end to end: a sheet with one person
+  // too many, one of them with a name far past MAX_NAME_LENGTH, and the
+  // roster the client would PUT back on save still saves.
+  it('reads more people and a longer name than the caps allow, and what it returns still saves', async () => {
+    const others = Array.from({ length: MAX_ROSTER_PEOPLE + 1 }, (_, i) => ({
+      name: i === 0 ? 'M'.repeat(200) : `Persona${i}`,
+      row: null,
+      codes: Array(31).fill('M'),
+    }));
+    const r: any = await readPhotoWith(
+      f.repo,
+      async () => rawWithOthers(others),
+      () => '2026-07-02',
+      () => 2026,
+      async () => {},
+    )(readPhotoEvent());
+    const roster = body(r).roster;
+    expect(roster.people).toHaveLength(MAX_ROSTER_PEOPLE);
+
+    const put: any = await putRosterWith(f.repo)(
+      event({
+        pathParameters: { year: '2026', month: '07' },
+        body: JSON.stringify({ people: roster.people }),
+      }),
+    );
+    expect(put.statusCode).toBe(200);
+    expect(body(put).saved).toBe(MAX_ROSTER_PEOPLE);
+  });
+});
+
+describe('GET /roster', () => {
+  it('reads a month', async () => {
+    await f.repo.saveRoster({ year: 2026, month: 9, people: [] });
+    const r: any = await getRosterWith(f.repo)(event({ pathParameters: { year: '2026', month: '09' } }));
+    expect(body(r).roster.month).toBe(9);
+  });
+
+  it('answers with a null roster for a month never imported', async () => {
+    const r: any = await getRosterWith(f.repo)(event({ pathParameters: { year: '2026', month: '09' } }));
+    expect(body(r).roster).toBeNull();
+  });
+
+  it('refuses a month outside the year', async () => {
+    const r: any = await getRosterWith(f.repo)(event({ pathParameters: { year: '2026', month: '13' } }));
+    expect(r.statusCode).toBe(400);
+  });
+});
+
+describe('PUT /roster', () => {
+  const people = [{ name: 'Giulia', row: 3, codes: Array(30).fill('M') }];
+
+  it('saves the month named in the path, not one named in the body', async () => {
+    await putRosterWith(f.repo)(
+      event({
+        pathParameters: { year: '2026', month: '09' },
+        body: JSON.stringify({ people, year: 1999, month: 1 }),
+      }),
+    );
+    expect(await f.repo.readRoster(2026, 9)).toMatchObject({ year: 2026, month: 9 });
+    expect(await f.repo.readRoster(1999, 1)).toBeNull();
+  });
+
+  it('refuses a body whose rows are not the length of that month', async () => {
+    const r: any = await putRosterWith(f.repo)(
+      event({
+        pathParameters: { year: '2026', month: '09' },
+        body: JSON.stringify({ people: [{ name: 'Giulia', row: 3, codes: Array(31).fill('M') }] }),
+      }),
+    );
+    expect(r.statusCode).toBe(400);
   });
 });

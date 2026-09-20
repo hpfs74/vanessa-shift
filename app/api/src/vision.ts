@@ -69,21 +69,22 @@ Sopra le colonne c'e' una riga con i numeri dei giorni, da 1 fino alla fine del
 mese: usala per allineare le colonne, non contarle a occhio. In alto c'e' il
 titolo con il mese e l'anno.
 
-Devi leggere UNA SOLA riga: quella della persona di nome ${ROW_NAME}.
+Devi leggere TUTTE le righe della griglia.
 I nomi stanno a sinistra, su due righe (cognome sopra, nome sotto): la riga dei
 turni e' quella del nome.
 
-Per ogni giorno del mese riporta la sigla che sta nella cella di quella riga.
-Le sigle valide sono soltanto: ${CODES}.
+La riga della persona di nome ${ROW_NAME} va in days, un elemento per OGNI
+giorno del mese, dal primo all'ultimo, anche per i giorni con code null.
+Le sigle valide per quella riga sono soltanto: ${CODES}.
 Se la cella contiene una x, e' vuota, oppure non riesci a leggerla con
-ragionevole certezza, metti code null.
+ragionevole certezza, metti code null. Metti confident a false quando la cella
+e' sbiadita, corretta a mano, ambigua o coperta.
 
-Attenzione: le altre righe contengono anche sigle diverse (F, R, C, N1 e altre).
-Non riguardano questa persona. Non riportare mai la cella di un'altra riga.
-
-Riporta un elemento per OGNI giorno del mese, dal primo all'ultimo, anche per i
-giorni con code null. Metti confident a false quando la cella e' sbiadita,
-corretta a mano, ambigua o coperta.
+Tutte le altre righe vanno in others, una per persona, con il nome cosi' come
+sta scritto sul foglio e un elenco codes lungo quanto il mese.
+Le altre righe contengono anche sigle diverse (F, R, C, N1 e altre): copiale
+cosi' come sono, senza tradurle e senza scartarle. Per una cella vuota, con una
+x, o illeggibile, metti la stringa vuota.
 
 In foundName scrivi il nome cosi' come sta scritto sul foglio, e in foundRow il
 numero della riga se il foglio lo mostra, altrimenti null.
@@ -91,11 +92,10 @@ numero della riga se il foglio lo mostra, altrimenti null.
 Se nella foto non c'e' nessuna riga intestata a ${ROW_NAME}, metti found a
 false e days a un elenco vuoto.`;
 
-/** Reasoning on Claude Opus 5 is on by default, and that's what's needed:
- *  counting thirty-one crooked, handwritten columns isn't a glance. The token
- *  cap covers reasoning plus response together, so it's set generous: too
- *  tight, and it truncates halfway. */
-const MAX_TOKENS = 8000;
+/** Reasoning plus response together. Raised from 8000 when the response went
+ *  from one row to the whole sheet: too tight and it truncates halfway, which
+ *  surfaces as VisionFailed('truncated') and costs a reading. */
+export const MAX_TOKENS = 16000;
 
 export function createVision(client?: MessagesClient): Vision {
   const c: MessagesClient =

@@ -9,6 +9,7 @@
 import { useMemo, useState } from 'react';
 
 import type { PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
+import type { PhotoRead } from './api.js';
 import {
   MONTH_NAMES,
   SHIFTS,
@@ -25,7 +26,7 @@ import { resize } from './image.js';
 export interface PhotoImportProps {
   year: number;
   existing: ReadonlyMap<IsoDate, ShiftCode>;
-  onRead: (image: string) => Promise<PhotoReading>;
+  onRead: (image: string) => Promise<PhotoRead>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
 }
 
@@ -75,7 +76,10 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
     setLoading(true);
     setError(null);
     try {
-      setReading(fromReading(await onRead(await resize(file))));
+      // The roster travels alongside the reading now, but showing it is
+      // Task 9's job: here only her own row matters.
+      const { reading } = await onRead(await resize(file));
+      setReading(fromReading(reading));
     } catch (e) {
       setError((e as Error).message);
     } finally {

@@ -91,7 +91,24 @@ describe('readPhoto', () => {
     expect(await messageOf(api.readPhoto('AAAA'))).toBe('Hai gia usato le 10 letture');
   });
 
-  it('returns the reading when the call goes through', async () => {
+  it('returns the reading and the roster together', async () => {
+    const reading = {
+      month: 7,
+      year: 2026,
+      found: true,
+      foundName: 'Vanessa',
+      foundRow: 14,
+      days: [],
+    };
+    const roster = { year: 2026, month: 7, people: [] };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ reading, roster })));
+
+    expect(await api.readPhoto('AAAA')).toEqual({ reading, roster });
+  });
+
+  // An older handler, mid-deploy, answers without a roster. The screen must
+  // still work: her row is the part that matters.
+  it('survives a response with no roster at all', async () => {
     const reading = {
       month: 7,
       year: 2026,
@@ -102,7 +119,35 @@ describe('readPhoto', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ reading })));
 
-    expect(await api.readPhoto('AAAA')).toEqual(reading);
+    const r = await api.readPhoto('AAAA');
+    expect(r.roster).toEqual({ year: 2026, month: 7, people: [] });
+  });
+});
+
+describe('roster', () => {
+  it('asks for the month zero-padded, as it is stored', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', async (u: string) => {
+      urls.push(u);
+      return response({ roster: null });
+    });
+    await api.roster(2026, 9);
+    expect(urls[0]).toBe('/api/roster/2026/09');
+  });
+
+  it('hands back null for a month never imported', async () => {
+    vi.stubGlobal('fetch', async () => response({ roster: null }));
+    expect(await api.roster(2026, 9)).toBeNull();
+  });
+
+  it('sends only the people: the month is in the path', async () => {
+    const bodies: string[] = [];
+    vi.stubGlobal('fetch', async (_u: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      return response({ saved: 1 });
+    });
+    await api.saveRoster({ year: 2026, month: 9, people: [{ name: 'Giulia', row: 3, codes: Array(30).fill('M') }] });
+    expect(Object.keys(JSON.parse(bodies[0]!))).toEqual(['people']);
   });
 });
 

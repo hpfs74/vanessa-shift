@@ -43,7 +43,12 @@ async function renderWith(
   existing = new Map<IsoDate, ShiftCode>(),
 ) {
   const onSave = vi.fn().mockResolvedValue(undefined);
-  const onRead = vi.fn().mockResolvedValue(reading);
+  // The component only takes `reading` out of the pair right now — showing
+  // the roster is Task 9's job — so an empty one here is enough.
+  const onRead = vi.fn().mockResolvedValue({
+    reading,
+    roster: { year: reading.year, month: reading.month, people: [] },
+  });
   const { container } = render(
     <PhotoImport year={2026} existing={existing} onRead={onRead} onSave={onSave} />,
   );

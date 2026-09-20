@@ -38,6 +38,8 @@ function fakeApi(initial: RemoteShift[] = [], settings: PaySettings = EMPTY_PAY_
     saveProfile: async (p) => {
       currentProfile = p;
     },
+    roster: async () => null,
+    saveRoster: async () => {},
     readPhoto: async () => {
       throw new Error('not used in these tests');
     },
@@ -551,6 +553,8 @@ describe('while the data is still loading', () => {
       paySettings: never,
       savePaySettings: never,
       saveProfile: never,
+      roster: never,
+      saveRoster: never,
       readPhoto: never,
     };
   }

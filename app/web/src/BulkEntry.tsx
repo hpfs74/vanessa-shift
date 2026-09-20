@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react';
 import type { IsoDate, ShiftCode } from '@vanessa/core';
 import { MONTH_NAMES, parseSequence } from '@vanessa/core';
 
+import type { PhotoRead } from './api.js';
 import { PhotoImport } from './PhotoImport.js';
 import { SavePlan } from './SavePlan.js';
 
@@ -19,7 +20,7 @@ export interface BulkEntryProps {
   onMonthChange: (m: number) => void;
   existing: ReadonlyMap<IsoDate, ShiftCode>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
-  onReadPhoto: (image: string) => Promise<import('@vanessa/core').PhotoReading>;
+  onReadPhoto: (image: string) => Promise<PhotoRead>;
 }
 
 export function BulkEntry({

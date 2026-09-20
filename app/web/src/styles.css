@@ -295,6 +295,28 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
 /* The model wasn't sure: it's shown, not blocked. */
 .photo-cell.unsure .code { text-decoration: underline dashed; text-underline-offset: 2px; }
 
+/* --- roster read from the same photo ---
+   Thirty-one cells do not fit a phone's width, and shrinking them to fit
+   would make them illegible; scrolling the row sideways beats that. */
+.roster-read { margin: 0.5rem 0; }
+.roster-grid { display: flex; flex-direction: column; gap: 2px; width: max-content; }
+.roster-row { display: flex; align-items: center; gap: 2px; }
+.roster-name {
+  flex: 0 0 5.5rem; font-size: 0.75rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.roster-cell {
+  display: flex; align-items: center; justify-content: center;
+  width: 1.6rem; height: 1.6rem; flex: 0 0 auto; font-size: 0.68rem;
+  border: 1px solid var(--border); border-radius: 4px; background: #fff;
+}
+.roster-cell.empty { background: var(--bg); color: var(--muted); }
+.roster-cell.t-M { background: var(--M); }
+.roster-cell.t-M1 { background: var(--M1); }
+.roster-cell.t-P { background: var(--P); }
+.roster-cell.t-P1 { background: var(--P1); }
+.roster-cell.t-L { background: var(--L); }
+
 /* --- profilo --- */
 .profilo-head {
   display: flex;

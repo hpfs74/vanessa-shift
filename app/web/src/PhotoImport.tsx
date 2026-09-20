@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from 'react';
 
-import type { PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
+import type { MonthRoster, PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
 import type { PhotoRead } from './api.js';
 import {
   MONTH_NAMES,
@@ -16,6 +16,7 @@ import {
   SHORT_DAY_NAMES,
   daysInMonth,
   entriesFromReading,
+  reshapeRoster,
   toIso,
   weekday,
 } from '@vanessa/core';
@@ -28,6 +29,7 @@ export interface PhotoImportProps {
   existing: ReadonlyMap<IsoDate, ShiftCode>;
   onRead: (image: string) => Promise<PhotoRead>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
+  onSaveRoster: (r: MonthRoster) => Promise<void>;
 }
 
 interface Reading {
@@ -61,7 +63,7 @@ function toReading(l: Reading): PhotoReading {
   };
 }
 
-export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps) {
+export function PhotoImport({ year, existing, onRead, onSave, onSaveRoster }: PhotoImportProps) {
   const [reading, setReading] = useState<Reading | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,16 +72,21 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
   // stale. Here it goes stale when she corrects a cell, which is the gesture
   // equivalent to typing in the textarea.
   const [savedCount, setSavedCount] = useState<number | null>(null);
+  const [roster, setRoster] = useState<MonthRoster | null>(null);
+  // Collapsed by default: fifteen rows times thirty-one days is five hundred
+  // cells nobody would check unasked, and showing them would suggest the
+  // data is as trustworthy as her own.
+  const [openRoster, setOpenRoster] = useState(false);
+  const [rosterError, setRosterError] = useState<string | null>(null);
 
   const pick = async (file: File | undefined) => {
     if (!file) return;
     setLoading(true);
     setError(null);
     try {
-      // The roster travels alongside the reading now, but showing it is
-      // Task 9's job: here only her own row matters.
-      const { reading } = await onRead(await resize(file));
+      const { reading, roster } = await onRead(await resize(file));
       setReading(fromReading(reading));
+      setRoster(roster);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -95,6 +102,21 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
     [reading],
   );
 
+  const save = async (planned: readonly { date: IsoDate; code: ShiftCode }[]) => {
+    // Her shifts first: they are the part that matters, and the part pay is
+    // computed from.
+    await onSave(planned);
+    setRosterError(null);
+    if (!roster || roster.people.length === 0) return;
+    try {
+      await onSaveRoster(roster);
+    } catch (e) {
+      // Her import succeeded. Failing the whole save here would send her back
+      // to redo work that is already stored.
+      setRosterError((e as Error).message);
+    }
+  };
+
   /** The month read from the title can be wrong, and taking the photo again
    *  wouldn't help: the model would read the same title again. Changing it,
    *  the grid shrinks or grows — a shorter month loses the days that no
@@ -107,6 +129,12 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
       const unsure = new Set([...l.unsure].filter((g) => g <= howMany));
       return { ...l, month, codes, unsure };
     });
+    // The corrected month is the key the roster is stored under. If her grid
+    // reshapes and the roster does not, her shifts land in one month and the
+    // roster in another, and the calendar shows the wrong people with nothing
+    // to signal it.
+    setRoster((r) => (r === null ? r : reshapeRoster(r, r.year, month)));
+    setRosterError(null);
     setSavedCount(null);
     setOpen(null);
   };
@@ -229,13 +257,56 @@ export function PhotoImport({ year, existing, onRead, onSave }: PhotoImportProps
                 })}
               </div>
 
+              {/* Read-only and collapsed by default: nobody edits five hundred
+                  cells of somebody else's shifts, and showing them open would
+                  imply that data is as trustworthy as her own row. */}
+              {roster && roster.people.length > 0 && (
+                <div className="roster-read">
+                  <button
+                    type="button"
+                    className="toggle"
+                    aria-expanded={openRoster}
+                    onClick={() => setOpenRoster((o) => !o)}
+                  >
+                    lette {roster.people.length} persone
+                  </button>
+                  {openRoster && (
+                    <div className="scroll-wrap">
+                      <div className="roster-grid" role="group" aria-label="Turni letti degli altri">
+                        {roster.people.map((p, i) => (
+                          // Two rows can share a name — two people, not one — so
+                          // the key also carries the row, never the name alone.
+                          <div className="roster-row" key={`${p.name}-${p.row ?? i}`}>
+                            <span className="roster-name">{p.name}</span>
+                            {p.codes.map((c, d) => (
+                              <span
+                                key={d}
+                                className={['roster-cell', c ? `t-${c}` : 'empty'].join(' ')}
+                              >
+                                {c || '–'}
+                              </span>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {rosterError && (
+                <p className="error" role="alert">
+                  I tuoi turni sono salvati. I turni degli altri no: {rosterError}
+                </p>
+              )}
+
               <SavePlan
                 entries={entries}
                 existing={existing}
                 month={reading.month}
                 withoutShift={reading.codes.filter((c) => c === null).length}
                 savedCount={savedCount}
-                onSave={onSave}
+                onSave={save}
                 onSaved={setSavedCount}
               />
             </>

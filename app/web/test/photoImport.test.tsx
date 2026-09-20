@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
+import type { MonthRoster, PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
 import { SHORT_DAY_NAMES } from '@vanessa/core';
 
 import { PhotoImport } from '../src/PhotoImport.js';
@@ -38,26 +38,47 @@ vi.mock('../src/image.js', () => ({
   resize: () => Promise.resolve('AAAA'),
 }));
 
+/** Extra behaviour beyond the reading itself: a roster to hand back from
+ *  `onRead`, and custom `onSave`/`onSaveRoster` implementations for tests
+ *  that need to observe order or failure rather than just success. */
+interface RenderOverrides {
+  roster?: MonthRoster;
+  onSave?: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
+  onSaveRoster?: (r: MonthRoster) => Promise<void>;
+}
+
 async function renderWith(
   reading: PhotoReading,
   existing = new Map<IsoDate, ShiftCode>(),
+  overrides: RenderOverrides = {},
 ) {
-  const onSave = vi.fn().mockResolvedValue(undefined);
-  // The component only takes `reading` out of the pair right now — showing
-  // the roster is Task 9's job — so an empty one here is enough.
-  const onRead = vi.fn().mockResolvedValue({
-    reading,
-    roster: { year: reading.year, month: reading.month, people: [] },
-  });
+  const onSave = vi.fn(overrides.onSave ?? (async () => {}));
+  const onSaveRoster = vi.fn(overrides.onSaveRoster ?? (async () => {}));
+  // Empty by default: most tests here only exercise her own row, and an
+  // empty roster is exactly what a handler unaware of rosters would send.
+  const roster = overrides.roster ?? { year: reading.year, month: reading.month, people: [] };
+  const onRead = vi.fn().mockResolvedValue({ reading, roster });
   const { container } = render(
-    <PhotoImport year={2026} existing={existing} onRead={onRead} onSave={onSave} />,
+    <PhotoImport
+      year={2026}
+      existing={existing}
+      onRead={onRead}
+      onSave={onSave}
+      onSaveRoster={onSaveRoster}
+    />,
   );
 
   await userEvent.upload(
     screen.getByLabelText(/Leggi da una foto/i),
     new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
   );
-  return { onSave, onRead, container };
+  return { onSave, onSaveRoster, onRead, container };
+}
+
+/** Presses whichever save button `SavePlan` is currently showing — its label
+ *  names the day count, which varies test to test — and waits for it. */
+async function salva() {
+  await userEvent.click(await screen.findByRole('button', { name: /^Salva \d+ giorni$/ }));
 }
 
 describe('PhotoImport', () => {
@@ -204,5 +225,90 @@ describe('PhotoImport', () => {
 
     const day1 = await screen.findByRole('button', { name: /^1 / });
     expect(day1).toHaveStyle({ gridColumnStart: '3' });
+  });
+});
+
+/** Two other rows from the same July sheet, thirty-one codes each, matching
+ *  `julyReading()`'s month. */
+const ROSTER: MonthRoster = {
+  year: 2026,
+  month: 7,
+  people: [
+    { name: 'Giulia', row: 3, codes: Array<string>(31).fill('M') },
+    { name: 'Marta', row: 4, codes: Array<string>(31).fill('P') },
+  ],
+};
+
+describe('PhotoImport and the other rows', () => {
+  it('says how many people it read, without listing them unasked', async () => {
+    await renderWith(julyReading(), undefined, { roster: ROSTER });
+    expect(await screen.findByText(/lette 2 persone/i)).toBeInTheDocument();
+    expect(screen.queryByText('Giulia')).not.toBeInTheDocument();
+  });
+
+  it('opens on request, so a row shifted or a name misread can be seen', async () => {
+    await renderWith(julyReading(), undefined, { roster: ROSTER });
+    await userEvent.click(await screen.findByRole('button', { name: /lette 2 persone/i }));
+    expect(screen.getByText('Giulia')).toBeInTheDocument();
+    expect(screen.getByText('Marta')).toBeInTheDocument();
+  });
+
+  it('saves her shifts before the roster', async () => {
+    const order: string[] = [];
+    await renderWith(julyReading(), undefined, {
+      roster: ROSTER,
+      onSave: async () => {
+        order.push('shifts');
+      },
+      onSaveRoster: async () => {
+        order.push('roster');
+      },
+    });
+    await salva();
+    expect(order).toEqual(['shifts', 'roster']);
+  });
+
+  // Her import succeeded. Saying otherwise would send her back to redo work
+  // that is already stored.
+  it('reports a roster that failed without claiming the import failed', async () => {
+    await renderWith(julyReading(), undefined, {
+      roster: ROSTER,
+      onSaveRoster: async () => {
+        throw new Error('rete giù');
+      },
+    });
+    await salva();
+    expect(await screen.findByText(/turni sono salvati/i)).toBeInTheDocument();
+    expect(screen.getByText(/rete giù/i)).toBeInTheDocument();
+  });
+
+  it('reshapes the roster when she corrects the month, so both are stored under one month', async () => {
+    const saved: MonthRoster[] = [];
+    await renderWith(julyReading(), undefined, {
+      roster: ROSTER,
+      onSaveRoster: async (r) => {
+        saved.push(r);
+      },
+    });
+
+    // June has 30 days against July's 31: the roster must reshape to match,
+    // or it would end up stored under the corrected month with the wrong
+    // number of days in it.
+    await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '6');
+    await salva();
+
+    expect(saved[0]!.month).toBe(6);
+    expect(saved[0]!.people[0]!.codes).toHaveLength(30);
+  });
+
+  it('does not call the roster endpoint when nobody else was read', async () => {
+    let called = 0;
+    await renderWith(julyReading(), undefined, {
+      onSaveRoster: async () => {
+        called += 1;
+      },
+    });
+    await salva();
+    expect(called).toBe(0);
   });
 });

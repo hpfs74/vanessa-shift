@@ -258,6 +258,9 @@ export function App({
               existing={codes}
               onSave={saveBulk}
               onReadPhoto={api.readPhoto}
+              // Reloading the calendar after a roster save is Task 11's job;
+              // wiring the endpoint through is all this task does.
+              onSaveRoster={api.saveRoster}
             />
           )}
 

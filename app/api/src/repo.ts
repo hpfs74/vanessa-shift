@@ -11,7 +11,7 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 
-import type { IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
+import type { IsoDate, MonthRoster, PaySettings, Profile, ShiftCode } from '@vanessa/core';
 import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, isContractKind, isIsoDate, parseIso } from '@vanessa/core';
 
 export interface ShiftRecord {
@@ -45,6 +45,15 @@ export function shiftsPk(year: number): string {
   return `SHIFTS#${year}`;
 }
 
+export function rosterPk(year: number): string {
+  return `ROSTER#${year}`;
+}
+
+/** Zero-padded, so the twelve months of a year sort in order. */
+export function rosterSk(month: number): string {
+  return String(month).padStart(2, '0');
+}
+
 export interface Repo {
   shiftsBetween(from: IsoDate, to: IsoDate): Promise<ShiftRecord[]>;
   saveShift(s: ShiftRecord): Promise<void>;
@@ -61,6 +70,12 @@ export interface Repo {
   consumePhotoQuota(date: IsoDate, max: number): Promise<boolean>;
   /** How many photo readings today has already spent. */
   readPhotoQuota(date: IsoDate): Promise<number>;
+  /** The month's roster as last imported, or null if never imported. */
+  readRoster(year: number, month: number): Promise<MonthRoster | null>;
+  /** Replaces that month wholesale. One Put: there is no moment in which the
+   *  month is half-written, which is why it is one item and not one per
+   *  person-day. */
+  saveRoster(r: MonthRoster): Promise<void>;
 }
 
 /** DynamoDB writes at most 25 items per BatchWrite call. */
@@ -255,6 +270,43 @@ export function createRepo(table: string, client?: DynamoDBDocumentClient): Repo
       );
       // No row means no reading yet today, which is the normal morning case.
       return typeof r.Item?.count === 'number' ? r.Item.count : 0;
+    },
+
+    async readRoster(year, month) {
+      const r = await doc.send(
+        new GetCommand({ TableName: table, Key: { pk: rosterPk(year), sk: rosterSk(month) } }),
+      );
+      if (!r.Item) return null;
+      const raw = Array.isArray(r.Item.people) ? r.Item.people : [];
+      const people = raw
+        .map((v: Record<string, unknown>) => ({
+          name: typeof v.name === 'string' ? v.name : '',
+          row: typeof v.row === 'number' ? v.row : null,
+          codes: typeof v.codes === 'string' && v.codes.length > 0 ? v.codes.split(',') : [],
+        }))
+        .filter((p: { name: string }) => p.name !== '');
+      return { year, month, people };
+    },
+
+    async saveRoster(r) {
+      await doc.send(
+        new PutCommand({
+          TableName: table,
+          Item: {
+            pk: rosterPk(r.year),
+            sk: rosterSk(r.month),
+            // One string per person instead of a list of thirty-one values:
+            // fifteen people would otherwise be some five hundred attribute
+            // values in an item that is never read in pieces. `normaliseCode`
+            // keeps the separator out of the codes themselves.
+            people: r.people.map((p) => ({
+              name: p.name,
+              ...(p.row == null ? {} : { row: p.row }),
+              codes: p.codes.join(','),
+            })),
+          },
+        }),
+      );
     },
   };
 }

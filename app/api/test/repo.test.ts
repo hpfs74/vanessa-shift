@@ -261,3 +261,78 @@ describe('readPhotoQuota', () => {
     expect(await repo.readPhotoQuota('2026-08-09')).toBe(3);
   });
 });
+
+/** A fake holding one item per key. Enough for the roster, which is a whole
+ *  item written and read back — no expressions, hence no reserved words. */
+function fakeTable() {
+  const items = new Map<string, Record<string, any>>();
+  const doc = {
+    async send(cmd: { input: Record<string, any>; constructor: { name: string } }) {
+      const key = `${cmd.input.Key?.pk ?? cmd.input.Item?.pk}#${cmd.input.Key?.sk ?? cmd.input.Item?.sk}`;
+      if (cmd.input.Item) {
+        items.set(key, cmd.input.Item);
+        return {};
+      }
+      return { Item: items.get(key) };
+    },
+  } as unknown as DynamoDBDocumentClient;
+  return { doc, items };
+}
+
+describe('roster', () => {
+  const september = {
+    year: 2026,
+    month: 9,
+    people: [
+      { name: 'Giulia', row: 3, codes: ['M', 'P', ...Array(28).fill('')] },
+      { name: 'Marta', row: null, codes: ['P1', '', ...Array(28).fill('')] },
+    ],
+  };
+
+  it('round-trips a month', async () => {
+    const { doc } = fakeTable();
+    const repo = createRepo('tabella', doc);
+    await repo.saveRoster(september);
+    expect(await repo.readRoster(2026, 9)).toEqual(september);
+  });
+
+  it('answers null for a month never imported', async () => {
+    const { doc } = fakeTable();
+    expect(await createRepo('tabella', doc).readRoster(2026, 9)).toBeNull();
+  });
+
+  it('writes under its own key, zero-padded, away from the shifts', async () => {
+    const { doc, items } = fakeTable();
+    await createRepo('tabella', doc).saveRoster(september);
+    expect([...items.keys()]).toEqual(['ROSTER#2026#09']);
+  });
+
+  it('stores a month of codes as one string, not thirty attributes', async () => {
+    const { doc, items } = fakeTable();
+    await createRepo('tabella', doc).saveRoster(september);
+    const stored = items.get('ROSTER#2026#09')!;
+    expect(typeof stored.people[0].codes).toBe('string');
+    expect(stored.people[0].codes.startsWith('M,P,,')).toBe(true);
+  });
+
+  // The whole reason this shape was chosen: replacing a month is one Put.
+  it('replaces the month wholesale: whoever left the sheet really leaves', async () => {
+    const { doc } = fakeTable();
+    const repo = createRepo('tabella', doc);
+    await repo.saveRoster(september);
+    await repo.saveRoster({ ...september, people: [september.people[0]!] });
+
+    const back = await repo.readRoster(2026, 9);
+    expect(back!.people.map((p) => p.name)).toEqual(['Giulia']);
+  });
+
+  it('keeps the months of one year apart', async () => {
+    const { doc } = fakeTable();
+    const repo = createRepo('tabella', doc);
+    await repo.saveRoster(september);
+    await repo.saveRoster({ ...september, month: 10, people: [] });
+
+    expect((await repo.readRoster(2026, 9))!.people).toHaveLength(2);
+    expect((await repo.readRoster(2026, 10))!.people).toHaveLength(0);
+  });
+});

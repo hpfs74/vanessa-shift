@@ -11,12 +11,15 @@ import {
   putShiftWith,
   putShiftsWith,
 } from '../src/handlers.js';
+import type { MonthRoster } from '@vanessa/core';
+
 import type { Repo, ShiftRecord } from '../src/repo.js';
 
 /** In-memory repo: the tests never touch the network. */
 function fakeRepo() {
   const shifts = new Map<string, ShiftRecord>();
   const quota = new Map<string, number>();
+  const rosters = new Map<string, MonthRoster>();
   let pay = EMPTY_PAY_SETTINGS;
   let profile = EMPTY_PROFILE;
   const calls: string[] = [];
@@ -67,8 +70,16 @@ function fakeRepo() {
       calls.push(`readPhotoQuota(${date})`);
       return quota.get(date) ?? 0;
     },
+    async readRoster(year, month) {
+      calls.push(`readRoster(${year},${month})`);
+      return rosters.get(`${year}#${month}`) ?? null;
+    },
+    async saveRoster(r) {
+      calls.push(`saveRoster(${r.year},${r.month})`);
+      rosters.set(`${r.year}#${r.month}`, r);
+    },
   };
-  return { repo, shifts, quota, calls, pay: () => pay, profile: () => profile };
+  return { repo, shifts, quota, rosters, calls, pay: () => pay, profile: () => profile };
 }
 
 function event(p: Partial<APIGatewayProxyEventV2>): APIGatewayProxyEventV2 {

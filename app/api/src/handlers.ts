@@ -219,8 +219,14 @@ export function readPhotoWith(
         // throw a request away — at worst it yields an empty `people`. The
         // month comes from the reading rather than a field of its own: the
         // photo is one, and two sources for one month could disagree.
+        // `reading.foundName` — the same name off the same sheet, already
+        // validated — is passed through so a roster row that duplicates her
+        // in her own written form (not just a bare "Vanessa") is excluded too.
         const reading = validateReading(raw, year());
-        return ok({ reading, roster: validateRoster(raw, reading.year, reading.month) });
+        return ok({
+          reading,
+          roster: validateRoster(raw, reading.year, reading.month, reading.foundName),
+        });
       } catch (e) {
         if (e instanceof RowNotFound) {
           return failure(

@@ -213,6 +213,13 @@ export function PhotoImport({ year, existing, onRead, onSave, onSaveRoster }: Ph
               onClick={() => {
                 setReading(null);
                 setError(null);
+                // `roster`, `rosterError` and `openRoster` are set together
+                // with `reading` in `pick`; clear them together here too, so
+                // this reset is not relying on the roster block's own
+                // `reading`-gated render to hide a stale roster.
+                setRoster(null);
+                setRosterError(null);
+                setOpenRoster(false);
               }}
             >
               ripeti con un altra foto

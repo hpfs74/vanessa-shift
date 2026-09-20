@@ -1109,4 +1109,72 @@ describe('saving a roster from a different month than the one on screen', () => 
       /collega con te/,
     );
   });
+
+  // The other half of the same guard: a save for the month she IS looking at
+  // must reach the calendar at once. `api.roster()` below never answers with
+  // anything but null, so nothing except the in-memory `setRoster(r)` in
+  // `saveRoster` could be the source of the badge this test looks for — a
+  // refetch supplying it instead would be a false pass.
+  it('shows a same-month import in the calendar right away', async () => {
+    const user = userEvent.setup();
+    const shifts = new Map<IsoDate, RemoteShift>([['2026-09-01', { date: '2026-09-01', code: 'P' }]]);
+    const savedRosters: MonthRoster[] = [];
+
+    const septemberReading: PhotoReading = {
+      month: 9,
+      year: 2026,
+      found: true,
+      foundName: 'Vanessa',
+      foundRow: 5,
+      days: Array.from({ length: 30 }, (_, i) => ({
+        day: i + 1,
+        code: i === 0 ? ('P' as ShiftCode) : null,
+        confident: true,
+      })),
+    };
+    const septemberRoster: MonthRoster = {
+      year: 2026,
+      month: 9,
+      people: [{ name: 'Giulia', row: 3, codes: ['P', ...Array<string>(29).fill('')] }],
+    };
+
+    const api: Api = {
+      shifts: async () => [...shifts.values()],
+      saveShift: async () => {},
+      deleteShift: async () => {},
+      saveShifts: async (entries) => {
+        for (const e of entries) shifts.set(e.date, { date: e.date, code: e.code });
+      },
+      config: async () => ({ pay: EMPTY_PAY_SETTINGS, profile: EMPTY_PROFILE, quota: { used: 0 } }),
+      paySettings: async () => EMPTY_PAY_SETTINGS,
+      savePaySettings: async () => {},
+      saveProfile: async () => {},
+      roster: async () => null,
+      saveRoster: async (r) => {
+        savedRosters.push(r);
+      },
+      readPhoto: async () => ({ reading: septemberReading, roster: septemberRoster }),
+    };
+
+    render(<App api={api} initialMonth={9} today="2026-09-01" />);
+
+    // Nothing loaded yet: no badge.
+    expect(await screen.findByRole('button', { name: /^1 Settembre/ })).not.toHaveAccessibleName(
+      /collega/,
+    );
+
+    const nav = () => within(screen.getByRole('navigation', { name: 'Sezioni' }));
+    await user.click(nav().getByRole('button', { name: /Carica/ }));
+    await user.upload(
+      screen.getByLabelText(/Leggi da una foto/i),
+      new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
+    );
+    await user.click(await screen.findByRole('button', { name: /^Salva \d+ giorni$/ }));
+    await waitFor(() => expect(savedRosters).toEqual([septemberRoster]));
+
+    await user.click(nav().getByRole('button', { name: /Calendario/ }));
+    expect(await screen.findByRole('button', { name: /^1 Settembre/ })).toHaveAccessibleName(
+      /collega con te/,
+    );
+  });
 });

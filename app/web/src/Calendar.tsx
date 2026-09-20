@@ -1,9 +1,10 @@
 /** The monthly calendar: same layout as the spreadsheet, Monday to Sunday. */
 
-import type { DayEntry, IsoDate } from '@vanessa/core';
+import type { DayEntry, IsoDate, MonthRoster } from '@vanessa/core';
 import {
   MONTH_NAMES,
   SHORT_DAY_NAMES,
+  countOverlapping,
   dayKind,
   entryHours,
   hasOverride,
@@ -22,6 +23,8 @@ export interface CalendarProps {
   swapped?: ReadonlySet<IsoDate>;
   /** Today, so it can be picked out of the grid. Injected to keep tests fixed. */
   today?: IsoDate;
+  /** Who else is on the sheet, so each cell can say how many share her hours. */
+  roster?: MonthRoster | null;
   selected: IsoDate | null;
   onPick: (d: IsoDate) => void;
 }
@@ -51,6 +54,7 @@ export function Calendar({
   shifts,
   swapped,
   today,
+  roster,
   selected,
   onPick,
 }: CalendarProps) {
@@ -78,6 +82,7 @@ export function Calendar({
             if (!d) return <div key={j} className="day empty" aria-hidden="true" />;
             const entry = shifts.get(d);
             const code = entry?.code;
+            const mates = countOverlapping(roster ?? null, d, code ?? '');
             const overridden = hasOverride(entry);
             const kind = dayKind(d, holidays);
             const dayNumber = Number(d.slice(8));
@@ -103,6 +108,7 @@ export function Calendar({
                   (d === today ? ', oggi' : '') +
                   (code ? `, turno ${code}` : ', nessun turno') +
                   (overridden ? `, ${entryHours(entry)} ore` : '') +
+                  (mates > 0 ? `, ${mates} ${mates === 1 ? 'collega' : 'colleghi'} con te` : '') +
                   (swapped?.has(d) ? ', scambiato' : '')
                 }
                 onClick={() => onPick(d)}
@@ -111,6 +117,11 @@ export function Calendar({
                 <span className="code">
                   {code ?? ''}
                   {swapped?.has(d) ? <i className="swap-dot" aria-hidden="true" /> : null}
+                  {mates > 0 ? (
+                    <span className="mates" aria-hidden="true">
+                      {mates}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="time">
                   {overridden ? `${entryHours(entry)} ore` : code ? timeRange(code) : ''}

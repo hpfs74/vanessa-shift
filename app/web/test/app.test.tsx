@@ -2,11 +2,11 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DayEntry, IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
+import type { DayEntry, IsoDate, MonthRoster, PaySettings, Profile, ShiftCode } from '@vanessa/core';
 import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
 
 import { App } from '../src/App.js';
-import { weekHours, weeksOfMonth } from '../src/Calendar.js';
+import { Calendar, weekHours, weeksOfMonth } from '../src/Calendar.js';
 import type { Api, RemoteShift } from '../src/api.js';
 
 function fakeApi(initial: RemoteShift[] = [], settings: PaySettings = EMPTY_PAY_SETTINGS) {
@@ -777,5 +777,56 @@ describe('esportazione nel calendario', () => {
     expect(anchors[0]!.download).toBe('turni-2026-02.ics');
 
     vi.restoreAllMocks();
+  });
+});
+
+describe('Calendar and who is in with her', () => {
+  const roster: MonthRoster = {
+    year: 2026,
+    month: 9,
+    people: [
+      { name: 'Giulia', row: 3, codes: ['P', ...Array(29).fill('')] },
+      { name: 'Marta', row: 4, codes: ['P1', ...Array(29).fill('')] },
+      { name: 'Anna', row: 5, codes: ['M', ...Array(29).fill('')] },
+    ],
+  };
+  const shifts = new Map<IsoDate, DayEntry>([['2026-09-01', { code: 'P', hoursOverride: null }]]);
+
+  it('counts only the ones who share her hours', () => {
+    render(<Calendar year={2026} month={9} shifts={shifts} roster={roster} selected={null} onPick={() => {}} />);
+    // Anna's M (07:00-13:00) hands off to P at 13:00, so she does not count:
+    // only Giulia and Marta actually overlap with the P shift.
+    const cell = screen.getByRole('button', { name: /^1 Settembre.*2 colleghi con te/ });
+    expect(cell.querySelector('.mates')).toHaveTextContent('2');
+  });
+
+  it('says it in the label too, in the singular when it is one', () => {
+    const one = { ...roster, people: [roster.people[0]!] };
+    render(<Calendar year={2026} month={9} shifts={shifts} roster={one} selected={null} onPick={() => {}} />);
+    expect(screen.getByRole('button', { name: /^1 Settembre.*1 collega con te/ })).toBeInTheDocument();
+  });
+
+  it('says nothing at all when nobody overlaps', () => {
+    render(
+      <Calendar
+        year={2026}
+        month={9}
+        shifts={shifts}
+        roster={{ ...roster, people: [roster.people[2]!] }}
+        selected={null}
+        onPick={() => {}}
+      />,
+    );
+    const cell = screen.getByRole('button', { name: /^1 Settembre/ });
+    // Neither the plural nor the singular phrase, and no visible badge.
+    expect(cell).not.toHaveAccessibleName(/\d+ colleg/);
+    expect(cell.querySelector('.mates')).toBeNull();
+  });
+
+  it('works exactly as before with no roster at all', () => {
+    render(<Calendar year={2026} month={9} shifts={shifts} selected={null} onPick={() => {}} />);
+    const cell = screen.getByRole('button', { name: /^1 Settembre/ });
+    expect(cell).not.toHaveAccessibleName(/\d+ colleg/);
+    expect(cell.querySelector('.mates')).toBeNull();
   });
 });

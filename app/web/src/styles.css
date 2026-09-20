@@ -134,6 +134,12 @@ button.wide { width: 100%; min-height: var(--tap); margin-top: 0.75rem; }
   display: inline-block; width: 4px; height: 4px; border-radius: 50%;
   background: var(--navy); vertical-align: super; margin-left: 1px;
 }
+.mates {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 0.9rem; height: 0.9rem; margin-left: 2px; padding: 0 2px;
+  border-radius: 999px; background: var(--navy); color: #fff;
+  font-size: 0.55rem; font-weight: 700; vertical-align: super;
+}
 .day.t-M { background: var(--M); }
 .day.t-M1 { background: var(--M1); }
 .day.t-P { background: var(--P); }

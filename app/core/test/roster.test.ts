@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { normaliseCode, validateRoster } from '../src/index.js';
+import { countOverlapping, normaliseCode, overlaps, rosterOnDay, validateRoster } from '../src/index.js';
 
 /** A well-formed `others` payload: one person, every day empty. */
 function person(name: string, codes: string[], row: number | null = 3) {
@@ -84,5 +84,103 @@ describe('validateRoster', () => {
   it('carries the month it was told, not one of its own', () => {
     const r = validateRoster({ others: [] }, 2026, 9);
     expect(r).toMatchObject({ year: 2026, month: 9 });
+  });
+});
+
+describe('overlaps', () => {
+  it('is false when the shifts only hand over: M ends when P begins', () => {
+    expect(overlaps('M', 'P')).toBe(false);
+  });
+
+  it('is true when the hours really cross: M1 runs to 14, P starts at 13', () => {
+    expect(overlaps('M1', 'P')).toBe(true);
+  });
+
+  it('is true for two shifts of the same kind', () => {
+    expect(overlaps('P', 'P1')).toBe(true);
+    expect(overlaps('M', 'M')).toBe(true);
+  });
+
+  it('is false for Libero, which has no hours to share', () => {
+    expect(overlaps('L', 'M')).toBe(false);
+    expect(overlaps('M', 'L')).toBe(false);
+  });
+
+  // The important one. An unknown code has no times, and guessing would be
+  // worse than silence: saying "you are with Anna" when Anna is on nights is
+  // a false statement, while saying nothing is only a missing one.
+  it('is false whenever either side is a code the app does not know', () => {
+    expect(overlaps('F', 'M')).toBe(false);
+    expect(overlaps('M', 'N1')).toBe(false);
+    expect(overlaps('F', 'F')).toBe(false);
+    expect(overlaps('', 'M')).toBe(false);
+  });
+});
+
+describe('rosterOnDay', () => {
+  const roster = {
+    year: 2026,
+    month: 9,
+    people: [
+      { name: 'Giulia', row: 3, codes: ['P', ...Array(29).fill('')] },
+      { name: 'Marta', row: 4, codes: ['M', ...Array(29).fill('')] },
+      { name: 'Anna', row: 5, codes: ['F', ...Array(29).fill('')] },
+      { name: 'Luca', row: 6, codes: ['L', ...Array(29).fill('')] },
+      { name: 'Sara', row: 7, codes: ['', ...Array(29).fill('')] },
+    ],
+  };
+
+  it('splits the day between who shares your hours and who is merely there', () => {
+    const day = rosterOnDay(roster, '2026-09-01', 'P');
+    expect(day.map((e) => [e.name, e.withYou])).toEqual([
+      ['Giulia', true],
+      ['Marta', false],
+      ['Anna', false],
+    ]);
+  });
+
+  it('leaves out the empty cells and the days off: neither is somebody at work', () => {
+    const names = rosterOnDay(roster, '2026-09-01', 'P').map((e) => e.name);
+    expect(names).not.toContain('Luca'); // L
+    expect(names).not.toContain('Sara'); // empty cell
+  });
+
+  it('is empty for a date outside the month it holds', () => {
+    expect(rosterOnDay(roster, '2026-10-01', 'P')).toEqual([]);
+    expect(rosterOnDay(roster, '2025-09-01', 'P')).toEqual([]);
+  });
+
+  it('is empty when there is no roster at all', () => {
+    expect(rosterOnDay(null, '2026-09-01', 'P')).toEqual([]);
+  });
+
+  it('still lists the day when she is off: who is in is a fact about the ward', () => {
+    const day = rosterOnDay(roster, '2026-09-01', '');
+    expect(day).toHaveLength(3);
+    expect(day.every((e) => !e.withYou)).toBe(true);
+  });
+});
+
+describe('countOverlapping', () => {
+  const roster = {
+    year: 2026,
+    month: 9,
+    people: [
+      { name: 'Giulia', row: 3, codes: ['P', ...Array(29).fill('')] },
+      { name: 'Marta', row: 4, codes: ['P1', ...Array(29).fill('')] },
+      { name: 'Anna', row: 5, codes: ['M', ...Array(29).fill('')] },
+    ],
+  };
+
+  it('counts only the ones who share the hours', () => {
+    expect(countOverlapping(roster, '2026-09-01', 'P')).toBe(2);
+  });
+
+  it('is zero on a day she is not working', () => {
+    expect(countOverlapping(roster, '2026-09-01', '')).toBe(0);
+  });
+
+  it('is zero on a day nobody is in', () => {
+    expect(countOverlapping(roster, '2026-09-02', 'P')).toBe(0);
   });
 });

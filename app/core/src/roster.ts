@@ -6,8 +6,9 @@
  * a row read badly must cost that row — never the import.
  */
 
-import { daysInMonth } from './dates.js';
+import { daysInMonth, parseIso, type IsoDate } from './dates.js';
 import { ROW_NAME } from './photo.js';
+import { isShiftCode, shift } from './shifts.js';
 import { normaliseColleague } from './swaps.js';
 
 /** Longer than this is not a code. The cap is what stops a model that wanders
@@ -71,4 +72,63 @@ export function validateRoster(v: unknown, year: number, month: number): MonthRo
     }
   }
   return { year, month, people };
+}
+
+export interface RosterEntry {
+  readonly name: string;
+  readonly row: number | null;
+  readonly code: string;
+  /** Their hours cross hers. False for every code the app cannot place. */
+  readonly withYou: boolean;
+}
+
+/** `HH:MM`, zero-padded, so a string comparison is a time comparison. */
+function timesOf(code: string): { start: string; end: string } | null {
+  if (!isShiftCode(code)) return null;
+  const s = shift(code);
+  // Libero has times of '': nobody is present for it.
+  if (!s.start || !s.end) return null;
+  return { start: s.start, end: s.end };
+}
+
+/** Together only when both codes resolve to known shifts whose intervals
+ *  cross. Touching endpoints do not count: M ends at 13:00 and P starts at
+ *  13:00 — they hand over, they do not meet. */
+export function overlaps(a: string, b: string): boolean {
+  const x = timesOf(a);
+  const y = timesOf(b);
+  if (!x || !y) return false;
+  return x.start < y.end && y.start < x.end;
+}
+
+/** A known code worth no hours is somebody not there. An unknown code could
+ *  be anything, so it stays and is simply never "with you". */
+function offDuty(code: string): boolean {
+  return isShiftCode(code) && shift(code).hours === 0;
+}
+
+export function rosterOnDay(
+  roster: MonthRoster | null,
+  date: IsoDate,
+  myCode: string,
+): RosterEntry[] {
+  if (!roster) return [];
+  const { year, month, day } = parseIso(date);
+  if (year !== roster.year || month !== roster.month) return [];
+
+  const out: RosterEntry[] = [];
+  for (const p of roster.people) {
+    const code = p.codes[day - 1] ?? '';
+    if (!code || offDuty(code)) continue;
+    out.push({ name: p.name, row: p.row, code, withYou: overlaps(myCode, code) });
+  }
+  return out;
+}
+
+export function countOverlapping(
+  roster: MonthRoster | null,
+  date: IsoDate,
+  myCode: string,
+): number {
+  return rosterOnDay(roster, date, myCode).filter((e) => e.withYou).length;
 }

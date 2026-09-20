@@ -132,3 +132,22 @@ export function countOverlapping(
 ): number {
   return rosterOnDay(roster, date, myCode).filter((e) => e.withYou).length;
 }
+
+/** The month read from the title can be corrected on the import screen, and
+ *  retaking the photo would not help: the model would read the same title
+ *  again. When it is corrected the roster has to follow, because that month is
+ *  the key it gets stored under — her shifts under one month and the roster
+ *  under another means the calendar shows the wrong people, with nothing to
+ *  signal it. Same rule as her own grid: a shorter month loses the days that
+ *  no longer exist, a longer one gains them empty. */
+export function reshapeRoster(r: MonthRoster, year: number, month: number): MonthRoster {
+  const howMany = daysInMonth(year, month);
+  return {
+    year,
+    month,
+    people: r.people.map((p) => ({
+      ...p,
+      codes: Array.from({ length: howMany }, (_, i) => p.codes[i] ?? ''),
+    })),
+  };
+}

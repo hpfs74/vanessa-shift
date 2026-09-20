@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { countOverlapping, normaliseCode, overlaps, rosterOnDay, validateRoster } from '../src/index.js';
+import { countOverlapping, normaliseCode, overlaps, reshapeRoster, rosterOnDay, validateRoster } from '../src/index.js';
 
 /** A well-formed `others` payload: one person, every day empty. */
 function person(name: string, codes: string[], row: number | null = 3) {
@@ -182,5 +182,36 @@ describe('countOverlapping', () => {
 
   it('is zero on a day nobody is in', () => {
     expect(countOverlapping(roster, '2026-09-02', 'P')).toBe(0);
+  });
+});
+
+describe('reshapeRoster', () => {
+  const september = {
+    year: 2026,
+    month: 9,
+    people: [{ name: 'Giulia', row: 3, codes: Array.from({ length: 30 }, (_, i) => `D${i}`) }],
+  };
+
+  it('grows into a longer month, the new days empty', () => {
+    const r = reshapeRoster(september, 2026, 10); // 31 days
+    expect(r.people[0]!.codes).toHaveLength(31);
+    expect(r.people[0]!.codes[30]).toBe('');
+    expect(r.people[0]!.codes[0]).toBe('D0');
+  });
+
+  it('shrinks into a shorter month, losing the days that no longer exist', () => {
+    const r = reshapeRoster(september, 2026, 2); // 28 days
+    expect(r.people[0]!.codes).toHaveLength(28);
+    expect(r.people[0]!.codes[27]).toBe('D27');
+  });
+
+  it('carries the corrected month, which is the key it will be stored under', () => {
+    expect(reshapeRoster(september, 2026, 10)).toMatchObject({ year: 2026, month: 10 });
+  });
+
+  it('keeps names and row numbers untouched', () => {
+    const r = reshapeRoster(september, 2026, 10);
+    expect(r.people[0]!.name).toBe('Giulia');
+    expect(r.people[0]!.row).toBe(3);
   });
 });

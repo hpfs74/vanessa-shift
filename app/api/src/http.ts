@@ -19,6 +19,7 @@ import {
   isSwapKind,
   isValidHours,
   normaliseCode,
+  normaliseColleague,
 } from '@vanessa/core';
 
 import { NotSignedIn } from './token.js';
@@ -193,10 +194,10 @@ export function requireYearMonth(
   const month = Number(p?.month);
   // Number(undefined) is NaN and Number('') is 0: both fail this.
   if (!Number.isInteger(year) || year < 2000 || year > 2100) {
-    throw new InvalidInput('year: expected a year');
+    throw new InvalidInput('year: anno non valido');
   }
   if (!Number.isInteger(month) || month < 1 || month > 12) {
-    throw new InvalidInput('month: out of 1-12');
+    throw new InvalidInput('month: mese fuori da 1-12');
   }
   return { year, month };
 }
@@ -213,18 +214,20 @@ export function requireRosterPeople(
   days: number,
 ): RosterPerson[] {
   const raw = b.people;
-  if (!Array.isArray(raw)) throw new InvalidInput('people: expected an array');
+  if (!Array.isArray(raw)) throw new InvalidInput('people: atteso un elenco');
   if (raw.length > MAX_ROSTER_PEOPLE) {
-    throw new InvalidInput(`people: at most ${MAX_ROSTER_PEOPLE}`);
+    throw new InvalidInput(`people: troppe persone, massimo ${MAX_ROSTER_PEOPLE}`);
   }
   return raw.map((v, i) => {
     const p = requireObject(v, `people[${i}]`);
-    const name = optionalText(p.name, `people[${i}].name`, 80);
-    // optionalText only rejects an empty string, not one that is blank once
-    // trimmed — a name of spaces would otherwise slip through.
-    if (!name || !name.trim()) throw new InvalidInput(`people[${i}].name: expected a name`);
+    const text = optionalText(p.name, `people[${i}].name`, 80);
+    // The photo path runs every name through `normaliseColleague` (roster.ts's
+    // `personOf`); this one must match, or the same field holds a trimmed name
+    // when it came from a photo and a raw one when it came from this form.
+    const name = text ? normaliseColleague(text) : '';
+    if (!name) throw new InvalidInput(`people[${i}].name: atteso un nome`);
     if (!Array.isArray(p.codes) || p.codes.length !== days) {
-      throw new InvalidInput(`people[${i}].codes: expected ${days} entries`);
+      throw new InvalidInput(`people[${i}].codes: attesi ${days} giorni`);
     }
     return {
       name,

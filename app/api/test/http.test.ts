@@ -126,6 +126,17 @@ describe('requireRosterPeople', () => {
     expect(r[0]!.codes[0]).toBe('M1');
   });
 
+  // The photo path (roster.ts's `personOf`) runs every name through
+  // `normaliseColleague`. This one must match it, or the same field holds a
+  // trimmed name when it came from a photo and a padded one from this form.
+  it('normalises the name on the way in, the same as the photo path does', () => {
+    const r = requireRosterPeople(
+      { people: [{ name: '  Giulia  ', row: null, codes: Array(30).fill('') }] },
+      30,
+    );
+    expect(r[0]!.name).toBe('Giulia');
+  });
+
   // Strict here, unlike validateRoster: this body comes from our own client,
   // which has already validated it. A malformed one is a bug, not a bad photo.
   it('refuses a row that is not the length of the month', () => {

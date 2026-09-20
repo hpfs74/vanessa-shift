@@ -7,13 +7,34 @@ import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
 
 import { App } from '../src/App.js';
 import { Calendar, weekHours, weeksOfMonth } from '../src/Calendar.js';
+import { DayEditor } from '../src/DayEditor.js';
 import type { Api, RemoteShift } from '../src/api.js';
 
-function fakeApi(initial: RemoteShift[] = [], settings: PaySettings = EMPTY_PAY_SETTINGS) {
+/** Only `roster` and `saveRoster` are worth swapping out from a test: every
+ *  other call already has a positional parameter, and giving the roster pair
+ *  one too would mean touching the ~15 existing positional call sites. */
+interface RosterOverrides {
+  roster?: Api['roster'];
+  saveRoster?: Api['saveRoster'];
+}
+
+function fakeApi(
+  initial: RemoteShift[] = [],
+  settings: PaySettings = EMPTY_PAY_SETTINGS,
+  rosterOverrides: RosterOverrides = {},
+) {
   const shifts = new Map(initial.map((s) => [s.date, s]));
   const saved: RemoteShift[] = [];
   const deleted: IsoDate[] = [];
   const bulk: { date: IsoDate; code: ShiftCode }[][] = [];
+  // Every month asked for, in call order — the roster loads one month at a
+  // time, unlike her own shifts, and this is how the tests below prove it.
+  const rosterAsked: number[] = [];
+  // Every month whose call has actually resolved (or thrown past the push
+  // below) — a signal to poll on that only flips once the microtask chain in
+  // `App`'s roster effect has had a chance to run.
+  const rosterResolved: number[] = [];
+  const rosterSaved: MonthRoster[] = [];
   let current = settings;
   let currentProfile: Profile = EMPTY_PROFILE;
   const api: Api = {
@@ -38,13 +59,23 @@ function fakeApi(initial: RemoteShift[] = [], settings: PaySettings = EMPTY_PAY_
     saveProfile: async (p) => {
       currentProfile = p;
     },
-    roster: async () => null,
-    saveRoster: async () => {},
+    roster: async (year, month) => {
+      rosterAsked.push(month);
+      try {
+        return rosterOverrides.roster ? await rosterOverrides.roster(year, month) : null;
+      } finally {
+        rosterResolved.push(month);
+      }
+    },
+    saveRoster: async (r) => {
+      rosterSaved.push(r);
+      if (rosterOverrides.saveRoster) await rosterOverrides.saveRoster(r);
+    },
     readPhoto: async () => {
       throw new Error('not used in these tests');
     },
   };
-  return { api, saved, deleted, bulk, settings: () => current };
+  return { api, saved, deleted, bulk, rosterAsked, rosterResolved, rosterSaved, settings: () => current };
 }
 
 /** A fixed "today" so the suite does not depend on the day it runs.
@@ -828,5 +859,160 @@ describe('Calendar and who is in with her', () => {
     const cell = screen.getByRole('button', { name: /^1 Settembre/ });
     expect(cell).not.toHaveAccessibleName(/\d+ colleg/);
     expect(cell.querySelector('.mates')).toBeNull();
+  });
+});
+
+describe('the day sheet lists who is in', () => {
+  const mates = [
+    { name: 'Giulia', row: 3, code: 'P', withYou: true },
+    { name: 'Anna', row: 5, code: 'M', withYou: false },
+  ];
+
+  it('splits them, and marks neither as editable', () => {
+    render(
+      <DayEditor
+        date="2026-09-01"
+        shift={null}
+        colleagues={[]}
+        mates={mates}
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText('Con te')).toBeInTheDocument();
+    expect(screen.getByText('Quel giorno')).toBeInTheDocument();
+    expect(screen.getByText('Giulia')).toBeInTheDocument();
+    // Nothing in the block is an input: the roster is read-only.
+    expect(screen.getByText('Giulia').closest('input')).toBeNull();
+  });
+
+  it('says nothing when nobody is in', () => {
+    render(
+      <DayEditor
+        date="2026-09-01"
+        shift={null}
+        colleagues={[]}
+        mates={[]}
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByText('Con te')).not.toBeInTheDocument();
+    expect(screen.queryByText('Quel giorno')).not.toBeInTheDocument();
+  });
+
+  it('shows only "Con te" when everyone present overlaps her hours', () => {
+    render(
+      <DayEditor
+        date="2026-09-01"
+        shift={null}
+        colleagues={[]}
+        mates={[mates[0]!]}
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText('Con te')).toBeInTheDocument();
+    expect(screen.queryByText('Quel giorno')).not.toBeInTheDocument();
+  });
+
+  // Two rows can carry the same name — two people, not one — so a key built
+  // from the name alone would collide and confuse React's reconciliation.
+  it('keeps the two apart even when they share a name', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sameName = [
+      { name: 'Giulia', row: 3, code: 'P', withYou: true },
+      { name: 'Giulia', row: 7, code: 'M', withYou: false },
+    ];
+    render(
+      <DayEditor
+        date="2026-09-01"
+        shift={null}
+        colleagues={[]}
+        mates={sameName}
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getAllByText('Giulia')).toHaveLength(2);
+    const warned = errorSpy.mock.calls.flat().join(' ');
+    expect(warned).not.toMatch(/same key/);
+    errorSpy.mockRestore();
+  });
+});
+
+describe('App and the roster', () => {
+  it('asks for the roster of the month it is showing, one month at a time', async () => {
+    const { api, rosterAsked } = fakeApi();
+    render(<App api={api} initialMonth={9} today="2026-09-01" />);
+    await screen.findByRole('button', { name: /^1 Settembre/ });
+    expect(rosterAsked).toEqual([9]);
+  });
+
+  it('asks again when the month changes', async () => {
+    const { api, rosterAsked } = fakeApi();
+    render(<App api={api} initialMonth={9} today="2026-09-01" />);
+    await screen.findByRole('button', { name: /^1 Settembre/ });
+    await userEvent.click(screen.getByRole('button', { name: 'Mese successivo' }));
+    await waitFor(() => expect(rosterAsked).toEqual([9, 10]));
+  });
+
+  // A roster that will not load is not a reason to lose the calendar: her own
+  // shifts, hours and pay stay correct without it.
+  it('still shows the month when the roster call fails', async () => {
+    const { api } = fakeApi([], EMPTY_PAY_SETTINGS, {
+      roster: async () => {
+        throw new Error('giù');
+      },
+    });
+    render(<App api={api} initialMonth={9} today="2026-09-01" />);
+    expect(await screen.findByRole('button', { name: /^1 Settembre/ })).toBeInTheDocument();
+  });
+
+  // Month changes can race: flicking from September to October must not let
+  // a slow September answer arrive after October's and repaint the wrong
+  // month's people. The `alive` guard in App's roster effect is what this
+  // proves.
+  it('ignores a stale roster response from a month she has already left', async () => {
+    const resolvers = new Map<number, (r: MonthRoster | null) => void>();
+    const { api, rosterAsked, rosterResolved } = fakeApi(
+      [{ date: '2026-10-01', code: 'P' }],
+      EMPTY_PAY_SETTINGS,
+      {
+        roster: (_y, m) =>
+          new Promise<MonthRoster | null>((resolve) => {
+            resolvers.set(m, resolve);
+          }),
+      },
+    );
+    render(<App api={api} initialMonth={9} today="2026-09-01" />);
+    await screen.findByRole('button', { name: /^1 Settembre/ });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Mese successivo' }));
+    await waitFor(() => expect(rosterAsked).toEqual([9, 10]));
+
+    // October's roster answers first, and Giulia's P overlaps Vanessa's own P.
+    const october: MonthRoster = {
+      year: 2026,
+      month: 10,
+      people: [{ name: 'Giulia', row: 3, codes: ['P', ...Array<string>(30).fill('')] }],
+    };
+    resolvers.get(10)!(october);
+    await waitFor(() => expect(rosterResolved).toContain(10));
+    expect(screen.getByRole('button', { name: /^1 Ottobre/ })).toHaveAccessibleName(
+      /collega con te/,
+    );
+
+    // September's slow answer lands after: it must not overwrite what is now
+    // on screen.
+    resolvers.get(9)!(null);
+    await waitFor(() => expect(rosterResolved).toContain(9));
+    expect(screen.getByRole('button', { name: /^1 Ottobre/ })).toHaveAccessibleName(
+      /collega con te/,
+    );
   });
 });

@@ -195,6 +195,26 @@ legend {
 
 .toggle { min-height: var(--tap); text-align: left; padding: 0 0.6rem; color: var(--navy); }
 
+.mates-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.mates-list h3 {
+  font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.05em; margin: 0.3rem 0 0;
+}
+.mates-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.mates-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 0.8rem;
+}
+.mates-list li span:last-child {
+  min-width: 1.8rem; text-align: center; border-radius: 6px; padding: 0.1rem 0.3rem; font-weight: 700;
+}
+.mates-list .t-M { background: var(--M); }
+.mates-list .t-M1 { background: var(--M1); }
+.mates-list .t-P { background: var(--P); }
+.mates-list .t-P1 { background: var(--P1); }
+.mates-list .t-L { background: var(--L); }
+
 label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.78rem; color: var(--muted); }
 input, select, textarea {
   padding: 0.6rem 0.55rem; border: 1px solid var(--border); border-radius: 8px;

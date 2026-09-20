@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react';
 
-import type { IsoDate, ShiftCode } from '@vanessa/core';
+import type { IsoDate, RosterEntry, ShiftCode } from '@vanessa/core';
 import { MAX_DAY_HOURS, SHIFTS, SWAP_KINDS, hours, timeRange } from '@vanessa/core';
 
 import type { RemoteShift } from './api.js';
@@ -15,6 +15,8 @@ export interface DayEditorProps {
   date: IsoDate;
   shift: RemoteShift | null;
   colleagues: readonly string[];
+  /** Who else is on the sheet that day. Read-only: nothing here is hers to edit. */
+  mates: readonly RosterEntry[];
   onSave: (shift: RemoteShift) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -24,6 +26,7 @@ export function DayEditor({
   date,
   shift,
   colleagues,
+  mates,
   onSave,
   onDelete,
   onClose,
@@ -194,6 +197,41 @@ export function DayEditor({
             onChange={(e) => setNotes(e.target.value)}
           />
         </label>
+
+        {mates.length > 0 && (
+          <div className="mates-list">
+            {mates.some((m) => m.withYou) && (
+              <>
+                <h3>Con te</h3>
+                <ul>
+                  {mates
+                    .filter((m) => m.withYou)
+                    .map((m, i) => (
+                      // Two rows can share a name — two people, not one — so
+                      // the key also carries the row, never the name alone.
+                      <li key={`${m.name}-${m.row ?? i}`}>
+                        <span>{m.name}</span> <span className={`t-${m.code}`}>{m.code}</span>
+                      </li>
+                    ))}
+                </ul>
+              </>
+            )}
+            {mates.some((m) => !m.withYou) && (
+              <>
+                <h3>Quel giorno</h3>
+                <ul>
+                  {mates
+                    .filter((m) => !m.withYou)
+                    .map((m, i) => (
+                      <li key={`${m.name}-${m.row ?? i}`}>
+                        <span>{m.name}</span> <span className={`t-${m.code}`}>{m.code}</span>
+                      </li>
+                    ))}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="sheet-actions">

@@ -265,6 +265,11 @@ describe('PhotoImport and the other rows', () => {
       },
     });
     await salva();
+    // The button's onClick doesn't hand the save promise back to
+    // `userEvent.click`, so the click resolves before `save()` does: wait
+    // for it to have run to completion, as the pre-existing tests in this
+    // file wait on `onSave`, before asserting on the result.
+    await waitFor(() => expect(order).toHaveLength(2));
     expect(order).toEqual(['shifts', 'roster']);
   });
 
@@ -297,18 +302,24 @@ describe('PhotoImport and the other rows', () => {
     await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '6');
     await salva();
 
+    // Same reason as the order test above: the click resolves before
+    // `save()` finishes, so wait for the roster save to have landed.
+    await waitFor(() => expect(saved).toHaveLength(1));
     expect(saved[0]!.month).toBe(6);
     expect(saved[0]!.people[0]!.codes).toHaveLength(30);
   });
 
   it('does not call the roster endpoint when nobody else was read', async () => {
     let called = 0;
-    await renderWith(julyReading(), undefined, {
+    const { onSave } = await renderWith(julyReading(), undefined, {
       onSaveRoster: async () => {
         called += 1;
       },
     });
     await salva();
+    // Wait for `save()` to have run its course, same as the tests above,
+    // before trusting that the absence held rather than just being early.
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(called).toBe(0);
   });
 });

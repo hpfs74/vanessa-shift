@@ -875,3 +875,95 @@ describe('origin secret', () => {
     expect(r.statusCode).toBe(200);
   });
 });
+
+import { getRosterWith, putRosterWith } from '../src/handlers.js';
+
+/** A reading of July with other rows attached. `julyReading()` is the helper
+ *  already in core's tests; here the shape is built inline to keep the two
+ *  suites independent. */
+function rawWithOthers(others: unknown) {
+  return {
+    month: 7,
+    year: 2026,
+    found: true,
+    foundName: 'Vanessa',
+    foundRow: 14,
+    days: Array.from({ length: 31 }, (_, i) => ({ day: i + 1, code: null, confident: true })),
+    others,
+  };
+}
+
+const readPhotoEvent = () =>
+  event({ body: JSON.stringify({ image: 'abc' }), headers: {} });
+
+describe('readPhoto and the roster', () => {
+  it('returns the roster beside the reading', async () => {
+    const raw = rawWithOthers([{ name: 'Giulia', row: 3, codes: Array(31).fill('M') }]);
+    const r: any = await readPhotoWith(f.repo, async () => raw, () => '2026-07-02', () => 2026, async () => {})(
+      readPhotoEvent(),
+    );
+    expect(body(r).reading.days).toHaveLength(31);
+    expect(body(r).roster.people[0].name).toBe('Giulia');
+  });
+
+  // The asymmetry, end to end: a roster that cannot be used must never take
+  // down a reading that can.
+  it('still answers 200 with the reading when the other rows are rubbish', async () => {
+    const r: any = await readPhotoWith(f.repo, async () => rawWithOthers('not an array'), () => '2026-07-02', () => 2026, async () => {})(
+      readPhotoEvent(),
+    );
+    expect(r.statusCode).toBe(200);
+    expect(body(r).roster.people).toEqual([]);
+  });
+
+  it('takes the roster month from the reading, not from a field of its own', async () => {
+    const raw = rawWithOthers([{ name: 'Giulia', row: 3, codes: Array(31).fill('M') }]);
+    const r: any = await readPhotoWith(f.repo, async () => raw, () => '2026-07-02', () => 2026, async () => {})(
+      readPhotoEvent(),
+    );
+    expect(body(r).roster.month).toBe(7);
+  });
+});
+
+describe('GET /roster', () => {
+  it('reads a month', async () => {
+    await f.repo.saveRoster({ year: 2026, month: 9, people: [] });
+    const r: any = await getRosterWith(f.repo)(event({ pathParameters: { year: '2026', month: '09' } }));
+    expect(body(r).roster.month).toBe(9);
+  });
+
+  it('answers with a null roster for a month never imported', async () => {
+    const r: any = await getRosterWith(f.repo)(event({ pathParameters: { year: '2026', month: '09' } }));
+    expect(body(r).roster).toBeNull();
+  });
+
+  it('refuses a month outside the year', async () => {
+    const r: any = await getRosterWith(f.repo)(event({ pathParameters: { year: '2026', month: '13' } }));
+    expect(r.statusCode).toBe(400);
+  });
+});
+
+describe('PUT /roster', () => {
+  const people = [{ name: 'Giulia', row: 3, codes: Array(30).fill('M') }];
+
+  it('saves the month named in the path, not one named in the body', async () => {
+    await putRosterWith(f.repo)(
+      event({
+        pathParameters: { year: '2026', month: '09' },
+        body: JSON.stringify({ people, year: 1999, month: 1 }),
+      }),
+    );
+    expect(await f.repo.readRoster(2026, 9)).toMatchObject({ year: 2026, month: 9 });
+    expect(await f.repo.readRoster(1999, 1)).toBeNull();
+  });
+
+  it('refuses a body whose rows are not the length of that month', async () => {
+    const r: any = await putRosterWith(f.repo)(
+      event({
+        pathParameters: { year: '2026', month: '09' },
+        body: JSON.stringify({ people: [{ name: 'Giulia', row: 3, codes: Array(31).fill('M') }] }),
+      }),
+    );
+    expect(r.statusCode).toBe(400);
+  });
+});

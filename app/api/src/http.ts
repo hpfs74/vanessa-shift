@@ -8,7 +8,7 @@
 
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 
-import type { ContractKind, IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
+import type { ContractKind, IsoDate, PaySettings, Profile, RosterPerson, ShiftCode } from '@vanessa/core';
 import {
   MAX_DAY_HOURS,
   MAX_WEEKLY_HOURS,
@@ -18,6 +18,7 @@ import {
   isShiftCode,
   isSwapKind,
   isValidHours,
+  normaliseCode,
 } from '@vanessa/core';
 
 import { NotSignedIn } from './token.js';
@@ -183,6 +184,54 @@ export function requireObject(v: unknown, field: string): Record<string, unknown
     throw new InvalidInput(`${field}: deve essere un oggetto`);
   }
   return v as Record<string, unknown>;
+}
+
+export function requireYearMonth(
+  p: Record<string, string | undefined> | undefined,
+): { year: number; month: number } {
+  const year = Number(p?.year);
+  const month = Number(p?.month);
+  // Number(undefined) is NaN and Number('') is 0: both fail this.
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new InvalidInput('year: expected a year');
+  }
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw new InvalidInput('month: out of 1-12');
+  }
+  return { year, month };
+}
+
+/** A ward is not this big. The cap is what keeps one item inside DynamoDB's
+ *  400 KB, and a malformed client from writing a book. */
+export const MAX_ROSTER_PEOPLE = 60;
+
+/** Strict, unlike `validateRoster`. That one judges what a model said it read
+ *  from a photograph; this one judges a body our own client has already
+ *  validated, where anything malformed is a bug worth hearing about. */
+export function requireRosterPeople(
+  b: Record<string, unknown>,
+  days: number,
+): RosterPerson[] {
+  const raw = b.people;
+  if (!Array.isArray(raw)) throw new InvalidInput('people: expected an array');
+  if (raw.length > MAX_ROSTER_PEOPLE) {
+    throw new InvalidInput(`people: at most ${MAX_ROSTER_PEOPLE}`);
+  }
+  return raw.map((v, i) => {
+    const p = requireObject(v, `people[${i}]`);
+    const name = optionalText(p.name, `people[${i}].name`, 80);
+    // optionalText only rejects an empty string, not one that is blank once
+    // trimmed — a name of spaces would otherwise slip through.
+    if (!name || !name.trim()) throw new InvalidInput(`people[${i}].name: expected a name`);
+    if (!Array.isArray(p.codes) || p.codes.length !== days) {
+      throw new InvalidInput(`people[${i}].codes: expected ${days} entries`);
+    }
+    return {
+      name,
+      row: typeof p.row === 'number' && Number.isInteger(p.row) ? p.row : null,
+      codes: p.codes.map(normaliseCode),
+    };
+  });
 }
 
 export function requireWeeklyHours(v: unknown): number | null {

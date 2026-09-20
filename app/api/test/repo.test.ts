@@ -335,4 +335,15 @@ describe('roster', () => {
     expect((await repo.readRoster(2026, 9))!.people).toHaveLength(2);
     expect((await repo.readRoster(2026, 10))!.people).toHaveLength(0);
   });
+
+  // '' .split(',') is [''], not []: without the guard a person with no codes
+  // comes back holding one phantom empty code.
+  it('round-trips a person with no codes at all, without inventing one', async () => {
+    const { doc } = fakeTable();
+    const repo = createRepo('tabella', doc);
+    await repo.saveRoster({ year: 2026, month: 9, people: [{ name: 'Giulia', row: 3, codes: [] }] });
+
+    const back = await repo.readRoster(2026, 9);
+    expect(back!.people[0]!.codes).toEqual([]);
+  });
 });

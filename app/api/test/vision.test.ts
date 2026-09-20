@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ROW_NAME } from '@vanessa/core';
+import { READING_SCHEMA, ROW_NAME } from '@vanessa/core';
 
 import { MAX_TOKENS, MODEL, VisionFailed, createVision } from '../src/vision.js';
 
@@ -118,8 +118,13 @@ describe('createVision', () => {
 });
 
 describe('the prompt and the token budget', () => {
-  it('raises the cap, because the response now carries the whole sheet', () => {
-    expect(MAX_TOKENS).toBe(16000);
+  // Tripwire, not decoration. This was 16000 for a few hours on 2026-09-20 and
+  // every reading in production died: the whole-sheet response outran the
+  // Lambda's 120s ceiling and the 60s CloudFront allows the origin, so the
+  // function was killed before any of the error handling could run. Raising it
+  // again is a wall-clock decision before it is a token one.
+  it('keeps the cap sized for one row, after 16000 timed out in production', () => {
+    expect(MAX_TOKENS).toBe(8000);
   });
 
   it('still tells the model to align on the day-number header row', async () => {
@@ -129,13 +134,22 @@ describe('the prompt and the token budget', () => {
     expect(text).toContain('numeri dei giorni');
   });
 
-  it('asks for the other rows instead of forbidding them', async () => {
+  // The reading is one row again. The roster plumbing downstream stays in
+  // place and simply receives nothing: `validateRoster` reads an absent
+  // `others` as an empty roster, and the web client already tolerates a
+  // response without one.
+  it('reads one row only, and says so', async () => {
     const { client, sent } = clientReturning(GOOD_RESPONSE);
     await createVision(client)('abc');
     const text = sent[0].messages[0].content[1].text as string;
-    expect(text).not.toContain('UNA SOLA riga');
-    // Case-sensitive toContain would fail on the sentence-initial capital,
-    // which is correct Italian, not a prompt to weaken.
-    expect(text).toMatch(/tutte le altre righe/i);
+    expect(text).toContain('UNA SOLA riga');
+    expect(text).not.toMatch(/tutte le altre righe/i);
+  });
+
+  it('does not ask the model to fill a field the schema no longer requires', () => {
+    const required = (READING_SCHEMA.required ?? []) as string[];
+    expect(required).not.toContain('others');
+    // The property itself stays, so re-widening the prompt needs no schema work.
+    expect((READING_SCHEMA.properties as Record<string, unknown>).others).toBeDefined();
   });
 });

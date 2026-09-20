@@ -69,22 +69,21 @@ Sopra le colonne c'e' una riga con i numeri dei giorni, da 1 fino alla fine del
 mese: usala per allineare le colonne, non contarle a occhio. In alto c'e' il
 titolo con il mese e l'anno.
 
-Devi leggere TUTTE le righe della griglia.
+Devi leggere UNA SOLA riga: quella della persona di nome ${ROW_NAME}.
 I nomi stanno a sinistra, su due righe (cognome sopra, nome sotto): la riga dei
 turni e' quella del nome.
 
-La riga della persona di nome ${ROW_NAME} va in days, un elemento per OGNI
-giorno del mese, dal primo all'ultimo, anche per i giorni con code null.
-Le sigle valide per quella riga sono soltanto: ${CODES}.
+Per ogni giorno del mese riporta la sigla che sta nella cella di quella riga.
+Le sigle valide sono soltanto: ${CODES}.
 Se la cella contiene una x, e' vuota, oppure non riesci a leggerla con
-ragionevole certezza, metti code null. Metti confident a false quando la cella
-e' sbiadita, corretta a mano, ambigua o coperta.
+ragionevole certezza, metti code null.
 
-Tutte le altre righe vanno in others, una per persona, con il nome cosi' come
-sta scritto sul foglio e un elenco codes lungo quanto il mese.
-Le altre righe contengono anche sigle diverse (F, R, C, N1 e altre): copiale
-cosi' come sono, senza tradurle e senza scartarle. Per una cella vuota, con una
-x, o illeggibile, metti la stringa vuota.
+Attenzione: le altre righe contengono anche sigle diverse (F, R, C, N1 e altre).
+Non riguardano questa persona. Non riportare mai la cella di un'altra riga.
+
+Riporta un elemento per OGNI giorno del mese, dal primo all'ultimo, anche per i
+giorni con code null. Metti confident a false quando la cella e' sbiadita,
+corretta a mano, ambigua o coperta.
 
 In foundName scrivi il nome cosi' come sta scritto sul foglio, e in foundRow il
 numero della riga se il foglio lo mostra, altrimenti null.
@@ -92,10 +91,17 @@ numero della riga se il foglio lo mostra, altrimenti null.
 Se nella foto non c'e' nessuna riga intestata a ${ROW_NAME}, metti found a
 false e days a un elenco vuoto.`;
 
-/** Reasoning plus response together. Raised from 8000 when the response went
- *  from one row to the whole sheet: too tight and it truncates halfway, which
- *  surfaces as VisionFailed('truncated') and costs a reading. */
-export const MAX_TOKENS = 16000;
+/** Reasoning plus response together, sized for ONE row.
+ *
+ * This was 16000 for a few hours on 2026-09-20, when the prompt was widened to
+ * read the whole sheet. The response then took longer than the Lambda's 120s
+ * ceiling — and longer still than the 60s CloudFront allows the origin — so
+ * every reading died before any of the error handling below could run. The
+ * one-row read measures 35s; the whole-sheet read did not finish inside 120s.
+ *
+ * Raising this again means fixing the wall-clock budget first, not the token
+ * budget: see the CloudFront readTimeout on `/foto/*` in infra. */
+export const MAX_TOKENS = 8000;
 
 export function createVision(client?: MessagesClient): Vision {
   const c: MessagesClient =

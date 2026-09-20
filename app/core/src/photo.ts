@@ -84,7 +84,11 @@ export const READING_SCHEMA: Record<string, unknown> = {
       },
     },
   },
-  required: ['month', 'year', 'found', 'foundName', 'foundRow', 'days', 'others'],
+  // `others` is deliberately NOT required: the prompt no longer asks for the
+  // other rows, and validateRoster reads an absent `others` as an empty
+  // roster. Putting it back here without widening the prompt would make the
+  // model invent a field nobody asked it to fill.
+  required: ['month', 'year', 'found', 'foundName', 'foundRow', 'days'],
   additionalProperties: false,
 };
 

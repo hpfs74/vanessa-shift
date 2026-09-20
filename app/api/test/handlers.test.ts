@@ -918,7 +918,12 @@ describe('readPhoto and the roster', () => {
 
   it('takes the roster month from the reading, not from a field of its own', async () => {
     const raw = rawWithOthers([{ name: 'Giulia', row: 3, codes: Array(31).fill('M') }]);
-    const r: any = await readPhotoWith(f.repo, async () => raw, () => '2026-07-02', () => 2026, async () => {})(
+    // `today` deliberately falls in a different month (November) than the
+    // reading (July): were the handler to take the month from `today()`
+    // instead of `reading.month` — say, by parsing the quota date — this
+    // would answer 11, not 7, and the assertion below would catch it. A
+    // `today` that happened to share July would let that bug pass silently.
+    const r: any = await readPhotoWith(f.repo, async () => raw, () => '2026-11-02', () => 2026, async () => {})(
       readPhotoEvent(),
     );
     expect(body(r).roster.month).toBe(7);

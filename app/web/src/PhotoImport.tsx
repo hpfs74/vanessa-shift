@@ -107,6 +107,12 @@ export function PhotoImport({ year, existing, onRead, onSave, onSaveRoster }: Ph
     // computed from.
     await onSave(planned);
     setRosterError(null);
+    // An exception to "la foto nuova e' la verita' del mese", left unwritten
+    // until now: PUT /roster replaces the whole month, so sending an empty
+    // `people` array would be read as "the ward is now empty" and erase
+    // whatever was already stored — this line is the only thing standing
+    // between a bad or missing roster reading and that erasure. Do not
+    // "fix" it in either direction without keeping both halves true.
     if (!roster || roster.people.length === 0) return;
     try {
       await onSaveRoster(roster);

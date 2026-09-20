@@ -343,6 +343,17 @@ Sta dietro la passkey come tutto il resto, non lascia l'account, e **non entra n
 inoltra, finisce in un backup — e i turni di terzi non devono viaggiare dentro un file pensato per
 essere condiviso.
 
+Nell'app non esiste un gesto per cancellarlo. L'API sì: un `PUT /roster` con `people` vuoto
+sostituisce il mese con niente, perché quella rotta rimpiazza tutto il mese in un colpo — è la
+stessa rotta che lo scrive. Che il client non mandi mai un `people` vuoto (vedi il commento su
+quella riga in `PhotoImport.tsx`) è una scelta, non una dimenticanza. E anche se quel gesto
+esistesse, la cancellazione non sarebbe immediata: la tabella ha il point-in-time recovery attivo,
+quindi un mese tolto per errore resta recuperabile per un po', non sparisce nell'istante in cui
+viene tolto. È il compromesso giusto, perché lo stesso PITR è ciò che protegge i turni **suoi**
+da uno sbaglio fatto da lei, da accesso effettuato — non serve un TTL a parte, e non ne va aggiunto
+uno solo per questo: tornare indietro a marzo e vedere chi c'era è la funzione, non un effetto
+collaterale da spegnere.
+
 Vale la pena scriverlo invece di lasciarlo implicito, perché è il genere di cosa che si decide una
 volta e poi non si rilegge più.
 

@@ -280,6 +280,30 @@ PROVA_BEDROCK=1 FOTO_LUGLIO=~/vanessa-foto/luglio.jpeg \
   npx vitest run --root api api/test/vision.integration.test.ts
 ```
 
+### I turni degli altri
+
+La lettura prende **tutte le righe** del foglio, non solo quella di Vanessa. La sua va nella
+griglia correggibile di sempre; le altre finiscono in un blocco richiudibile, in sola lettura, che
+dice quante persone ha letto.
+
+Le sigle degli altri si conservano **così come sono scritte**, anche quelle che l'app non conosce
+(`F`, `R`, `C`, `N1`). Dove la sigla è una delle cinque note, il calendario sa gli orari e può
+dire chi condivide le ore; dove non lo è, mostra la lettera e tace. Una sigla nuova non rompe
+l'import: è il motivo per cui non entrano in `ShiftCode`.
+
+Nel calendario il numero in un giorno conta **chi si sovrappone alle sue ore**, non chi c'è. `M`
+finisce quando `P` comincia: si danno il cambio, non si incontrano. Toccando il giorno, i nomi si
+dividono fra *Con te* e *Quel giorno*.
+
+**Se una riga risulta letta male**, non si corregge: si rifà la foto. La nuova lettura sostituisce
+il mese per intero — chi è sparito dal foglio sparisce dal calendario — mentre i suoi turni non si
+cancellano mai. Le due regole sono opposte perché i due dati lo sono: il suo è l'originale, il
+resto è la copia di un foglio che viene riemesso.
+
+**Cosa viene conservato.** Il turnario completo del reparto, con i nomi come stanno sul foglio.
+Sta dietro la passkey come tutto il resto, non lascia l'account, e **non entra nel file `.ics`**:
+quello si manda in giro per natura, e i turni di altri non devono viaggiarci dentro.
+
 ## Risorse AWS
 
 Account `495133941005`, regione `eu-south-1`. I certificati stanno in `us-east-1` perché
@@ -656,9 +680,12 @@ Una tabella sola, chiave composta:
 |--------|------|------|
 | Turno | `TURNI#2026` | `2026-01-15` |
 | Parametri paga | `CONFIG` | `PAGA` |
+| Turnario | `ROSTER#<anno>` | `<MM>` |
 
 Le ore non si memorizzano: si derivano dal codice turno. Un giorno senza turno non esiste come
 item — l'assenza è l'assenza, non una riga vuota.
+
+`ROSTER#<anno>` / `<MM>` — il turnario del mese: una riga per persona, le sigle unite da virgole.
 
 ## Il generatore Python
 

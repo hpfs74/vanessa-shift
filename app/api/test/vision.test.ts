@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ROW_NAME } from '@vanessa/core';
 
-import { MODEL, VisionFailed, createVision } from '../src/vision.js';
+import { MAX_TOKENS, MODEL, VisionFailed, createVision } from '../src/vision.js';
 
 function clientReturning(response: unknown) {
   const sent: any[] = [];
@@ -114,5 +114,28 @@ describe('createVision', () => {
       content: [{ type: 'text', text: 'mi dispiace' }],
     });
     expect(error.reason).toBe('not-json');
+  });
+});
+
+describe('the prompt and the token budget', () => {
+  it('raises the cap, because the response now carries the whole sheet', () => {
+    expect(MAX_TOKENS).toBe(16000);
+  });
+
+  it('still tells the model to align on the day-number header row', async () => {
+    const { client, sent } = clientReturning(GOOD_RESPONSE);
+    await createVision(client)('abc');
+    const text = sent[0].messages[0].content[1].text as string;
+    expect(text).toContain('numeri dei giorni');
+  });
+
+  it('asks for the other rows instead of forbidding them', async () => {
+    const { client, sent } = clientReturning(GOOD_RESPONSE);
+    await createVision(client)('abc');
+    const text = sent[0].messages[0].content[1].text as string;
+    expect(text).not.toContain('UNA SOLA riga');
+    // Case-sensitive toContain would fail on the sentence-initial capital,
+    // which is correct Italian, not a prompt to weaken.
+    expect(text).toMatch(/tutte le altre righe/i);
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   InvalidReading,
+  READING_SCHEMA,
   RowNotFound,
   romeToday,
   validateReading,
@@ -125,6 +126,26 @@ describe('validateReading', () => {
   it('when the row is not there it says so with its own error', () => {
     const e = { ...emptyReading(8, 2026, 31), found: false, foundName: null, foundRow: null };
     expect(() => validateReading(e, 2026)).toThrow(RowNotFound);
+  });
+});
+
+describe('READING_SCHEMA', () => {
+  it('asks for the other rows too, in a shape of their own', () => {
+    const props = READING_SCHEMA.properties as Record<string, any>;
+    expect(props.others.type).toBe('array');
+    expect(Object.keys(props.others.items.properties).sort()).toEqual(['codes', 'name', 'row']);
+  });
+
+  // No `confident` on other people's cells: the flag exists to underline a
+  // cell she can correct, and there is no per-cell editing for them.
+  it('does not ask for a confidence flag on the other rows', () => {
+    const props = READING_SCHEMA.properties as Record<string, any>;
+    expect(props.others.items.properties.confident).toBeUndefined();
+  });
+
+  it('still asks for her own row exactly as before', () => {
+    const props = READING_SCHEMA.properties as Record<string, any>;
+    expect(Object.keys(props.days.items.properties).sort()).toEqual(['code', 'confident', 'day']);
   });
 });
 

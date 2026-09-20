@@ -261,7 +261,12 @@ rifiuti: la Function URL è su `authType: NONE` e risponde a chiunque. È che da
 qui sotto — quindi la richiesta parte senza token e la Lambda la rifiuta per
 prima cosa. Una lettura vera va provata in linea.
 
-Ogni lettura costa circa 0,09 €. L'endpoint è dietro lo stesso token verificato in
+Il costo di una lettura va rimisurato, non citato: la cifra che stava qui era presa con
+`MAX_TOKENS` a 8000 e una risposta di una sola riga, e questo ramo ha portato il tetto a 16000 e
+la risposta a un foglio intero — più righe, più `others`, oltre al `thinking: 'adaptive'` che
+sposta la spesa in modo imprevedibile fra ragionamento e risposta. L'immagine in ingresso non è
+cambiata, ma a dominare ora sono i token in uscita, e inventare un numero varrebbe meno di non
+averne nessuno. L'endpoint è dietro lo stesso token verificato in
 **Autenticazione** — la Lambda lo controlla per primo, prima della quota e prima di Bedrock —
 quindi le difese sotto fermano un chiamante già autenticato che esagera, non sostituiscono quel
 controllo: un **tetto di 10 letture al giorno** (contatore su DynamoDB, condizione e

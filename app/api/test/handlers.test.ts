@@ -2,7 +2,7 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IsoDate, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, romeToday } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, MAX_ROSTER_PEOPLE, romeToday } from '@vanessa/core';
 
 import {
   getConfigWith,
@@ -922,6 +922,37 @@ describe('readPhoto and the roster', () => {
       readPhotoEvent(),
     );
     expect(body(r).roster.month).toBe(7);
+  });
+
+  // The photo path and the save path must agree on both caps (I1), or a
+  // roster this lenient side accepted can still be refused whole by the
+  // strict `requireRosterPeople`. Proven end to end: a sheet with one person
+  // too many, one of them with a name far past MAX_NAME_LENGTH, and the
+  // roster the client would PUT back on save still saves.
+  it('reads more people and a longer name than the caps allow, and what it returns still saves', async () => {
+    const others = Array.from({ length: MAX_ROSTER_PEOPLE + 1 }, (_, i) => ({
+      name: i === 0 ? 'M'.repeat(200) : `Persona${i}`,
+      row: null,
+      codes: Array(31).fill('M'),
+    }));
+    const r: any = await readPhotoWith(
+      f.repo,
+      async () => rawWithOthers(others),
+      () => '2026-07-02',
+      () => 2026,
+      async () => {},
+    )(readPhotoEvent());
+    const roster = body(r).roster;
+    expect(roster.people).toHaveLength(MAX_ROSTER_PEOPLE);
+
+    const put: any = await putRosterWith(f.repo)(
+      event({
+        pathParameters: { year: '2026', month: '07' },
+        body: JSON.stringify({ people: roster.people }),
+      }),
+    );
+    expect(put.statusCode).toBe(200);
+    expect(body(put).saved).toBe(MAX_ROSTER_PEOPLE);
   });
 });
 

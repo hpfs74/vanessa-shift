@@ -11,6 +11,8 @@ import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ContractKind, IsoDate, PaySettings, Profile, RosterPerson, ShiftCode } from '@vanessa/core';
 import {
   MAX_DAY_HOURS,
+  MAX_NAME_LENGTH,
+  MAX_ROSTER_PEOPLE,
   MAX_WEEKLY_HOURS,
   daysBetween,
   isContractKind,
@@ -21,6 +23,13 @@ import {
   normaliseCode,
   normaliseColleague,
 } from '@vanessa/core';
+
+// Re-exported rather than redeclared: `roster.ts`'s `validateRoster` (the
+// photo path) and this module's `requireRosterPeople` (the save path) must
+// agree on both caps, or a reading this lenient side accepted could still be
+// refused whole by the strict one — see the comment on `MAX_ROSTER_PEOPLE`
+// in core.
+export { MAX_ROSTER_PEOPLE };
 
 import { NotSignedIn } from './token.js';
 
@@ -202,13 +211,11 @@ export function requireYearMonth(
   return { year, month };
 }
 
-/** A ward is not this big. The cap is what keeps one item inside DynamoDB's
- *  400 KB, and a malformed client from writing a book. */
-export const MAX_ROSTER_PEOPLE = 60;
-
 /** Strict, unlike `validateRoster`. That one judges what a model said it read
  *  from a photograph; this one judges a body our own client has already
- *  validated, where anything malformed is a bug worth hearing about. */
+ *  validated, where anything malformed is a bug worth hearing about. Both
+ *  caps still come from `@vanessa/core`, though: what the photo path already
+ *  accepted must never be the reason this one refuses the whole save. */
 export function requireRosterPeople(
   b: Record<string, unknown>,
   days: number,
@@ -220,7 +227,7 @@ export function requireRosterPeople(
   }
   return raw.map((v, i) => {
     const p = requireObject(v, `people[${i}]`);
-    const text = optionalText(p.name, `people[${i}].name`, 80);
+    const text = optionalText(p.name, `people[${i}].name`, MAX_NAME_LENGTH);
     // The photo path runs every name through `normaliseColleague` (roster.ts's
     // `personOf`); this one must match, or the same field holds a trimmed name
     // when it came from a photo and a raw one when it came from this form.

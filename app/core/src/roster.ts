@@ -15,6 +15,21 @@ import { normaliseColleague } from './swaps.js';
  *  from storing a sentence inside a cell. */
 export const MAX_CODE_LENGTH = 4;
 
+/** Longer than this is not a name a sheet would show. The cap is what stops
+ *  a model that wanders from storing a sentence inside a name cell — the
+ *  same failure `MAX_CODE_LENGTH` stops one field over. `http.ts`'s
+ *  `requireRosterPeople` enforces the same number on the way back in, so a
+ *  name this module already accepted can never be the reason a save is
+ *  refused. */
+export const MAX_NAME_LENGTH = 80;
+
+/** A ward is not this big. The cap is what keeps one roster item inside
+ *  DynamoDB's 400 KB, and a malformed reading from growing without bound.
+ *  `http.ts`'s `requireRosterPeople` enforces the same number on the way
+ *  back in — one rule, checked on the way a roster enters the app and kept
+ *  true on the way it leaves, not two rules that can disagree. */
+export const MAX_ROSTER_PEOPLE = 60;
+
 export interface RosterPerson {
   readonly name: string;
   /** The row number when the sheet shows one. A caption: nothing computes. */
@@ -37,16 +52,25 @@ export function normaliseCode(v: unknown): string {
   return v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, MAX_CODE_LENGTH);
 }
 
-function personOf(v: unknown, expected: number): RosterPerson | null {
+function personOf(
+  v: unknown,
+  expected: number,
+  excludedNormalised: string | null,
+): RosterPerson | null {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
   const e = v as Record<string, unknown>;
 
   if (typeof e.name !== 'string') return null;
-  const name = normaliseColleague(e.name);
-  if (!name) return null;
+  const full = normaliseColleague(e.name);
+  if (!full) return null;
+  const lower = full.toLocaleLowerCase('it');
   // Her row already travels in the `reading`. Twice over would put her on
-  // shift with herself.
-  if (name.toLocaleLowerCase('it') === ROW_NAME.toLocaleLowerCase('it')) return null;
+  // shift with herself. `ROW_NAME` catches a bare "Vanessa"; `excludedNormalised`
+  // (the reading's own `foundName`) catches the sheet's own spelling — e.g.
+  // "ROSSI VANESSA" when the prompt asks for surname-then-name — which a
+  // bare-first-name check would walk straight past.
+  if (lower === ROW_NAME.toLocaleLowerCase('it')) return null;
+  if (excludedNormalised && lower === excludedNormalised) return null;
 
   // The all-or-nothing rule does not disappear, it drops a level: from the
   // reading to the single row. A row that is not the length of the month was
@@ -54,20 +78,38 @@ function personOf(v: unknown, expected: number): RosterPerson | null {
   if (!Array.isArray(e.codes) || e.codes.length !== expected) return null;
 
   const row = typeof e.row === 'number' && Number.isInteger(e.row) ? e.row : null;
-  return { name, row, codes: e.codes.map(normaliseCode) };
+  // Truncated, like `normaliseCode` truncates a code: a name this long costs
+  // the field, never the row, and never the rest of the sheet with it.
+  return { name: full.slice(0, MAX_NAME_LENGTH), row, codes: e.codes.map(normaliseCode) };
 }
 
 /** Best-effort by design: it drops what it cannot use and never throws.
  *  The caller has already validated Vanessa's own row, and nothing here may
- *  take that reading down. */
-export function validateRoster(v: unknown, year: number, month: number): MonthRoster {
+ *  take that reading down.
+ *
+ *  `excludeName`, when given, is the reading's own `foundName` — the same
+ *  name off the same sheet, which catches her row duplicated into `others`
+ *  under its full written form even when that form is not a bare "Vanessa". */
+export function validateRoster(
+  v: unknown,
+  year: number,
+  month: number,
+  excludeName?: string | null,
+): MonthRoster {
   const expected = daysInMonth(year, month);
+  const excludedNormalised = excludeName
+    ? normaliseColleague(excludeName).toLocaleLowerCase('it')
+    : null;
   const people: RosterPerson[] = [];
   const raw =
     typeof v === 'object' && v !== null ? (v as Record<string, unknown>).others : undefined;
   if (Array.isArray(raw)) {
     for (const item of raw) {
-      const p = personOf(item, expected);
+      // A stop, not a rejection: the first MAX_ROSTER_PEOPLE well-formed rows
+      // are kept and the rest silently left off — "a bad row costs that row"
+      // extended to a sheet with too many rows on it.
+      if (people.length >= MAX_ROSTER_PEOPLE) break;
+      const p = personOf(item, expected, excludedNormalised);
       if (p) people.push(p);
     }
   }

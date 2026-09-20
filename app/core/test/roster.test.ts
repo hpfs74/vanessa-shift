@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { countOverlapping, normaliseCode, overlaps, reshapeRoster, rosterOnDay, validateRoster } from '../src/index.js';
+import {
+  MAX_NAME_LENGTH,
+  MAX_ROSTER_PEOPLE,
+  countOverlapping,
+  normaliseCode,
+  overlaps,
+  reshapeRoster,
+  rosterOnDay,
+  validateRoster,
+} from '../src/index.js';
 
 /** A well-formed `others` payload: one person, every day empty. */
 function person(name: string, codes: string[], row: number | null = 3) {
@@ -65,6 +74,26 @@ describe('validateRoster', () => {
     expect(r.people).toEqual([]);
   });
 
+  // The prompt asks for names "cosi' come sta scritto sul foglio", surname
+  // above given name — so a duplicated row arrives as "ROSSI VANESSA", not a
+  // bare "Vanessa". `ROW_NAME` alone would miss it; the reading's own
+  // `foundName` is what catches it, because it is the same name off the same
+  // sheet.
+  it('excludes her row under the sheet\'s own written form, via the reading\'s foundName', () => {
+    const r = validateRoster(
+      {
+        others: [
+          person('ROSSI VANESSA', Array(30).fill('M')),
+          person('BIANCHI GIULIA', Array(30).fill('P')),
+        ],
+      },
+      2026,
+      9,
+      'ROSSI VANESSA',
+    );
+    expect(r.people.map((p) => p.name)).toEqual(['BIANCHI GIULIA']);
+  });
+
   it('keeps two people who normalise to the same name: on the sheet they are two rows', () => {
     const r = validateRoster(
       { others: [person('Giulia', Array(30).fill('M'), 3), person('Giulia', Array(30).fill('P'), 9)] },
@@ -84,6 +113,29 @@ describe('validateRoster', () => {
   it('carries the month it was told, not one of its own', () => {
     const r = validateRoster({ others: [] }, 2026, 9);
     expect(r).toMatchObject({ year: 2026, month: 9 });
+  });
+
+  // Mirrors `normaliseCode`'s own test: a field that wanders costs the
+  // field, not the row. This also keeps `requireRosterPeople`'s stricter
+  // 80-character check (api/src/http.ts) from ever seeing a name it would
+  // refuse — the roster the client saves is exactly what this returned.
+  it('truncates a name that wanders instead of dropping the person over it', () => {
+    const long = 'M'.repeat(200);
+    const r = validateRoster({ others: [person(long, Array(30).fill('M'))] }, 2026, 9);
+    expect(r.people).toHaveLength(1);
+    expect(r.people[0]!.name).toBe(long.slice(0, MAX_NAME_LENGTH));
+    expect(r.people[0]!.name).toHaveLength(MAX_NAME_LENGTH);
+  });
+
+  // Same shape as the length cap on a code: a stop, not a rejection. This is
+  // also what keeps `requireRosterPeople`'s 60-person cap from ever refusing
+  // a whole PUT over a reading this module already accepted.
+  it('stops at the people cap instead of growing without bound', () => {
+    const many = Array.from({ length: MAX_ROSTER_PEOPLE + 1 }, (_, i) =>
+      person(`Persona${i}`, Array(30).fill('M')),
+    );
+    const r = validateRoster({ others: many }, 2026, 9);
+    expect(r.people).toHaveLength(MAX_ROSTER_PEOPLE);
   });
 });
 

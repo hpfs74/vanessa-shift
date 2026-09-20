@@ -112,10 +112,12 @@ export class AppStack extends Stack {
     const putShiftsFn = lambda('PutShifts', 'putShifts');
     const getConfigFn = lambda('GetConfig', 'getConfig');
     const putConfigFn = lambda('PutConfig', 'putConfig');
+    const getRosterFn = lambda('GetRoster', 'getRoster');
+    const putRosterFn = lambda('PutRoster', 'putRoster');
 
     // A reading combines reasoning and vision: it can take more than the 30
     // seconds to which API Gateway truncates the integration. Hence the
-    // Function URL, which doesn't have that limit. The other five routes are
+    // Function URL, which doesn't have that limit. The other seven routes are
     // untouched.
     const readPhotoFn = new NodejsFunction(this, 'ReadPhoto', {
       entry: HANDLERS,
@@ -178,9 +180,11 @@ export class AppStack extends Stack {
     // Least privilege: readers do not write.
     table.grantReadData(getShiftsFn);
     table.grantReadData(getConfigFn);
+    table.grantReadData(getRosterFn);
     table.grantReadWriteData(putShiftFn);
     table.grantReadWriteData(putShiftsFn);
     table.grantReadWriteData(putConfigFn);
+    table.grantReadWriteData(putRosterFn);
 
     // --- API ---
     const api = new HttpApi(this, 'Api', {
@@ -192,7 +196,7 @@ export class AppStack extends Stack {
       },
     });
 
-    // The five API routes are checked by the gateway, before our code runs.
+    // The seven API routes are checked by the gateway, before our code runs.
     // The photo function cannot have this — a Function URL takes no
     // authorizer — so it verifies the same token itself; see api/src/token.ts.
     const authorizer = new HttpJwtAuthorizer(
@@ -214,6 +218,8 @@ export class AppStack extends Stack {
     route('/api/shifts/{date}', HttpMethod.PUT, putShiftFn, 'IntPutShift');
     route('/api/config', HttpMethod.GET, getConfigFn, 'IntGetConfig');
     route('/api/config', HttpMethod.PUT, putConfigFn, 'IntPutConfig');
+    route('/api/roster/{year}/{month}', HttpMethod.GET, getRosterFn, 'IntGetRoster');
+    route('/api/roster/{year}/{month}', HttpMethod.PUT, putRosterFn, 'IntPutRoster');
 
     // The authorizer stops a caller who isn't signed in; throttling is what
     // stops one who is, from hammering the API faster than a person would.

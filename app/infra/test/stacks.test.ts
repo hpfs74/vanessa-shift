@@ -112,11 +112,11 @@ describe('lambdas', () => {
   it('there is one per route', () => {
     const fn = app.findResources('AWS::Lambda::Function');
     const nostre = Object.values(fn).filter((f: any) =>
-      ['getShifts', 'putShift', 'putShifts', 'getConfig', 'putConfig'].includes(
+      ['getShifts', 'putShift', 'putShifts', 'getConfig', 'putConfig', 'getRoster', 'putRoster'].includes(
         f.Properties?.Handler?.split('.').pop(),
       ),
     );
-    expect(nostre).toHaveLength(5);
+    expect(nostre).toHaveLength(7);
   });
 
   it('run on Node 22 and ARM', () => {
@@ -152,7 +152,7 @@ describe('lambdas', () => {
 });
 
 describe('api', () => {
-  it('exposes the five expected routes, under /api so CloudFront can forward the path as it is', () => {
+  it('exposes the seven expected routes, under /api so CloudFront can forward the path as it is', () => {
     const rotte = Object.values(app.findResources('AWS::ApiGatewayV2::Route')).map(
       (r: any) => r.Properties.RouteKey,
     );
@@ -163,6 +163,8 @@ describe('api', () => {
         'PUT /api/shifts/{date}',
         'GET /api/config',
         'PUT /api/config',
+        'GET /api/roster/{year}/{month}',
+        'PUT /api/roster/{year}/{month}',
       ]),
     );
   });
@@ -295,7 +297,7 @@ describe('reading photos', () => {
 
 describe('one door only', () => {
   it('routes the API under /api, so CloudFront can forward the path as it is', () => {
-    for (const path of ['/api/shifts', '/api/shifts/{date}', '/api/config']) {
+    for (const path of ['/api/shifts', '/api/shifts/{date}', '/api/config', '/api/roster/{year}/{month}']) {
       app.hasResourceProperties('AWS::ApiGatewayV2::Route', {
         RouteKey: Match.stringLikeRegexp(`^(GET|PUT) ${path.replace(/[{}]/g, '\\$&')}$`),
       });
@@ -364,9 +366,9 @@ describe('one door only', () => {
 });
 
 describe('chi entra', () => {
-  it('puts an authorizer on all five API routes', () => {
+  it('puts an authorizer on all seven API routes', () => {
     const routes = app.findResources('AWS::ApiGatewayV2::Route');
-    expect(Object.keys(routes)).toHaveLength(5);
+    expect(Object.keys(routes)).toHaveLength(7);
     for (const r of Object.values(routes)) {
       expect(r.Properties.AuthorizationType).toBe('JWT');
       expect(r.Properties.AuthorizerId).toBeDefined();

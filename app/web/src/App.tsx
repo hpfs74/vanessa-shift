@@ -18,6 +18,7 @@ import { BulkEntry } from './BulkEntry.js';
 import { Calendar } from './Calendar.js';
 import { DayEditor } from './DayEditor.js';
 import { Pay } from './Pay.js';
+import { Oggi } from './Oggi.js';
 import { Profilo } from './Profilo.js';
 import { Summary } from './Summary.js';
 import { Swaps } from './Swaps.js';
@@ -26,9 +27,10 @@ import { esportaMese } from './esportaTurni.js';
 
 const YEAR = 2026;
 
-type View = 'calendar' | 'bulk' | 'swaps' | 'summary' | 'pay';
+type View = 'oggi' | 'calendar' | 'bulk' | 'swaps' | 'summary' | 'pay';
 
 const VIEWS: { id: View; label: string; icon: string }[] = [
+  { id: 'oggi', label: 'Oggi', icon: '◉' },
   { id: 'calendar', label: 'Calendario', icon: '▦' },
   { id: 'bulk', label: 'Carica', icon: '⇥' },
   { id: 'swaps', label: 'Scambi', icon: '⇄' },
@@ -47,7 +49,9 @@ export interface AppProps {
 export function App({
   api = realApi,
   initialMonth,
-  initialView = 'calendar',
+  // The next five days, not the month: that is the question she opens the
+  // app with.
+  initialView = 'oggi',
   today = realToday(),
 }: AppProps) {
   // Open on the month you are living in. In another year the rota does not
@@ -234,6 +238,10 @@ export function App({
               non un anno non ancora letto. Vale per tutte le viste, non solo
               per il calendario. */}
           {loading && <p className="waiting">Carico i turni…</p>}
+
+          {!loading && view === 'oggi' && (
+            <Oggi today={today} year={YEAR} days={days} api={api} />
+          )}
 
           {!loading && view === 'calendar' && (
             <>

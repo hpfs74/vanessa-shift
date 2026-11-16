@@ -5,11 +5,13 @@ import {
   type IsoDate,
   type MonthHours,
   type ShiftCode,
+  DAY_NAMES,
   EMPTY_PAY_SETTINGS,
   SHIFTS,
   dayKind,
   daysBetween,
   easter,
+  nextDays,
   entryHours,
   hasOverride,
   hours,
@@ -349,5 +351,29 @@ describe('pay', () => {
     const months = Array.from({ length: 12 }, () => monthPay(HOURS, settings));
     const t = sumPay(months);
     expect(t.basePay).toBeCloseTo(1140 * 12, 8);
+  });
+});
+
+describe('nextDays', () => {
+  it('starts today and runs on day by day', () => {
+    expect(nextDays('2026-11-16', 5)).toEqual([
+      '2026-11-16',
+      '2026-11-17',
+      '2026-11-18',
+      '2026-11-19',
+      '2026-11-20',
+    ]);
+  });
+
+  it('crosses the end of a month and of a year', () => {
+    expect(nextDays('2026-11-29', 3)).toEqual(['2026-11-29', '2026-11-30', '2026-12-01']);
+    expect(nextDays('2026-12-30', 3)).toEqual(['2026-12-30', '2026-12-31', '2027-01-01']);
+  });
+});
+
+describe('DAY_NAMES', () => {
+  it('names the weekday the way weekday() counts it, Monday first', () => {
+    expect(DAY_NAMES[weekday('2026-11-16')]).toBe('lunedì');
+    expect(DAY_NAMES[weekday('2026-11-22')]).toBe('domenica');
   });
 });

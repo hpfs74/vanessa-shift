@@ -393,16 +393,27 @@ describe('PhotoImport and the second reading', () => {
     expect(onSaveRoster).not.toHaveBeenCalled();
   });
 
-  it('saves the roster on the next press once it has arrived', async () => {
+  // She saved while it was still reading and has no reason to come back: a
+  // roster that arrives afterwards is saved by itself, or it never is.
+  it('saves by itself a roster that arrives after her shifts were saved', async () => {
     const pending = inFlight();
     const { onSave, onSaveRoster } = await renderWith(julyReading(), undefined, { second: pending.promise });
     await salva();
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     pending.settle(secondFor(julyReading(), ROSTER.people));
-    expect(await screen.findByText(/lette 2 persone/i)).toBeInTheDocument();
-    await salva();
     await waitFor(() => expect(onSaveRoster).toHaveBeenCalledTimes(1));
     expect(onSaveRoster.mock.calls[0]![0].people).toHaveLength(2);
+  });
+
+  it('does not save a late roster by itself once she has changed the grid since saving', async () => {
+    const pending = inFlight();
+    const { onSave, onSaveRoster } = await renderWith(julyReading(), undefined, { second: pending.promise });
+    await salva();
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '6');
+    pending.settle(secondFor(julyReading(), ROSTER.people));
+    expect(await screen.findByText(/lette 2 persone/i)).toBeInTheDocument();
+    expect(onSaveRoster).not.toHaveBeenCalled();
   });
 
   it('stores a late roster under the month she picked meanwhile', async () => {
@@ -417,14 +428,36 @@ describe('PhotoImport and the second reading', () => {
     expect(onSaveRoster.mock.calls[0]![0].people[0]!.codes).toHaveLength(30);
   });
 
-  it('ignores a late answer for a photo she has already put aside', async () => {
-    const pending = inFlight();
-    await renderWith(julyReading(), undefined, { second: pending.promise });
+  // The race that matters: photo A's second reading lands after photo B's
+  // first reading is already on screen. Without the guard A's roster — read
+  // from another sheet — would attach to B's grid.
+  it("does not attach an old photo's late roster to the new photo", async () => {
+    const a = inFlight();
+    const b = inFlight();
+    const onReadRoster = vi.fn().mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
+    render(
+      <PhotoImport
+        year={2026}
+        existing={new Map()}
+        onRead={vi.fn().mockResolvedValue({
+          reading: julyReading(),
+          roster: { year: 2026, month: 7, people: [] },
+        })}
+        onReadRoster={onReadRoster}
+        onSave={async () => {}}
+        onSaveRoster={async () => {}}
+      />,
+    );
+    const foto = () => new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' });
+    await userEvent.upload(screen.getByLabelText(/Leggi da una foto/i), foto());
     await userEvent.click(await screen.findByRole('button', { name: /ripeti con un altra foto/i }));
-    pending.settle(secondFor(julyReading(), ROSTER.people));
+    await userEvent.upload(screen.getByLabelText(/Leggi da una foto/i), foto());
+    await waitFor(() => expect(onReadRoster).toHaveBeenCalledTimes(2));
+
+    a.settle(secondFor(julyReading(), ROSTER.people));
     // Give the late answer every chance to land before asserting it did not.
     await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByText(/lette 2 persone/i)).not.toBeInTheDocument();
-    expect(screen.queryByText('Leggo anche le colleghe…')).not.toBeInTheDocument();
+    expect(screen.getByText('Leggo anche le colleghe…')).toBeInTheDocument();
   });
 });

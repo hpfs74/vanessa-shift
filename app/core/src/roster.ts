@@ -297,7 +297,11 @@ export function rosterFromSecondRead(reading: PhotoReading, second: SecondRead):
   if (hers.length !== expected) return null;
   const byDay = new Map(reading.days.map((d) => [d.day, d.code ?? '']));
   for (let day = 1; day <= expected; day++) {
-    if (cleanCode(hers[day - 1]) !== (byDay.get(day) ?? '')) return null;
+    // Compared in call 1's vocabulary. Call 1 can only answer a shift code or
+    // null, so an F for her holidays comes back as null there and F here:
+    // anything call 1 could not have written counts as empty.
+    const c = cleanCode(hers[day - 1]);
+    if ((isShiftCode(c) ? c : '') !== (byDay.get(day) ?? '')) return null;
   }
 
   const others = second.rows

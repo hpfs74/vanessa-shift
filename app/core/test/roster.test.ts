@@ -360,6 +360,20 @@ describe('rosterFromSecondRead', () => {
     expect(r!.people.map((p) => p.name)).toEqual(['Anna', 'Sara']);
   });
 
+  // Call 1 can only say L, M, M1, P, P1 or null: an F for her holidays comes
+  // back as null there and as F here. Both readings are right.
+  it('does not throw the roster away over a code call 1 cannot express', () => {
+    const row = herCodes().map((c) => (c === '' ? 'F' : c));
+    expect(rosterFromSecondRead(readingWith(), second(row))).not.toBeNull();
+  });
+
+  it('still catches a slip that moves a modelled code onto an empty day', () => {
+    const row = herCodes();
+    const empty = row.indexOf('');
+    row[empty] = 'M';
+    expect(rosterFromSecondRead(readingWith(), second(row))).toBeNull();
+  });
+
   it('compares the first of two rows that carry her name', () => {
     const wrong = herCodes().map(() => 'L');
     const s = second();

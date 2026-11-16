@@ -101,6 +101,12 @@ export function PhotoImport({
   // stored under the same month as her shifts, as `setMonth` ensures for a
   // roster already in hand.
   const selectedMonth = useRef<number | null>(null);
+  // True once her shifts are saved and the grid has not changed since. A
+  // roster landing then is saved by itself: she saved while it was reading
+  // and has no reason to come back and press again.
+  const shiftsSaved = useRef(false);
+  const onSaveRosterRef = useRef(onSaveRoster);
+  onSaveRosterRef.current = onSaveRoster;
 
   const pick = async (file: File | undefined) => {
     if (!file) return;
@@ -115,6 +121,7 @@ export function PhotoImport({
       selectedMonth.current = reading.month;
       setRoster(null);
       setRosterStatus('reading');
+      shiftsSaved.current = false;
       // Not awaited: her grid is on screen and editable now, and saving it
       // never waits for the colleagues. The checksum runs against call 1's
       // reading as it came back, not the grid she may be correcting: it
@@ -128,8 +135,12 @@ export function PhotoImport({
             return;
           }
           const month = selectedMonth.current ?? r.month;
-          setRoster(month === r.month ? r : reshapeRoster(r, r.year, month));
+          const shaped = month === r.month ? r : reshapeRoster(r, r.year, month);
+          setRoster(shaped);
           setRosterStatus('idle');
+          if (shiftsSaved.current && shaped.people.length > 0) {
+            onSaveRosterRef.current(shaped).catch((e: Error) => setRosterError(e.message));
+          }
         },
         () => {
           if (id === attempt.current) setRosterStatus('failed');
@@ -154,6 +165,7 @@ export function PhotoImport({
     // Her shifts first: they are the part that matters, and the part pay is
     // computed from.
     await onSave(planned);
+    shiftsSaved.current = true;
     setRosterError(null);
     // An exception to "la foto nuova e' la verita' del mese", left unwritten
     // until now: PUT /roster replaces the whole month, so sending an empty
@@ -177,6 +189,7 @@ export function PhotoImport({
    *  longer exist, a longer one adds them empty. */
   const setMonth = (month: number) => {
     selectedMonth.current = month;
+    shiftsSaved.current = false;
     setReading((l) => {
       if (!l) return l;
       const howMany = daysInMonth(l.year, month);
@@ -204,6 +217,7 @@ export function PhotoImport({
       unsure.delete(day);
       return { ...l, codes, unsure };
     });
+    shiftsSaved.current = false;
     setSavedCount(null);
     setOpen(null);
   };

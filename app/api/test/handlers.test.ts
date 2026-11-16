@@ -2,7 +2,14 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IsoDate, ShiftCode } from '@vanessa/core';
-import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, MAX_ROSTER_PEOPLE, romeToday } from '@vanessa/core';
+import {
+  EMPTY_PAY_SETTINGS,
+  EMPTY_PROFILE,
+  MAX_READINGS_PER_DAY,
+  MAX_ROSTER_PEOPLE,
+  romeToday,
+  validateSecondRead,
+} from '@vanessa/core';
 
 import {
   getConfigWith,
@@ -557,7 +564,7 @@ describe('responses', () => {
   });
 });
 
-import { readPhotoWith } from '../src/handlers.js';
+import { readPhotoWith, readRosterWith } from '../src/handlers.js';
 import { NotSignedIn } from '../src/token.js';
 import { VisionFailed } from '../src/vision.js';
 
@@ -617,13 +624,13 @@ describe('readPhoto', () => {
       async () => {},
     );
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < MAX_READINGS_PER_DAY; i++) {
       const allowed: any = await h(photoEvent('AAAA'));
       expect(allowed.statusCode).toBe(200);
     }
     const r: any = await h(photoEvent('AAAA'));
     expect(r.statusCode).toBe(429);
-    expect(calls).toBe(10);
+    expect(calls).toBe(MAX_READINGS_PER_DAY);
   });
 
   it('an oversized body is 413, touching neither quota nor model', async () => {
@@ -1001,5 +1008,92 @@ describe('PUT /roster', () => {
       }),
     );
     expect(r.statusCode).toBe(400);
+  });
+});
+
+describe('readRoster', () => {
+  const today = () => '2026-08-02';
+  const SECOND = {
+    month: 8,
+    year: 2026,
+    rows: [
+      { name: 'Anna', row: 9, codes: Array(31).fill('M') },
+      { name: 'Vanessa', row: 12, codes: Array(31).fill('') },
+    ],
+  };
+  const signedIn = async () => {};
+
+  it('answers with the rows as read, without judging them', async () => {
+    const { repo } = fakeRepo();
+    const r: any = await readRosterWith(repo, async () => SECOND, today, signedIn)(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(200);
+    expect(body(r)).toEqual(validateSecondRead(SECOND));
+  });
+
+  it('checks the sign-in before touching the counter', async () => {
+    const { repo, calls } = fakeRepo();
+    const h = readRosterWith(repo, async () => SECOND, today, async () => {
+      throw new NotSignedIn('no token');
+    });
+    const r: any = await h(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(401);
+    expect(calls.filter((c) => c.startsWith('consumePhotoQuota'))).toEqual([]);
+  });
+
+  // Counting calls, not photos: the expensive half must not be the free one.
+  it('spends the same counter as the photo reading', async () => {
+    const { repo, calls } = fakeRepo();
+    await readRosterWith(repo, async () => SECOND, today, signedIn)(photoEvent('AAAA'));
+    expect(calls).toContain(`consumePhotoQuota(2026-08-02,${MAX_READINGS_PER_DAY})`);
+  });
+
+  it('past the cap it responds 429 without calling the model', async () => {
+    const { repo, quota } = fakeRepo();
+    quota.set('2026-08-02', MAX_READINGS_PER_DAY);
+    let called = 0;
+    const r: any = await readRosterWith(
+      repo,
+      async () => {
+        called += 1;
+        return SECOND;
+      },
+      today,
+      signedIn,
+    )(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(429);
+    expect(called).toBe(0);
+  });
+
+  it('an unusable answer is 422 with the one line about the colleagues', async () => {
+    const { repo } = fakeRepo();
+    const r: any = await readRosterWith(
+      repo,
+      async () => {
+        throw new VisionFailed('boom', 'truncated');
+      },
+      today,
+      signedIn,
+    )(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(422);
+    expect(body(r).errore).toBe('Le colleghe non si sono lette questa volta. I tuoi turni non cambiano.');
+  });
+
+  it('an answer of the wrong shape is 422 too', async () => {
+    const { repo } = fakeRepo();
+    const r: any = await readRosterWith(repo, async () => ({ month: 13 }), today, signedIn)(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(422);
+  });
+
+  it('a failure of the service itself is 502', async () => {
+    const { repo } = fakeRepo();
+    const r: any = await readRosterWith(
+      repo,
+      async () => {
+        throw new Error('ThrottlingException');
+      },
+      today,
+      signedIn,
+    )(photoEvent('AAAA'));
+    expect(r.statusCode).toBe(502);
   });
 });

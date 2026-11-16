@@ -50,3 +50,47 @@ describe('urlRegistrazionePasskey', () => {
     expect(() => urlRegistrazionePasskey()).toThrow(ConfigurazioneMancante);
   });
 });
+
+describe('iniziaAccesso', () => {
+  /** jsdom's `location` cannot be navigated, so a plain object stands in:
+   *  `iniziaAccesso` only reads `origin` and calls `assign`. */
+  let assign: ReturnType<typeof vi.fn>;
+  const linkAperto = () => new URL(assign.mock.calls[0]![0] as string);
+
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    localStorage.clear();
+    sessionStorage.clear();
+    assign = vi.fn();
+    vi.stubGlobal('location', {
+      href: 'https://vanessa.matteo.cool/',
+      origin: 'https://vanessa.matteo.cool',
+      assign,
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('passes the remembered email as login_hint', async () => {
+    localStorage.setItem('email', 'vanessa+turni@esempio.it');
+    const { iniziaAccesso } = await conConfig(DOMINIO, CLIENT);
+    await iniziaAccesso();
+    expect(linkAperto().pathname).toBe('/oauth2/authorize');
+    expect(linkAperto().searchParams.get('login_hint')).toBe('vanessa+turni@esempio.it');
+  });
+
+  it('sends no login_hint when no email is remembered', async () => {
+    const { iniziaAccesso } = await conConfig(DOMINIO, CLIENT);
+    await iniziaAccesso();
+    expect(linkAperto().searchParams.has('login_hint')).toBe(false);
+  });
+
+  it('sends no login_hint when the remembered email is empty', async () => {
+    localStorage.setItem('email', '');
+    const { iniziaAccesso } = await conConfig(DOMINIO, CLIENT);
+    await iniziaAccesso();
+    expect(linkAperto().searchParams.has('login_hint')).toBe(false);
+  });
+});

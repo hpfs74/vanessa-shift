@@ -160,6 +160,56 @@ describe('completaAccesso', () => {
   });
 });
 
+/** A JWT whose payload is `payload`. Signature and header are never checked
+ *  on this side: `claims.ts` only reads the payload. */
+const idTokenCon = (payload: object) =>
+  'h.' +
+  btoa(JSON.stringify(payload)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_') +
+  '.s';
+
+describe('the remembered email', () => {
+  const scambio = (id_token: string) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id_token, expires_in: 3600 }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+
+  it('is saved from the ID token after a successful sign-in', async () => {
+    sessionStorage.setItem('pkce', 'v');
+    scambio(idTokenCon({ email: 'vanessa+turni@esempio.it' }));
+    await completaAccesso(new URL('https://esempio.test/?code=c'));
+    expect(localStorage.getItem('email')).toBe('vanessa+turni@esempio.it');
+  });
+
+  // A token without the claim says nothing about her address: it must not
+  // erase the one already known, or the next morning she types it again.
+  it('is not overwritten by a token that carries no email', async () => {
+    localStorage.setItem('email', 'vanessa@esempio.it');
+    sessionStorage.setItem('pkce', 'v');
+    scambio(idTokenCon({}));
+    await completaAccesso(new URL('https://esempio.test/?code=c'));
+    expect(localStorage.getItem('email')).toBe('vanessa@esempio.it');
+  });
+
+  it('is untouched by a refusal from Cognito', async () => {
+    localStorage.setItem('email', 'vanessa@esempio.it');
+    await completaAccesso(new URL('https://esempio.test/?error=access_denied')).catch(() => {});
+    expect(localStorage.getItem('email')).toBe('vanessa@esempio.it');
+  });
+
+  // `esci()` runs when the day-long session ends, and the morning after is
+  // exactly when the address is needed.
+  it('survives esci()', () => {
+    localStorage.setItem('email', 'vanessa@esempio.it');
+    esci();
+    expect(localStorage.getItem('email')).toBe('vanessa@esempio.it');
+  });
+});
+
 describe('rinnovaAccesso', () => {
   // The ID token lives an hour, the refresh token the day the pool was
   // configured for: without this, "she opens the app mid-afternoon" bounces
@@ -281,6 +331,22 @@ describe('sessioneRifiutata', () => {
     expect(localStorage.getItem('sessione')).toBeNull();
     expect(localStorage.getItem('refresh')).toBeNull();
     expect(ricarica).toHaveBeenCalledTimes(2);
+  });
+
+  // Throwing the session away is about the token, not about who she is: the
+  // fresh sign-in that follows still gets her address filled in.
+  it('keeps the remembered email when it clears everything', async () => {
+    reload();
+    localStorage.setItem('email', 'vanessa@esempio.it');
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
+    localStorage.setItem('refresh', 'un-refresh-token');
+
+    (await nuovoGiro()).sessioneRifiutata();
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'rinnovato', scade: 9e12 }));
+    (await nuovoGiro()).sessioneRifiutata();
+
+    expect(localStorage.getItem('refresh')).toBeNull();
+    expect(localStorage.getItem('email')).toBe('vanessa@esempio.it');
   });
 
   // The loop this closes: `esci()` has to clear the retry marker, or a real

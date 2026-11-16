@@ -6,9 +6,16 @@
  * and the code that comes back is worthless without the verifier.
  */
 
+import { claimsOf } from './claims.js';
+
 const CHIAVE_SESSIONE = 'sessione';
 const CHIAVE_VERIFIER = 'pkce';
 const CHIAVE_REFRESH = 'refresh';
+/** Her email, kept so Cognito's page can show it already filled in
+ *  (`login_hint`). It outlives the session on purpose: `esci()` runs when the
+ *  day is up, and the next morning's sign-in is exactly when it is needed. It
+ *  is no secret — it already sits in the ID token next to it. */
+const CHIAVE_EMAIL = 'email';
 const CHIAVE_RIPROVATO = 'riprovaSessione';
 /** Set when the circuit breaker has already fired once: a renewed token was
  *  refused too, everything was thrown away, and the next thing that happens is
@@ -80,7 +87,8 @@ export function sessioneValida(now: number = Date.now()): Sessione | null {
 
 /** Forgets the session. Deliberately *not* `CHIAVE_INTERROTTO`: read its
  *  comment before adding it here, because doing so reopens the loop it was
- *  written to close. */
+ *  written to close. Nor `CHIAVE_EMAIL`: who she is does not expire with the
+ *  token. */
 export function esci(): void {
   localStorage.removeItem(CHIAVE_SESSIONE);
   localStorage.removeItem(CHIAVE_REFRESH);
@@ -255,6 +263,10 @@ export async function iniziaAccesso(): Promise<void> {
   u.searchParams.set('redirect_uri', `${location.origin}/`);
   u.searchParams.set('code_challenge', challenge);
   u.searchParams.set('code_challenge_method', 'S256');
+  // Her address, so the page opens with it filled in. Absent on the very
+  // first sign-in on a device, which then looks exactly as it always did.
+  const email = localStorage.getItem(CHIAVE_EMAIL);
+  if (email) u.searchParams.set('login_hint', email);
   // No `state`. It was considered and left out, which is worth writing down
   // because `state` is the parameter a reviewer looks for and its absence
   // reads as an oversight. PKCE already covers code injection; `state` covers
@@ -369,6 +381,10 @@ export async function completaAccesso(url: URL = new URL(location.href)): Promis
   // configured on one side only, and the hourly bounce she was promised
   // wouldn't happen becomes real.
   if (j.refresh_token) localStorage.setItem(CHIAVE_REFRESH, j.refresh_token);
+  // Saved on every sign-in, not only the first, so a changed address corrects
+  // itself. A token without the claim leaves the known one alone.
+  const email = claimsOf(j.id_token).email;
+  if (email) localStorage.setItem(CHIAVE_EMAIL, email);
   sessionStorage.removeItem(CHIAVE_VERIFIER);
   // The trip ended in a session, so it was not a loop. Cleared here and not
   // in `sessioneConfermata()` on purpose: this counter asks "did signing in

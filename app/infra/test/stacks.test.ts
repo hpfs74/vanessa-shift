@@ -295,6 +295,49 @@ describe('reading photos', () => {
   });
 });
 
+describe('reading the colleagues', () => {
+  // A function of its own, not a parameter on ReadPhoto: each has two
+  // reserved executions, so a slow second reading never blocks her next
+  // import.
+  it('has a Lambda of its own, sized like the photo reading', () => {
+    app.hasResourceProperties('AWS::Lambda::Function', {
+      Handler: 'index.readRoster',
+      Timeout: 120,
+      MemorySize: 512,
+      ReservedConcurrentExecutions: 2,
+      Environment: Match.objectLike({
+        Variables: Match.objectLike({
+          USER_POOL_ID: 'eu-south-1_finto',
+          USER_POOL_CLIENT_ID: 'clientefinto',
+        }),
+      }),
+    });
+  });
+
+  it('both readings can invoke the model, and both write the counter', () => {
+    const policies = Object.values(app.findResources('AWS::IAM::Policy')) as any[];
+    const conModello = policies.filter((p) =>
+      p.Properties.PolicyDocument.Statement.some((s: any) => s.Action === 'bedrock:InvokeModel'),
+    );
+    expect(conModello).toHaveLength(2);
+    for (const p of conModello) {
+      const azioni = p.Properties.PolicyDocument.Statement.flatMap((s: any) =>
+        Array.isArray(s.Action) ? s.Action : [s.Action],
+      );
+      expect(azioni).toContain('dynamodb:UpdateItem');
+    }
+  });
+
+  it('is served under /colleghe/*, with the same sixty seconds as /foto/*', () => {
+    const config = Object.values(app.findResources('AWS::CloudFront::Distribution'))[0].Properties
+      .DistributionConfig;
+    const behaviour = config.CacheBehaviors.find((b: any) => b.PathPattern === '/colleghe/*');
+    expect(behaviour).toBeDefined();
+    const origin = config.Origins.find((o: any) => o.Id === behaviour.TargetOriginId);
+    expect(origin.CustomOriginConfig.OriginReadTimeout).toBe(60);
+  });
+});
+
 describe('one door only', () => {
   it('routes the API under /api, so CloudFront can forward the path as it is', () => {
     for (const path of ['/api/shifts', '/api/shifts/{date}', '/api/config', '/api/roster/{year}/{month}']) {

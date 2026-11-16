@@ -55,6 +55,7 @@ const API_LOCKFILE = join(APP_ROOT, 'package-lock.json');
 export class AppStack extends Stack {
   readonly apiUrl: string;
   readonly photoUrl: string;
+  readonly rosterUrl: string;
 
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, { ...props, crossRegionReferences: true });
@@ -119,63 +120,76 @@ export class AppStack extends Stack {
     // seconds to which API Gateway truncates the integration. Hence the
     // Function URL, which doesn't have that limit. The other seven routes are
     // untouched.
-    const readPhotoFn = new NodejsFunction(this, 'ReadPhoto', {
-      entry: HANDLERS,
-      handler: 'readPhoto',
-      projectRoot: APP_ROOT,
-      depsLockFilePath: API_LOCKFILE,
-      runtime: Runtime.NODEJS_22_X,
-      architecture: Architecture.ARM_64,
-      memorySize: 512,
-      timeout: Duration.seconds(120),
-      // Without API Gateway's throttling, this is the brake on parallelism.
-      reservedConcurrentExecutions: 2,
-      logGroup: new LogGroup(this, 'ReadPhotoLog', {
-        retention: RetentionDays.ONE_MONTH,
-        removalPolicy: RemovalPolicy.DESTROY,
-      }),
-      environment: {
-        TABLE_NAME: table.tableName,
-        ALLOWED_ORIGIN: `https://${props.domain}`,
-        USER_POOL_ID: props.userPoolId,
-        USER_POOL_CLIENT_ID: props.userPoolClientId,
-      },
-      bundling: { format: undefined, minify: true, sourceMap: true },
-    });
+    // The two readings are one recipe with two handlers. Built from a single
+    // function so the second can never drift from the first: same timeout,
+    // same reserved concurrency, same Bedrock grant, same open Function URL.
+    const lettore = (id: string, handler: string) => {
+      const fn = new NodejsFunction(this, id, {
+        entry: HANDLERS,
+        handler,
+        projectRoot: APP_ROOT,
+        depsLockFilePath: API_LOCKFILE,
+        runtime: Runtime.NODEJS_22_X,
+        architecture: Architecture.ARM_64,
+        memorySize: 512,
+        timeout: Duration.seconds(120),
+        // Without API Gateway's throttling, this is the brake on parallelism.
+        reservedConcurrentExecutions: 2,
+        logGroup: new LogGroup(this, `${id}Log`, {
+          retention: RetentionDays.ONE_MONTH,
+          removalPolicy: RemovalPolicy.DESTROY,
+        }),
+        environment: {
+          TABLE_NAME: table.tableName,
+          ALLOWED_ORIGIN: `https://${props.domain}`,
+          USER_POOL_ID: props.userPoolId,
+          USER_POOL_CLIENT_ID: props.userPoolClientId,
+        },
+        bundling: { format: undefined, minify: true, sourceMap: true },
+      });
 
-    // Writes only the quota counter, but there's only one table.
-    table.grantReadWriteData(readPhotoFn);
+      // Writes only the quota counter, but there's only one table.
+      table.grantReadWriteData(fn);
 
-    // The older InvokeModel path, in our own region. Two resources because the
-    // call names the `eu.` cross-region inference profile: the profile itself,
-    // and the model in whichever European region the profile routes to. The
-    // wildcard is on the region, not the model — one model is granted.
-    readPhotoFn.addToRolePolicy(
-      new PolicyStatement({
-        effect: Effect.ALLOW,
-        actions: ['bedrock:InvokeModel'],
-        resources: [
-          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/eu.anthropic.claude-sonnet-4-6`,
-          'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6',
-        ],
-      }),
-    );
+      // The older InvokeModel path, in our own region. Two resources because the
+      // call names the `eu.` cross-region inference profile: the profile itself,
+      // and the model in whichever European region the profile routes to. The
+      // wildcard is on the region, not the model — one model is granted.
+      fn.addToRolePolicy(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: ['bedrock:InvokeModel'],
+          resources: [
+            `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/eu.anthropic.claude-sonnet-4-6`,
+            'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6',
+          ],
+        }),
+      );
 
-    // NONE, not AWS_IAM. Origin Access Control was tried and taken out again:
-    // with OAC the function is invoked over SigV4, and a signed POST needs the
-    // viewer to supply the body hash — which the frontend was made to do. It
-    // still did not work: the request was refused before the function ran, so
-    // nothing reached our code and nothing said why. Diagnosing that further
-    // while the feature was down was not worth it.
-    //
-    // What is given up: this URL stays reachable by anyone who knows it. What
-    // is kept: it is not reachable from a browser on another page, because the
-    // CORS block is gone, and everything Vanessa uses goes through CloudFront.
-    // The API's own origin is still closed — see the shared secret above.
-    const photoFunctionUrl = readPhotoFn.addFunctionUrl({
-      authType: FunctionUrlAuthType.NONE,
-    });
+      // NONE, not AWS_IAM. Origin Access Control was tried and taken out again:
+      // with OAC the function is invoked over SigV4, and a signed POST needs the
+      // viewer to supply the body hash — which the frontend was made to do. It
+      // still did not work: the request was refused before the function ran, so
+      // nothing reached our code and nothing said why. Diagnosing that further
+      // while the feature was down was not worth it.
+      //
+      // What is given up: this URL stays reachable by anyone who knows it. What
+      // is kept: it is not reachable from a browser on another page, because the
+      // CORS block is gone, and everything Vanessa uses goes through CloudFront.
+      // The API's own origin is still closed — see the shared secret above.
+      return fn.addFunctionUrl({
+        authType: FunctionUrlAuthType.NONE,
+      });
+    };
+
+    const photoFunctionUrl = lettore('ReadPhoto', 'readPhoto');
+    // A function of its own for the colleagues, not a parameter on ReadPhoto.
+    // Each has two reserved executions: on one function, the two calls of a
+    // single import would saturate it, and a slow second reading would block
+    // her next import. Her fast path stays independent of the slow one.
+    const rosterFunctionUrl = lettore('ReadRoster', 'readRoster');
     this.photoUrl = photoFunctionUrl.url;
+    this.rosterUrl = rosterFunctionUrl.url;
 
     // Least privilege: readers do not write.
     table.grantReadData(getShiftsFn);
@@ -271,6 +285,20 @@ export class AppStack extends Stack {
           cachePolicy: CachePolicy.CACHING_DISABLED,
           originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
         },
+        // `/colleghe/leggi`, never a bare `/colleghe`: as for `/foto/*`, the
+        // `*` only matches after the literal, so a bare path would fall
+        // through to the site bucket and be refused at the edge.
+        '/colleghe/*': {
+          origin: new HttpOrigin(Fn.select(2, Fn.split('/', rosterFunctionUrl.url)), {
+            // Same wall as /foto/*. Measured at 8 to 10 seconds with no
+            // reasoning; ROSTER_MAX_TOKENS caps it near 27.
+            readTimeout: Duration.seconds(60),
+          }),
+          viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          allowedMethods: AllowedMethods.ALLOW_ALL,
+          cachePolicy: CachePolicy.CACHING_DISABLED,
+          originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        },
       },
       domainNames: [props.domain],
       certificate: Certificate.fromCertificateArn(this, 'Cert', props.certificateArn),
@@ -307,6 +335,7 @@ export class AppStack extends Stack {
 
     new CfnOutput(this, 'UrlApi', { value: api.apiEndpoint });
     new CfnOutput(this, 'PhotoUrl', { value: photoFunctionUrl.url });
+    new CfnOutput(this, 'RosterUrl', { value: rosterFunctionUrl.url });
     new CfnOutput(this, 'UrlSito', { value: `https://${props.domain}` });
     new CfnOutput(this, 'NomeTabella', { value: table.tableName });
     new CfnOutput(this, 'BucketSito', { value: bucket.bucketName });

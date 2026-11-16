@@ -65,16 +65,25 @@ si consulta di proposito è un gesto che non si fa mai.
 
 Il lavoro in background con polling risolverebbe il problema una volta per tutte, e toglierebbe
 anche i 35 secondi di attesa che la sua lettura ha già oggi. È la risposta giusta se quella dei due
-tentativi non basta: vedi *Il rischio che resta*.
+tentativi non basta. La misura dice che basta: vedi *La misura*.
 
-## Decisione: effort basso solo per le colleghe
+## Decisione: le colleghe senza ragionamento
 
 La chiamata 1 tiene `effort: high` e il ragionamento adattivo, perché da quella riga discendono le
 ore e lo stipendio, e perché una riga letta una colonna in anticipo è il bug che quel parametro è
 stato messo lì a risolvere.
 
-La chiamata 2 gira più economica. Nessuno calcola niente sul turnario, e il prezzo — una riga
-altrui più facilmente disallineata — è esattamente ciò che il checksum qui sotto intercetta.
+La chiamata 2 gira **senza ragionamento**: niente `thinking`, niente `effort`, solo lo schema.
+Non è una scelta di gusto, è l'unica configurazione misurata che sta nei tempi (vedi *La misura*):
+a effort medio il ragionamento si mangia tutti gli 8000 token e la risposta non arriva; a effort
+basso arriva, ma fra i 29 e i 45 secondi. Senza ragionamento arriva in 8–10 secondi, sempre.
+
+E il ragionamento non comprava precisione: sulle due foto misurate la lettura a effort basso
+sbagliava allineamento quanto quella senza, e su agosto di più. Nessuno calcola niente sul
+turnario, e il prezzo — una riga altrui disallineata — resta, qualunque delle due si scelga.
+
+Senza ragionamento il modello scrive `x` dove il prompt chiede la stringa vuota. Si normalizza in
+codice prima di qualunque confronto, non si insegue col prompt.
 
 ## Decisione: la riga di lei come checksum
 
@@ -92,6 +101,14 @@ scostamento rompe quasi tutti i giorni, un errore di lettura ne rompe uno. Il co
 sbaglia verso «nessun turnario», che è la direzione scelta, e se in pratica scarta spesso allora
 quella è la prova che la lettura economica non basta — un'informazione che conviene avere subito,
 non nascosta dietro una soglia.
+
+**La misura smentisce metà della premessa.** Gli scostamenti osservati non spostano tutte le righe
+insieme: spostano **una riga alla volta**, di solito da un certo giorno in poi, e spesso vicino a
+una correzione a penna. Il checksum quindi prende lo scostamento quando cade sulla riga di lei (su
+luglio è successo in tre letture su quattro, e le avrebbe buttate tutte e tre), ma lascia passare
+una riga altrui sfasata quando la sua è giusta: nella lettura di luglio che ha letto bene lei,
+Stefania era comunque sfasata di un giorno dal 19 in poi. Il checksum resta, perché il caso che
+prende è reale; non va venduto come garanzia sulle colleghe.
 
 La funzione sta in `core`, non nella Lambda: il client ha già in mano tutte e due le metà, e la
 regola si prova senza rete, come `validateReading`.
@@ -248,31 +265,50 @@ In `infra`:
 - la funzione nuova, il comportamento nuovo, e che `ReadRoster` scrive mentre le Lambda di sola
   lettura continuano a non scrivere.
 
+## La misura
+
+Presa il 16 novembre 2026 contro Bedrock vero (`eu.anthropic.claude-sonnet-4-6`, `eu-south-1`),
+con una sonda usa-e-getta che bypassava la Lambda, sulle due foto di sempre: agosto, uno screenshot
+pulito del foglio; luglio, una foto storta del foglio stampato con correzioni a penna. Il prompt
+era quello della chiamata 2, con il paragrafo sull'allineamento copiato da quello in produzione.
+
+| | agosto | luglio | esito |
+|---|---|---|---|
+| effort medio | 52 s, **nessuna risposta** | 56 s, **nessuna risposta** | 8000 token tutti di ragionamento, `max_tokens` |
+| effort basso | 29 s · 45 s | 43 s · 45 s | arriva, ma tre volte su quattro nel margine sottile |
+| senza ragionamento | 8,1 · 8,1 · 9,6 s | 9,7 · 9,7 · 9,7 s | ~1170 token, 50 secondi di margine |
+
+Tutte le letture arrivate avevano 14 persone, 31 codici a testa, mese e anno giusti. **Il tempo
+non è più il rischio**: senza ragionamento la chiamata 2 sta nei sessanta secondi con un margine
+che non è una coincidenza, e il lavoro in background non serve.
+
+La precisione, controllata a occhio sulle celle dove le due modalità non erano d'accordo:
+
+- **Agosto.** Le tre letture senza ragionamento sono identiche e giuste su tutte le 14 celle
+  contese (righe di Vanessa ed Edith). Quella a effort basso è sfasata di una colonna dal 23 in poi,
+  su tutte e due le righe.
+- **Luglio.** Sbagliano tutte e due. La riga di lei è sedici `x` e poi `M M P L P…` dal 17: solo
+  una lettura senza ragionamento su tre l'ha presa giusta; le altre due, e quella a effort basso,
+  la fanno partire un giorno prima — proprio il guasto per cui esiste il paragrafo
+  sull'allineamento. Stefania è sfasata dal 19 in tutte e due le modalità, vicino alle correzioni a
+  penna. E senza ragionamento luglio non è stabile: sei righe su quattordici cambiano da una
+  lettura all'altra.
+
 ## Il rischio che resta
 
-**Non sappiamo quanto dura la chiamata 2.** Le due letture in produzione sono state troncate a 120
-secondi, quindi «più di 120» è tutto ciò che si sa — e quella era la lettura intera a effort alto,
-non la lettura compatta a effort basso che questo progetto propone.
+Non è più il tempo, è **la riga sfasata di una collega**. Su una foto pulita la lettura è giusta;
+su una foto di carta con correzioni a penna qualche riga esce spostata di un giorno, con o senza
+ragionamento, e il checksum la prende solo quando cade sulla riga di lei.
 
-Se la chiamata 2 non sta nei 60 secondi di CloudFront, **questo progetto non funziona** e la
-risposta è il lavoro in background con polling, scartato più sopra. La misura va presa prima di
-scrivere il codice, con `api/test/vision.integration.test.ts`, che gira contro Bedrock vero e
-bypassa la Lambda:
-
-```bash
-PROVA_BEDROCK=1 \
-  FOTO_LUGLIO=~/vanessa-foto/luglio.jpeg \
-  FOTO_AGOSTO=~/vanessa-foto/agosto.jpeg \
-  npx vitest run --root api api/test/vision.integration.test.ts
-```
-
-Un margine sottile conta come fallimento: 55 secondi su un tetto di 60 non è un progetto, è una
-coincidenza che aspetta una foto più grande.
+Due foto sono poche, e alcune celle scritte a mano si leggono male anche a occhio. Ma la
+conseguenza per la schermata è già chiara: il blocco delle colleghe è una lettura di massima, e
+va presentato così — non come il foglio.
 
 ## Fuori perimetro
 
 - **Alzare il tetto di CloudFront a 180 secondi.** Richiede un aumento di quota ad AWS, e tre
   minuti di clessidra non sono comunque una schermata.
 - **Correggere la riga di un'altra persona.** Come prima: si rifà la foto.
-- **Il lavoro in background**, a meno che la misura non lo imponga.
+- **Il lavoro in background.** La misura non lo impone: senza ragionamento la chiamata 2 sta in
+  dieci secondi.
 - **Conservare l'immagine** fra le due chiamate.

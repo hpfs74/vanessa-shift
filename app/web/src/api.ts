@@ -1,6 +1,15 @@
 /** The only place that talks to the network. */
 
-import type { MonthRoster, PhotoReading, IsoDate, PaySettings, Profile, ShiftCode } from '@vanessa/core';
+import type {
+  MonthRoster,
+  PhotoReading,
+  IsoDate,
+  PaySettings,
+  Profile,
+  SecondRead,
+  ShiftCode,
+} from '@vanessa/core';
+import { validateSecondRead } from '@vanessa/core';
 
 import { sessioneConfermata, sessioneRifiutata, sessioneValida } from './auth.js';
 
@@ -26,6 +35,8 @@ export const API_URL = '/api';
  *  The Lambda behind it ignores the path, so the segment costs nothing and
  *  spares the distribution a third behaviour. */
 export const PHOTO_URL = '/foto/leggi';
+/** Same reason as `PHOTO_URL`: the behaviour is `/colleghe/*`. */
+export const ROSTER_URL = '/colleghe/leggi';
 
 /** The reading never left, or never came back whole. Every message on this
  *  path ends with a way out: the textarea is always one tap away. */
@@ -128,6 +139,57 @@ export interface Api {
   roster(year: number, month: number): Promise<MonthRoster | null>;
   saveRoster(r: MonthRoster): Promise<void>;
   readPhoto(image: string): Promise<PhotoRead>;
+  /** The second reading: every row, judged by the caller against her row. */
+  readRoster(image: string): Promise<SecondRead>;
+}
+
+/** The two readings share everything but the address: the minute-long
+ *  wait from a phone, the 401 that goes through the breaker, the Italian
+ *  message out of an error body, and the HTML a CloudFront refusal hides
+ *  behind a 200. */
+async function leggi(url: string, image: string): Promise<unknown> {
+  const body = JSON.stringify({ image });
+
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...autorizzazione() },
+      body,
+    });
+  } catch {
+    // The reading takes up to a minute, from a phone: a timeout or a lost
+    // connection is not the rare case. `fetch` rejects with the browser's own
+    // message — English, and with no way out.
+    throw new Error(UNREACHABLE);
+  }
+
+  if (!r.ok) {
+    if (r.status === 401) sessioneRifiutata();
+    const text = await r.text().catch(() => '');
+    let message = `lettura fallita (${r.status})`;
+    try {
+      const j = JSON.parse(text) as { errore?: string };
+      if (j.errore) message = j.errore;
+    } catch {
+      /* the body wasn't JSON: the generic message stays */
+    }
+    throw new Error(message);
+  }
+
+  try {
+    requireJson(r);
+    // See the matching comment in `request()`: this has to run after
+    // `requireJson`, not before, or a CloudFront-rewritten refusal (a 200
+    // that isn't really an answer) would confirm a session that was never
+    // actually checked.
+    sessioneConfermata();
+    return await r.json();
+  } catch {
+    // A body that stops halfway, or that isn't the JSON expected: from here
+    // it's the same failure as never having arrived.
+    throw new Error(UNREACHABLE);
+  }
 }
 
 export const api: Api = {
@@ -191,51 +253,27 @@ export const api: Api = {
     });
   },
   async readPhoto(image) {
-    const body = JSON.stringify({ image });
-
-    let r: Response;
+    const j = (await leggi(PHOTO_URL, image)) as { reading: PhotoReading; roster?: MonthRoster };
+    // A deploy replaces the bundle and the Lambda as independent resources,
+    // so for a moment the new bundle can be talking to a handler that knows
+    // nothing about rosters. Her row is what matters: an absent roster is an
+    // empty one, not a failed reading.
     try {
-      r = await fetch(PHOTO_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...autorizzazione() },
-        body,
-      });
+      return {
+        reading: j.reading,
+        roster: j.roster ?? { year: j.reading.year, month: j.reading.month, people: [] },
+      };
     } catch {
-      // The reading takes up to a minute, from a phone: a timeout or a lost
-      // connection is not the rare case. `fetch` rejects with the browser's own
-      // message — English, and with no way out.
       throw new Error(UNREACHABLE);
     }
-
-    if (!r.ok) {
-      if (r.status === 401) sessioneRifiutata();
-      const text = await r.text().catch(() => '');
-      let message = `lettura fallita (${r.status})`;
-      try {
-        const j = JSON.parse(text) as { errore?: string };
-        if (j.errore) message = j.errore;
-      } catch {
-        /* the body wasn't JSON: the generic message stays */
-      }
-      throw new Error(message);
-    }
-
+  },
+  async readRoster(image) {
+    // Validated again here, not trusted: the same deploy gap as above, and
+    // the checksum that follows indexes into these rows.
+    const j = await leggi(ROSTER_URL, image);
     try {
-      requireJson(r);
-      // See the matching comment in `request()`: this has to run after
-      // `requireJson`, not before, or a CloudFront-rewritten refusal (a 200
-      // that isn't really an answer) would confirm a session that was never
-      // actually checked.
-      sessioneConfermata();
-      const j = (await r.json()) as { reading: PhotoReading; roster?: MonthRoster };
-      // A deploy replaces the bundle and the Lambda as independent resources,
-      // so for a moment the new bundle can be talking to a handler that knows
-      // nothing about rosters. Her row is what matters: an absent roster is an
-      // empty one, not a failed reading.
-      return { reading: j.reading, roster: j.roster ?? { year: j.reading.year, month: j.reading.month, people: [] } };
+      return validateSecondRead(j);
     } catch {
-      // A body that stops halfway, or that isn't the JSON expected: from here
-      // it's the same failure as never having arrived.
       throw new Error(UNREACHABLE);
     }
   },

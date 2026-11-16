@@ -6,9 +6,9 @@
  * convinced of the opposite.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
-import type { MonthRoster, PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
+import type { MonthRoster, PhotoReading, IsoDate, SecondRead, ShiftCode } from '@vanessa/core';
 import type { PhotoRead } from './api.js';
 import {
   MONTH_NAMES,
@@ -17,6 +17,7 @@ import {
   daysInMonth,
   entriesFromReading,
   reshapeRoster,
+  rosterFromSecondRead,
   toIso,
   weekday,
 } from '@vanessa/core';
@@ -28,6 +29,8 @@ export interface PhotoImportProps {
   year: number;
   existing: ReadonlyMap<IsoDate, ShiftCode>;
   onRead: (image: string) => Promise<PhotoRead>;
+  /** The second reading, started by itself as soon as her row is back. */
+  onReadRoster: (image: string) => Promise<SecondRead>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
   onSaveRoster: (r: MonthRoster) => Promise<void>;
 }
@@ -51,6 +54,11 @@ function fromReading(e: PhotoReading): Reading {
   return { month: e.month, year: e.year, name: e.foundName, row: e.foundRow, codes, unsure };
 }
 
+/** Every way the second reading can fail ends here: a 504 at sixty seconds,
+ *  an unusable answer, a failed checksum, the counter. None of them leads to
+ *  a different gesture, so they all read the same. */
+const ROSTER_FAILED = 'Le colleghe non si sono lette questa volta. I tuoi turni non cambiano.';
+
 /** The other way round: the grid as it stands after the corrections. */
 function toReading(l: Reading): PhotoReading {
   return {
@@ -63,7 +71,14 @@ function toReading(l: Reading): PhotoReading {
   };
 }
 
-export function PhotoImport({ year, existing, onRead, onSave, onSaveRoster }: PhotoImportProps) {
+export function PhotoImport({
+  year,
+  existing,
+  onRead,
+  onReadRoster,
+  onSave,
+  onSaveRoster,
+}: PhotoImportProps) {
   const [reading, setReading] = useState<Reading | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,15 +93,48 @@ export function PhotoImport({ year, existing, onRead, onSave, onSaveRoster }: Ph
   // data is as trustworthy as her own.
   const [openRoster, setOpenRoster] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
+  const [rosterStatus, setRosterStatus] = useState<'idle' | 'reading' | 'failed'>('idle');
+  // Which photo is current. A second reading that lands after she has put its
+  // photo aside, or picked another, belongs to nothing on screen any more.
+  const attempt = useRef(0);
+  // The month she has selected, read when a late roster lands: it has to be
+  // stored under the same month as her shifts, as `setMonth` ensures for a
+  // roster already in hand.
+  const selectedMonth = useRef<number | null>(null);
 
   const pick = async (file: File | undefined) => {
     if (!file) return;
     setLoading(true);
     setError(null);
+    const id = ++attempt.current;
     try {
-      const { reading, roster } = await onRead(await resize(file));
+      const image = await resize(file);
+      const { reading } = await onRead(image);
+      if (id !== attempt.current) return;
       setReading(fromReading(reading));
-      setRoster(roster);
+      selectedMonth.current = reading.month;
+      setRoster(null);
+      setRosterStatus('reading');
+      // Not awaited: her grid is on screen and editable now, and saving it
+      // never waits for the colleagues. The checksum runs against call 1's
+      // reading as it came back, not the grid she may be correcting: it
+      // measures the second reading, not her edits.
+      onReadRoster(image).then(
+        (second) => {
+          if (id !== attempt.current) return;
+          const r = rosterFromSecondRead(reading, second);
+          if (r === null) {
+            setRosterStatus('failed');
+            return;
+          }
+          const month = selectedMonth.current ?? r.month;
+          setRoster(month === r.month ? r : reshapeRoster(r, r.year, month));
+          setRosterStatus('idle');
+        },
+        () => {
+          if (id === attempt.current) setRosterStatus('failed');
+        },
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -128,6 +176,7 @@ export function PhotoImport({ year, existing, onRead, onSave, onSaveRoster }: Ph
    *  the grid shrinks or grows — a shorter month loses the days that no
    *  longer exist, a longer one adds them empty. */
   const setMonth = (month: number) => {
+    selectedMonth.current = month;
     setReading((l) => {
       if (!l) return l;
       const howMany = daysInMonth(l.year, month);
@@ -220,6 +269,8 @@ export function PhotoImport({ year, existing, onRead, onSave, onSaveRoster }: Ph
                 setRoster(null);
                 setRosterError(null);
                 setOpenRoster(false);
+                setRosterStatus('idle');
+                attempt.current += 1;
               }}
             >
               ripeti con un altra foto
@@ -306,6 +357,9 @@ export function PhotoImport({ year, existing, onRead, onSave, onSaveRoster }: Ph
                   )}
                 </div>
               )}
+
+              {rosterStatus === 'reading' && <p className="waiting">Leggo anche le colleghe…</p>}
+              {rosterStatus === 'failed' && <p className="hint">{ROSTER_FAILED}</p>}
 
               {rosterError && (
                 <p className="error" role="alert">

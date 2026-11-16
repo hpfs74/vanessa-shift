@@ -8,6 +8,7 @@ import type {
   MonthRoster,
   PaySettings,
   PhotoReading,
+  SecondRead,
   Profile,
   ShiftCode,
 } from '@vanessa/core';
@@ -91,6 +92,9 @@ function fakeApi(
     readPhoto: async () => {
       throw new Error('not used in these tests');
     },
+    readRoster: async () => {
+      throw new Error('not used in these tests');
+    },
   };
   return { api, saved, deleted, bulk, rosterAsked, rosterResolved, rosterSaved, settings: () => current };
 }
@@ -98,6 +102,19 @@ function fakeApi(
 /** A fixed "today" so the suite does not depend on the day it runs.
  *  15 January 2026 is an ordinary Thursday: no weekend, no holiday. */
 const JAN = '2026-01-15';
+
+/** What the second reading answers for `reading`: her row as call 1 read it,
+ *  so the checksum passes, plus the roster's people. */
+function secondOf(reading: PhotoReading, roster: MonthRoster): SecondRead {
+  return {
+    month: reading.month,
+    year: reading.year,
+    rows: [
+      { name: reading.foundName, row: reading.foundRow, codes: reading.days.map((d) => d.code ?? '') },
+      ...roster.people.map((p) => ({ name: p.name, row: p.row, codes: [...p.codes] })),
+    ],
+  };
+}
 
 const openDay = async (user: ReturnType<typeof userEvent.setup>, label: RegExp) =>
   user.click(await screen.findByRole('button', { name: label }));
@@ -604,6 +621,7 @@ describe('while the data is still loading', () => {
       roster: never,
       saveRoster: never,
       readPhoto: never,
+      readRoster: never,
     };
   }
 
@@ -1083,7 +1101,11 @@ describe('saving a roster from a different month than the one on screen', () => 
       saveRoster: async (r) => {
         savedRosters.push(r);
       },
-      readPhoto: async () => ({ reading: septemberReading, roster: septemberRoster }),
+      readPhoto: async () => ({
+        reading: septemberReading,
+        roster: { year: 2026, month: 9, people: [] },
+      }),
+      readRoster: async () => secondOf(septemberReading, septemberRoster),
     };
 
     render(<App api={api} initialMonth={10} today="2026-10-01" />);
@@ -1099,6 +1121,8 @@ describe('saving a roster from a different month than the one on screen', () => 
       screen.getByLabelText(/Leggi da una foto/i),
       new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
     );
+    // The roster arrives with the second reading, a moment after her row.
+    await screen.findByText(/lette 1 persone/i);
     await user.click(await screen.findByRole('button', { name: /^Salva \d+ giorni$/ }));
     await waitFor(() => expect(savedRosters).toEqual([septemberRoster]));
 
@@ -1153,7 +1177,11 @@ describe('saving a roster from a different month than the one on screen', () => 
       saveRoster: async (r) => {
         savedRosters.push(r);
       },
-      readPhoto: async () => ({ reading: septemberReading, roster: septemberRoster }),
+      readPhoto: async () => ({
+        reading: septemberReading,
+        roster: { year: 2026, month: 9, people: [] },
+      }),
+      readRoster: async () => secondOf(septemberReading, septemberRoster),
     };
 
     render(<App api={api} initialMonth={9} today="2026-09-01" />);
@@ -1169,6 +1197,8 @@ describe('saving a roster from a different month than the one on screen', () => 
       screen.getByLabelText(/Leggi da una foto/i),
       new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
     );
+    // The roster arrives with the second reading, a moment after her row.
+    await screen.findByText(/lette 1 persone/i);
     await user.click(await screen.findByRole('button', { name: /^Salva \d+ giorni$/ }));
     await waitFor(() => expect(savedRosters).toEqual([septemberRoster]));
 

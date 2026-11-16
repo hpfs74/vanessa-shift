@@ -289,6 +289,7 @@ export function App({
               existing={codes}
               onSave={saveBulk}
               onReadPhoto={api.readPhoto}
+              onReadRoster={api.readRoster}
               onSaveRoster={saveRoster}
             />
           )}

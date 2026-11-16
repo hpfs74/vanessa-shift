@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE } from '@vanessa/core';
+import { EMPTY_PAY_SETTINGS, EMPTY_PROFILE, MAX_READINGS_PER_DAY } from '@vanessa/core';
 
 import { Profilo } from '../src/Profilo.js';
 import type { Api } from '../src/api.js';
@@ -61,7 +61,7 @@ describe('Profilo', () => {
       }),
     });
     render(<Profilo api={api} onClose={() => {}} />);
-    expect(await screen.findByText(/3 di 10/)).toBeInTheDocument();
+    expect(await screen.findByText(`3 di ${MAX_READINGS_PER_DAY}`)).toBeInTheDocument();
   });
 
   it('saves what was typed', async () => {

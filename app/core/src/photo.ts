@@ -15,8 +15,13 @@ export const ROW_NAME = 'Vanessa';
 /** Every reading costs money. The cap is the second defense, not the first:
  *  the photo Lambda verifies the token before anything else, so this is what
  *  stops a caller who is already signed in — Vanessa on a bad day, or her
- *  device with a stolen token — rather than the open internet. */
-export const MAX_READINGS_PER_DAY = 10;
+ *  device with a stolen token — rather than the open internet.
+ *
+ *  It counts model calls, not photos: a sheet is two readings (her row, then
+ *  everyone's), so twenty is ten sheets. Exempting the second call would
+ *  leave the expensive half uncounted, and a signed-in caller could loop on
+ *  it for free. */
+export const MAX_READINGS_PER_DAY = 20;
 
 export interface ReadDay {
   readonly day: number;
@@ -66,28 +71,10 @@ export const READING_SCHEMA: Record<string, unknown> = {
         additionalProperties: false,
       },
     },
-    /** The other rows, in a shape of their own: a name and a flat list of
-     *  codes. Her row's shape costs about 25 tokens a day; fifteen people in
-     *  that shape would be some twelve thousand tokens of JSON alone, and the
-     *  answer would be truncated. This is about seven hundred for the lot. */
-    others: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          name: { type: 'string' },
-          row: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-          codes: { type: 'array', items: { type: 'string' } },
-        },
-        required: ['name', 'row', 'codes'],
-        additionalProperties: false,
-      },
-    },
   },
-  // `others` is deliberately NOT required: the prompt no longer asks for the
-  // other rows, and validateRoster reads an absent `others` as an empty
-  // roster. Putting it back here without widening the prompt would make the
-  // model invent a field nobody asked it to fill.
+  // No `others`: the other rows have a call of their own, with its own
+  // schema (`SECOND_READ_SCHEMA` in roster.ts). A field this prompt never
+  // names is an invitation to fill it.
   required: ['month', 'year', 'found', 'foundName', 'foundRow', 'days'],
   additionalProperties: false,
 };

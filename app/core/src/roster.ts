@@ -7,7 +7,7 @@
  */
 
 import { daysInMonth, parseIso, type IsoDate } from './dates.js';
-import { ROW_NAME } from './photo.js';
+import { InvalidReading, type PhotoReading, ROW_NAME } from './photo.js';
 import { isShiftCode, shift } from './shifts.js';
 import { normaliseColleague } from './swaps.js';
 
@@ -192,4 +192,116 @@ export function reshapeRoster(r: MonthRoster, year: number, month: number): Mont
       codes: Array.from({ length: howMany }, (_, i) => p.codes[i] ?? ''),
     })),
   };
+}
+
+/** A row as the second reading returns it. */
+export interface RawRow {
+  readonly name: string;
+  readonly row: number | null;
+  readonly codes: readonly string[];
+}
+
+/** What the second reading answers, already deserialised. */
+export interface SecondRead {
+  readonly month: number;
+  readonly year: number;
+  readonly rows: readonly RawRow[];
+}
+
+/** The shape the second reading is required to return: every row, flat.
+ *
+ *  Her row's shape in call 1 costs about 25 tokens a day; fifteen people in
+ *  that shape would be some twelve thousand tokens of JSON. This one is about
+ *  seven hundred for the lot, which is what keeps call 2 near ten seconds. */
+export const SECOND_READ_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    month: { type: 'integer' },
+    year: { type: 'integer' },
+    rows: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          row: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+          codes: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['name', 'row', 'codes'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['month', 'year', 'rows'],
+  additionalProperties: false,
+};
+
+/** The envelope must be right or nothing is usable; a single row that is not
+ *  costs that row, the same rule `validateRoster` applies. */
+export function validateSecondRead(v: unknown): SecondRead {
+  if (typeof v !== 'object' || v === null) throw new InvalidReading('second read: not an object');
+  const e = v as Record<string, unknown>;
+  if (typeof e.month !== 'number' || !Number.isInteger(e.month) || e.month < 1 || e.month > 12) {
+    throw new InvalidReading('second read: month');
+  }
+  if (typeof e.year !== 'number' || !Number.isInteger(e.year)) {
+    throw new InvalidReading('second read: year');
+  }
+  if (!Array.isArray(e.rows)) throw new InvalidReading('second read: rows');
+
+  const rows: RawRow[] = [];
+  for (const item of e.rows) {
+    if (typeof item !== 'object' || item === null) continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r.name !== 'string') continue;
+    if (!Array.isArray(r.codes) || !r.codes.every((c) => typeof c === 'string')) continue;
+    const row = typeof r.row === 'number' && Number.isInteger(r.row) ? r.row : null;
+    rows.push({ name: r.name, row, codes: r.codes as string[] });
+  }
+  return { month: e.month, year: e.year, rows };
+}
+
+/** Without reasoning the model writes `x` where the prompt asks for an empty
+ *  string. On this sheet an x means "not scheduled": it is the empty cell. */
+function cleanCode(c: unknown): string {
+  const n = normaliseCode(c);
+  return n === 'X' ? '' : n;
+}
+
+const nameKey = (name: string) => normaliseColleague(name).toLocaleLowerCase('it');
+
+/** The roster, or null when the second reading cannot be trusted.
+ *
+ *  Her row is the checksum. Call 1 read it carefully; if the cheap reading
+ *  disagrees with it on any of her days, it read the columns out of register.
+ *  The comparison is exact on purpose: it errs towards "no roster". It is not
+ *  a guarantee about the other rows — measured slips move one row at a time —
+ *  only a guard against the slips that land on hers. */
+export function rosterFromSecondRead(reading: PhotoReading, second: SecondRead): MonthRoster | null {
+  // The month comes from the validated reading; the second reading's own is
+  // only compared. Two sources disagreeing is exactly what we want to know.
+  if (second.month !== reading.month || second.year !== reading.year) return null;
+
+  const keys = [nameKey(reading.foundName), nameKey(ROW_NAME)];
+  let herIndex = -1;
+  for (const key of keys) {
+    herIndex = second.rows.findIndex((r) => nameKey(r.name) === key);
+    if (herIndex !== -1) break;
+  }
+  // Without her row there is nothing to measure against, and an unmeasured
+  // roster is not kept.
+  if (herIndex === -1) return null;
+
+  const expected = daysInMonth(reading.year, reading.month);
+  const hers = second.rows[herIndex]!.codes;
+  if (hers.length !== expected) return null;
+  const byDay = new Map(reading.days.map((d) => [d.day, d.code ?? '']));
+  for (let day = 1; day <= expected; day++) {
+    if (cleanCode(hers[day - 1]) !== (byDay.get(day) ?? '')) return null;
+  }
+
+  const others = second.rows
+    .filter((_, i) => i !== herIndex)
+    .map((r) => ({ ...r, codes: r.codes.map(cleanCode) }));
+  return validateRoster({ others }, reading.year, reading.month, reading.foundName);
 }

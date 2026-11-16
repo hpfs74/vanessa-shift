@@ -9,6 +9,11 @@ import {
   reshapeRoster,
   rosterOnDay,
   validateRoster,
+  rosterFromSecondRead,
+  validateSecondRead,
+  InvalidReading,
+  type PhotoReading,
+  type SecondRead,
 } from '../src/index.js';
 
 /** A well-formed `others` payload: one person, every day empty. */
@@ -265,5 +270,128 @@ describe('reshapeRoster', () => {
     const r = reshapeRoster(september, 2026, 10);
     expect(r.people[0]!.name).toBe('Giulia');
     expect(r.people[0]!.row).toBe(3);
+  });
+});
+
+/** August 2026, her row as call 1 returns it: a few unread days (null). */
+const HER: (string | null)[] = Array.from({ length: 31 }, (_, i) =>
+  i % 7 === 6 ? null : (['M', 'P', 'L', 'M1', 'P1', 'M'] as const)[i % 6]!,
+);
+
+function readingWith(foundName = 'Vanessa'): PhotoReading {
+  return {
+    month: 8,
+    year: 2026,
+    found: true,
+    foundName,
+    foundRow: 12,
+    days: HER.map((code, i) => ({ day: i + 1, code: code as never, confident: true })),
+  };
+}
+
+const herCodes = () => HER.map((c) => c ?? '');
+const ANNA = Array.from({ length: 31 }, (_, i) => ['F', 'N1', 'R', 'M'][i % 4]!);
+const SARA = Array.from({ length: 31 }, (_, i) => ['P', 'M'][i % 2]!);
+
+function second(herRow: string[] = herCodes(), herName = 'Vanessa', extra: Partial<SecondRead> = {}): SecondRead {
+  return {
+    month: 8,
+    year: 2026,
+    rows: [
+      { name: 'Anna', row: 9, codes: ANNA },
+      { name: herName, row: 12, codes: herRow },
+      { name: 'Sara', row: 7, codes: SARA },
+    ],
+    ...extra,
+  };
+}
+
+describe('rosterFromSecondRead', () => {
+  it('keeps the roster when her row agrees with call 1, and leaves her out of it', () => {
+    const r = rosterFromSecondRead(readingWith(), second());
+    expect(r).not.toBeNull();
+    expect(r!.year).toBe(2026);
+    expect(r!.month).toBe(8);
+    expect(r!.people.map((p) => p.name)).toEqual(['Anna', 'Sara']);
+  });
+
+  it('throws the roster away when a single cell of her row differs', () => {
+    const row = herCodes();
+    row[20] = row[20] === 'M' ? 'P' : 'M';
+    expect(rosterFromSecondRead(readingWith(), second(row))).toBeNull();
+  });
+
+  it('throws the roster away when her row is read one column off', () => {
+    const row = ['', ...herCodes().slice(0, 30)];
+    expect(rosterFromSecondRead(readingWith(), second(row))).toBeNull();
+  });
+
+  // Without reasoning the model writes x where the prompt asks for empty.
+  it('treats an x in her row as the empty cell call 1 reports as null', () => {
+    const row = herCodes().map((c) => (c === '' ? 'x' : c));
+    expect(rosterFromSecondRead(readingWith(), second(row))).not.toBeNull();
+  });
+
+  it("stores a colleague's x cells as empty", () => {
+    const s = second();
+    const withX = { ...s, rows: [{ name: 'Anna', row: 9, codes: ['x', 'X', ...ANNA.slice(2)] }, s.rows[1]!] };
+    const r = rosterFromSecondRead(readingWith(), withX);
+    expect(r!.people[0]!.codes.slice(0, 3)).toEqual(['', '', 'R']);
+  });
+
+  it('keeps codes the app does not model, as written', () => {
+    const r = rosterFromSecondRead(readingWith(), second());
+    expect(r!.people[0]!.codes.slice(0, 4)).toEqual(['F', 'N1', 'R', 'M']);
+  });
+
+  it('is null when the two readings disagree on the month', () => {
+    expect(rosterFromSecondRead(readingWith(), second(undefined, undefined, { month: 7 }))).toBeNull();
+    expect(rosterFromSecondRead(readingWith(), second(undefined, undefined, { year: 2025 }))).toBeNull();
+  });
+
+  it('is null when her row is not among the rows', () => {
+    const s = second();
+    expect(rosterFromSecondRead(readingWith(), { ...s, rows: [s.rows[0]!, s.rows[2]!] })).toBeNull();
+  });
+
+  it("finds her row by the sheet's own spelling, ignoring case and spacing", () => {
+    const r = rosterFromSecondRead(readingWith('ROSSI VANESSA'), second(undefined, 'Rossi  Vanessa'));
+    expect(r).not.toBeNull();
+    expect(r!.people.map((p) => p.name)).toEqual(['Anna', 'Sara']);
+  });
+
+  it('compares the first of two rows that carry her name', () => {
+    const wrong = herCodes().map(() => 'L');
+    const s = second();
+    const twice = (a: string[], b: string[]): SecondRead => ({
+      ...s,
+      rows: [s.rows[0]!, { name: 'Vanessa', row: 12, codes: a }, { name: 'Vanessa', row: 13, codes: b }],
+    });
+    expect(rosterFromSecondRead(readingWith(), twice(herCodes(), wrong))).not.toBeNull();
+    expect(rosterFromSecondRead(readingWith(), twice(wrong, herCodes()))).toBeNull();
+  });
+});
+
+describe('validateSecondRead', () => {
+  const ok = { month: 8, year: 2026, rows: [{ name: 'Anna', row: 9, codes: ['M'] }] };
+
+  it('returns a well-formed answer as it is', () => {
+    expect(validateSecondRead(ok)).toEqual(ok);
+  });
+
+  it('throws on a month that is not one', () => {
+    expect(() => validateSecondRead({ ...ok, month: 13 })).toThrow(InvalidReading);
+  });
+
+  it('throws when rows is not a list', () => {
+    expect(() => validateSecondRead({ ...ok, rows: 'x' })).toThrow(InvalidReading);
+  });
+
+  it('drops a row it cannot use instead of throwing', () => {
+    expect(validateSecondRead({ ...ok, rows: [{ name: 3, row: 1, codes: [] }, ...ok.rows] }).rows).toEqual(ok.rows);
+  });
+
+  it('turns a row number that is not an integer into null', () => {
+    expect(validateSecondRead({ ...ok, rows: [{ name: 'Anna', row: 2.5, codes: ['M'] }] }).rows[0]!.row).toBeNull();
   });
 });

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   InvalidReading,
+  MAX_READINGS_PER_DAY,
   READING_SCHEMA,
+  SECOND_READ_SCHEMA,
   RowNotFound,
   romeToday,
   validateReading,
@@ -130,17 +132,10 @@ describe('validateReading', () => {
 });
 
 describe('READING_SCHEMA', () => {
-  it('asks for the other rows too, in a shape of their own', () => {
-    const props = READING_SCHEMA.properties as Record<string, any>;
-    expect(props.others.type).toBe('array');
-    expect(Object.keys(props.others.items.properties).sort()).toEqual(['codes', 'name', 'row']);
-  });
-
-  // No `confident` on other people's cells: the flag exists to underline a
-  // cell she can correct, and there is no per-cell editing for them.
-  it('does not ask for a confidence flag on the other rows', () => {
-    const props = READING_SCHEMA.properties as Record<string, any>;
-    expect(props.others.items.properties.confident).toBeUndefined();
+  // Call 2 has its own schema: a field the prompt never names is an
+  // invitation to fill it.
+  it('no longer asks for the other rows', () => {
+    expect(READING_SCHEMA.properties as object).not.toHaveProperty('others');
   });
 
   it('still asks for her own row exactly as before', () => {
@@ -167,5 +162,22 @@ describe('romeToday', () => {
     // Half past midnight in Rome in summer: in Greenwich it's still the day before.
     expect(romeToday(new Date('2026-08-02T22:30:00Z'))).toBe('2026-08-03');
     expect(romeToday(new Date('2026-08-02T12:00:00Z'))).toBe('2026-08-02');
+  });
+});
+
+describe('MAX_READINGS_PER_DAY', () => {
+  // Counts calls, not photos: ten sheets of two readings each.
+  it('is twenty', () => {
+    expect(MAX_READINGS_PER_DAY).toBe(20);
+  });
+});
+
+describe('SECOND_READ_SCHEMA', () => {
+  it('asks for every row as a name, a row number and a flat list of codes', () => {
+    const s = SECOND_READ_SCHEMA as Record<string, any>;
+    expect(s.required.sort()).toEqual(['month', 'rows', 'year']);
+    expect(Object.keys(s.properties.rows.items.properties).sort()).toEqual(['codes', 'name', 'row']);
+    expect(s.properties.rows.items.additionalProperties).toBe(false);
+    expect(s.additionalProperties).toBe(false);
   });
 });

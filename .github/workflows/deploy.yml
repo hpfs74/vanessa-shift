@@ -9,13 +9,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Un deploy alla volta. Due `cdk deploy` in parallelo sullo stesso stack si
-# ostacolano e lasciano CloudFormation in UPDATE_IN_PROGRESS. I deploy in
-# corso non si annullano: interrompere a meta' e' peggio che aspettare.
-concurrency:
-  group: deploy-produzione
-  cancel-in-progress: false
-
 env:
   NODE_VERSION: '22'
 
@@ -62,6 +55,20 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: produzione
+
+    # Un deploy alla volta. Due `cdk deploy` in parallelo sullo stesso stack si
+    # ostacolano e lasciano CloudFormation in UPDATE_IN_PROGRESS. I deploy in
+    # corso non si annullano: interrompere a meta' e' peggio che aspettare.
+    #
+    # Il gruppo sta sul job, non sul workflow. A livello di workflow ci
+    # finivano anche i test delle pull request, e GitHub tiene un solo run in
+    # attesa per gruppo: il 17 novembre i test delle PR di Dependabot hanno
+    # scalzato e fatto annullare i deploy in attesa di #11 e #12. Sul job ci
+    # arrivano solo i push su main; se due aspettano, resta l'ultimo, che
+    # porta in produzione anche il commit dell'altro.
+    concurrency:
+      group: deploy-produzione
+      cancel-in-progress: false
 
     # Il minimo necessario: leggere il codice e farsi rilasciare il token
     # OIDC. Nessuna credenziale AWS e' conservata da nessuna parte.

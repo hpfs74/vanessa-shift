@@ -243,7 +243,17 @@ export function PhotoImport({
               onChange={(e) => void pick(e.target.files?.[0])}
             />
           </label>
-          {loading && <p className="waiting">Leggo la foto… ci vuole qualche secondo.</p>}
+          {loading && (
+            <div className="waiting">
+              <p>Leggo la foto… di solito ~30 secondi.</p>
+              {/* No real progress exists inside one model call: the bar is
+                  paced on the usual time (styles.css, .progresso) so she sees
+                  the wait moving. Decoration only; the line above is the news. */}
+              <div className="progresso" aria-hidden="true">
+                <div />
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -372,7 +382,12 @@ export function PhotoImport({
                 </div>
               )}
 
-              {rosterStatus === 'reading' && <p className="waiting">Leggo anche le colleghe…</p>}
+              {rosterStatus === 'reading' && (
+                <p className="waiting">
+                  <span className="spinner" aria-hidden="true" />
+                  Leggo anche le colleghe…
+                </p>
+              )}
               {rosterStatus === 'failed' && <p className="hint">{ROSTER_FAILED}</p>}
 
               {rosterError && (

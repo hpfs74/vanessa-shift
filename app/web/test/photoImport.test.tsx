@@ -461,3 +461,55 @@ describe('PhotoImport and the second reading', () => {
     expect(screen.getByText('Leggo anche le colleghe…')).toBeInTheDocument();
   });
 });
+
+// The first reading is one model call of about thirty seconds, with no
+// progress to report from inside it. The bar is paced on that usual time,
+// so she can see the wait is moving; the words stay what screen readers get.
+describe('PhotoImport while the photo is read', () => {
+  function renderPending() {
+    let settle!: (v: { reading: PhotoReading; roster: MonthRoster }) => void;
+    const onRead = vi.fn(() => new Promise<{ reading: PhotoReading; roster: MonthRoster }>((r) => (settle = r)));
+    const { container } = render(
+      <PhotoImport
+        year={2026}
+        existing={new Map()}
+        onRead={onRead}
+        onReadRoster={() => new Promise<SecondRead>(() => {})}
+        onSave={async () => {}}
+        onSaveRoster={async () => {}}
+      />,
+    );
+    return { container, settle: (r: PhotoReading) => settle({ reading: r, roster: { year: 2026, month: 7, people: [] } }) };
+  }
+
+  it('shows a progress bar paced on the usual thirty seconds', async () => {
+    const { container } = renderPending();
+    await userEvent.upload(screen.getByLabelText(/Leggi da una foto/i), new File(['f'], 'f.jpeg', { type: 'image/jpeg' }));
+    expect(await screen.findByText(/di solito ~30 secondi/)).toBeInTheDocument();
+    const bar = container.querySelector('.progresso');
+    expect(bar).not.toBeNull();
+    // Decoration: the text above already says what is happening.
+    expect(bar!.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('takes the bar away once her grid is back', async () => {
+    const { container, settle } = renderPending();
+    await userEvent.upload(screen.getByLabelText(/Leggi da una foto/i), new File(['f'], 'f.jpeg', { type: 'image/jpeg' }));
+    await screen.findByText(/di solito ~30 secondi/);
+    settle(julyReading());
+    await screen.findByText(/Luglio 2026/i);
+    expect(container.querySelector('.progresso')).toBeNull();
+  });
+
+  it('puts a spinner beside the colleagues line', async () => {
+    const { container, settle } = renderPending();
+    await userEvent.upload(screen.getByLabelText(/Leggi da una foto/i), new File(['f'], 'f.jpeg', { type: 'image/jpeg' }));
+    await screen.findByText(/di solito ~30 secondi/);
+    settle(julyReading());
+    const line = await screen.findByText('Leggo anche le colleghe…');
+    const spinner = line.closest('.waiting')!.querySelector('.spinner');
+    expect(spinner).not.toBeNull();
+    expect(spinner!.getAttribute('aria-hidden')).toBe('true');
+    expect(container.querySelector('.progresso')).toBeNull();
+  });
+});

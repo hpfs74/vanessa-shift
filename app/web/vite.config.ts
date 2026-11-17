@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
 // The two shapes live in `env-shapes.ts`, where a test can reach them
 // without importing this file — see the comment there. Extensionless on
@@ -47,10 +48,50 @@ function richiedeConfigAccesso(mode: string): Plugin {
   };
 }
 
+/** Installable on her phone's home screen, and the shell opens without a
+ *  network. Only the app itself is precached: /api, /foto and /colleghe are
+ *  never touched by the service worker, so data is always live (or fails
+ *  the way it already did offline), never a stale copy.
+ *
+ *  `autoUpdate` with the plain registration script: a new deploy activates
+ *  at once and is picked up on the next open, no "update?" prompt. There
+ *  are no lazy chunks, so an already-open page never asks for a file the
+ *  new worker has cleaned away. */
+const pwa = VitePWA({
+  registerType: 'autoUpdate',
+  injectRegister: 'script-defer',
+  includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'icona.svg'],
+  manifest: {
+    name: 'Turni di Vanessa',
+    short_name: 'Turni',
+    description: 'I turni, le presenze e la busta paga di Vanessa.',
+    lang: 'it',
+    start_url: '/',
+    scope: '/',
+    display: 'standalone',
+    orientation: 'portrait',
+    theme_color: '#1F3A5F',
+    background_color: '#1F3A5F',
+    icons: [
+      { src: 'pwa-64x64.png', sizes: '64x64', type: 'image/png' },
+      { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+      { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+      { src: 'maskable-icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+  },
+  workbox: {
+    navigateFallback: '/index.html',
+    // A navigation to any of these must reach CloudFront, not get the cached
+    // shell back.
+    navigateFallbackDenylist: [/^\/api\//, /^\/foto\//, /^\/colleghe\//],
+    cleanupOutdatedCaches: true,
+  },
+});
+
 export default defineConfig(({ command, mode }) => ({
   // The `command === 'build'` check is load-bearing, not tidiness: see the
   // comment on `richiedeConfigAccesso` above.
-  plugins: [react(), ...(command === 'build' ? [richiedeConfigAccesso(mode)] : [])],
+  plugins: [react(), pwa, ...(command === 'build' ? [richiedeConfigAccesso(mode)] : [])],
   define: {
     __APP_VERSION__: JSON.stringify(versioneDelBuild(process.env)),
   },

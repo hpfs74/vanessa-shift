@@ -290,6 +290,39 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
 }
 .waiting { color: var(--muted); }
 
+/* The photo reading is one model call of about thirty seconds, with nothing
+   to report from inside it. The bar is paced on that usual time: most of the
+   way in thirty seconds, then a slow creep, so a slow reading still moves and
+   never looks finished before it is. It goes away when the grid arrives. */
+.progresso {
+  height: 6px; border-radius: 3px; overflow: hidden;
+  background: var(--grey);
+  margin-top: 0.4rem;
+}
+.progresso > div {
+  height: 100%; width: 0; border-radius: inherit; background: var(--navy);
+  animation: progresso-di-solito 30s cubic-bezier(0.2, 0.6, 0.4, 1) forwards,
+             progresso-di-piu 30s linear 30s forwards;
+}
+@keyframes progresso-di-solito { from { width: 0; } to { width: 90%; } }
+@keyframes progresso-di-piu { from { width: 90%; } to { width: 97%; } }
+
+.spinner {
+  display: inline-block; width: 0.9em; height: 0.9em; margin-right: 0.4em;
+  vertical-align: -0.1em; border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--navy);
+  animation: spinner-gira 0.9s linear infinite;
+}
+@keyframes spinner-gira { to { transform: rotate(360deg); } }
+
+/* Reduced motion: a still bar half full and a still ring say "working"
+   without anything moving. */
+@media (prefers-reduced-motion: reduce) {
+  .progresso > div { animation: none; width: 50%; }
+  .spinner { animation: none; }
+}
+
 .bulk { display: flex; flex-direction: column; gap: 0.6rem; }
 
 /* --- photo import --- */

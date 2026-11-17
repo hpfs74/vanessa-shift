@@ -8,6 +8,7 @@ import type {
   MonthRoster,
   PaySettings,
   PhotoReading,
+  SecondRead,
   Profile,
   ShiftCode,
 } from '@vanessa/core';
@@ -91,6 +92,9 @@ function fakeApi(
     readPhoto: async () => {
       throw new Error('not used in these tests');
     },
+    readRoster: async () => {
+      throw new Error('not used in these tests');
+    },
   };
   return { api, saved, deleted, bulk, rosterAsked, rosterResolved, rosterSaved, settings: () => current };
 }
@@ -98,6 +102,19 @@ function fakeApi(
 /** A fixed "today" so the suite does not depend on the day it runs.
  *  15 January 2026 is an ordinary Thursday: no weekend, no holiday. */
 const JAN = '2026-01-15';
+
+/** What the second reading answers for `reading`: her row as call 1 read it,
+ *  so the checksum passes, plus the roster's people. */
+function secondOf(reading: PhotoReading, roster: MonthRoster): SecondRead {
+  return {
+    month: reading.month,
+    year: reading.year,
+    rows: [
+      { name: reading.foundName, row: reading.foundRow, codes: reading.days.map((d) => d.code ?? '') },
+      ...roster.people.map((p) => ({ name: p.name, row: p.row, codes: [...p.codes] })),
+    ],
+  };
+}
 
 const openDay = async (user: ReturnType<typeof userEvent.setup>, label: RegExp) =>
   user.click(await screen.findByRole('button', { name: label }));
@@ -138,7 +155,7 @@ describe('navigation', () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it('offers the five sections in the bottom bar', async () => {
-    render(<App api={fakeApi().api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi().api} today={JAN} />);
     const bar = screen.getByRole('navigation', { name: 'Sezioni' });
     for (const label of ['Calendario', 'Carica', 'Scambi', 'Riepilogo', 'Stipendio']) {
       expect(within(bar).getByRole('button', { name: new RegExp(label) })).toBeInTheDocument();
@@ -147,7 +164,7 @@ describe('navigation', () => {
 
   it('moves between months without leaving the year', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi().api} today={JAN} />);
     expect(await screen.findByRole('heading', { name: /Gennaio 2026/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mese precedente' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Mese successivo' }));
@@ -157,7 +174,7 @@ describe('navigation', () => {
 
 describe('opening on today', () => {
   it('starts on the calendar, on the month you are living in', async () => {
-    render(<App api={fakeApi().api} today="2026-08-02" />);
+    render(<App initialView="calendar" api={fakeApi().api} today="2026-08-02" />);
     expect(await screen.findByRole('heading', { name: /Agosto 2026/ })).toBeInTheDocument();
     const bar = screen.getByRole('navigation', { name: 'Sezioni' });
     expect(within(bar).getByRole('button', { name: /Calendario/ })).toHaveAttribute(
@@ -167,7 +184,7 @@ describe('opening on today', () => {
   });
 
   it('picks today out of the grid', async () => {
-    render(<App api={fakeApi().api} today="2026-08-02" />);
+    render(<App initialView="calendar" api={fakeApi().api} today="2026-08-02" />);
     const cell = await screen.findByRole('button', { name: /^2 Agosto, oggi/ });
     expect(cell.className).toContain('is-today');
     // Exactly one day is today, never two.
@@ -178,14 +195,14 @@ describe('opening on today', () => {
 
   it('marks today even when it is a holiday or a weekend', async () => {
     // 15 August 2026 is Ferragosto, and a Saturday.
-    render(<App api={fakeApi().api} today="2026-08-15" />);
+    render(<App initialView="calendar" api={fakeApi().api} today="2026-08-15" />);
     const cell = await screen.findByRole('button', { name: /^15 Agosto, Ferragosto, oggi/ });
     expect(cell.className).toContain('is-today');
     expect(cell.className).toContain('d-holiday');
   });
 
   it('falls back to January for a year the rota does not cover', async () => {
-    render(<App api={fakeApi().api} today="2031-05-09" />);
+    render(<App initialView="calendar" api={fakeApi().api} today="2031-05-09" />);
     expect(await screen.findByRole('heading', { name: /Gennaio 2026/ })).toBeInTheDocument();
     expect(
       screen.queryAllByRole('button').filter((b) => b.className.includes('is-today')),
@@ -194,7 +211,7 @@ describe('opening on today', () => {
 
   it('marks no day as today when looking at another month', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} today="2026-08-02" />);
+    render(<App initialView="calendar" api={fakeApi().api} today="2026-08-02" />);
     await screen.findByRole('heading', { name: /Agosto 2026/ });
     await user.click(screen.getByRole('button', { name: 'Mese successivo' }));
     expect(
@@ -206,14 +223,14 @@ describe('opening on today', () => {
 describe('day editor', () => {
   it('shows the loaded shift', async () => {
     const { api } = fakeApi([{ date: '2026-01-05', code: 'M1' }]);
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
     const cell = await screen.findByRole('button', { name: /^5 Gennaio, turno M1$/ });
     expect(within(cell).getByText('M1')).toBeInTheDocument();
     expect(within(cell).getByText('07:00-14:00')).toBeInTheDocument();
   });
 
   it('marks holidays even when they fall on a Saturday', async () => {
-    render(<App api={fakeApi().api} today={JAN} initialMonth={4} />);
+    render(<App initialView="calendar" api={fakeApi().api} today={JAN} initialMonth={4} />);
     const cell = await screen.findByRole('button', { name: /^25 Aprile, Liberazione/ });
     expect(cell.className).toContain('d-holiday');
     expect(cell.className).not.toContain('d-saturday');
@@ -222,7 +239,7 @@ describe('day editor', () => {
   it('creates a day', async () => {
     const user = userEvent.setup();
     const { api, saved } = fakeApi();
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, nessun turno$/);
     const sheet = screen.getByRole('dialog');
@@ -239,7 +256,7 @@ describe('day editor', () => {
     const { api, saved } = fakeApi([
       { date: '2026-01-05', code: 'M', originalCode: 'P', colleague: 'Giulia', swapKind: 'Ho coperto' },
     ]);
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M, scambiato$/);
     const sheet = screen.getByRole('dialog');
@@ -259,7 +276,7 @@ describe('day editor', () => {
   it('records a swap on a day that had none', async () => {
     const user = userEvent.setup();
     const { api, saved } = fakeApi([{ date: '2026-01-05', code: 'M' }]);
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M$/);
     const sheet = screen.getByRole('dialog');
@@ -280,7 +297,7 @@ describe('day editor', () => {
 
   it('shows the hour difference of a swap', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi([{ date: '2026-01-05', code: 'P1', originalCode: 'M' }]).api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi([{ date: '2026-01-05', code: 'P1', originalCode: 'M' }]).api} today={JAN} />);
     await openDay(user, /^5 Gennaio, turno P1, scambiato$/);
     expect(within(screen.getByRole('dialog')).getByText(/\+2/)).toBeInTheDocument();
   });
@@ -288,7 +305,7 @@ describe('day editor', () => {
   it('deletes a day', async () => {
     const user = userEvent.setup();
     const { api, deleted } = fakeApi([{ date: '2026-01-05', code: 'M' }]);
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M$/);
     await user.click(
@@ -301,7 +318,7 @@ describe('day editor', () => {
 
   it('cannot delete a day that does not exist yet', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi().api} today={JAN} />);
     await openDay(user, /^5 Gennaio, nessun turno$/);
     expect(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancella giorno' }),
@@ -314,7 +331,7 @@ describe('day editor', () => {
     api.saveShift = async () => {
       throw new Error('rete non raggiungibile');
     };
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M$/);
     const sheet = screen.getByRole('dialog');
@@ -330,7 +347,7 @@ describe('day editor', () => {
     api.shifts = async () => {
       throw new Error('API non disponibile');
     };
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('API non disponibile');
   });
 });
@@ -338,7 +355,7 @@ describe('day editor', () => {
 describe('per-day hours', () => {
   it('shows the shift hours as a placeholder, not as a value', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi([{ date: '2026-01-05', code: 'M' }]).api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi([{ date: '2026-01-05', code: 'M' }]).api} today={JAN} />);
     await openDay(user, /^5 Gennaio, turno M$/);
     const field = within(screen.getByRole('dialog')).getByLabelText(/Ore effettivamente/);
     expect(field).toHaveValue(null);
@@ -348,7 +365,7 @@ describe('per-day hours', () => {
   it('saves the hours typed for that day', async () => {
     const user = userEvent.setup();
     const { api, saved } = fakeApi([{ date: '2026-01-05', code: 'M' }]);
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M$/);
     const sheet = screen.getByRole('dialog');
@@ -362,7 +379,7 @@ describe('per-day hours', () => {
   it('keeps a zero: went in and was sent home is not the same as untouched', async () => {
     const user = userEvent.setup();
     const { api, saved } = fakeApi([{ date: '2026-01-05', code: 'M' }]);
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M$/);
     const sheet = screen.getByRole('dialog');
@@ -376,7 +393,7 @@ describe('per-day hours', () => {
   it('clearing the field goes back to the shift hours', async () => {
     const user = userEvent.setup();
     const { api, saved } = fakeApi([{ date: '2026-01-05', code: 'M', hoursOverride: 3 }]);
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M, 3 ore$/);
     const sheet = screen.getByRole('dialog');
@@ -390,7 +407,7 @@ describe('per-day hours', () => {
   it('refuses hours a day cannot hold', async () => {
     const user = userEvent.setup();
     const { api, saved } = fakeApi([{ date: '2026-01-05', code: 'M' }]);
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
 
     await openDay(user, /^5 Gennaio, turno M$/);
     const sheet = screen.getByRole('dialog');
@@ -401,7 +418,7 @@ describe('per-day hours', () => {
   });
 
   it('marks the day in the grid and shows the real hours', async () => {
-    render(<App api={fakeApi([{ date: '2026-01-05', code: 'M', hoursOverride: 3 }]).api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi([{ date: '2026-01-05', code: 'M', hoursOverride: 3 }]).api} today={JAN} />);
     const cell = await screen.findByRole('button', { name: /^5 Gennaio, turno M, 3 ore$/ });
     expect(cell.className).toContain('has-override');
     expect(within(cell).getByText('3 ore')).toBeInTheDocument();
@@ -412,6 +429,7 @@ describe('per-day hours', () => {
     // 5 and 6 January are Monday and Tuesday of the same week; M is 6h each.
     render(
       <App
+        initialView="calendar"
         today={JAN}
         api={
           fakeApi([
@@ -437,6 +455,7 @@ describe('per-day hours', () => {
     // Rostered M (6h), covered P1 (8h) but actually worked 5.
     render(
       <App
+        initialView="calendar"
         today={JAN}
         api={
           fakeApi([
@@ -459,7 +478,7 @@ describe('bulk entry', () => {
   it('saves a whole month from a sequence', async () => {
     const user = userEvent.setup();
     const { api, bulk } = fakeApi();
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
     await goToBulk(user);
 
     await user.type(screen.getByLabelText(/Sequenza/), 'M M P1 L');
@@ -478,7 +497,7 @@ describe('bulk entry', () => {
   it('refuses to save while a code is unrecognised', async () => {
     const user = userEvent.setup();
     const { api, bulk } = fakeApi();
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
     await goToBulk(user);
 
     await user.type(screen.getByLabelText(/Sequenza/), 'M ZZ P');
@@ -489,7 +508,7 @@ describe('bulk entry', () => {
 
   it('refuses a sequence longer than the month', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi().api} today={JAN} />);
     await goToBulk(user);
 
     await user.selectOptions(screen.getByLabelText(/Mese/), '2');
@@ -499,7 +518,7 @@ describe('bulk entry', () => {
 
   it('warns before overwriting days that already have a shift', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi([{ date: '2026-01-01', code: 'L' }]).api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi([{ date: '2026-01-01', code: 'L' }]).api} today={JAN} />);
     await goToBulk(user);
 
     await user.type(screen.getByLabelText(/Sequenza/), 'P1 M');
@@ -517,6 +536,7 @@ describe('swaps view', () => {
     const user = userEvent.setup();
     render(
       <App
+        initialView="calendar"
         today={JAN}
         api={
           fakeApi([
@@ -538,6 +558,7 @@ describe('swaps view', () => {
     const user = userEvent.setup();
     render(
       <App
+        initialView="calendar"
         today={JAN}
         api={
           fakeApi([
@@ -553,7 +574,7 @@ describe('swaps view', () => {
 
   it('says so plainly when there are no swaps', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi([{ date: '2026-01-05', code: 'M' }]).api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi([{ date: '2026-01-05', code: 'M' }]).api} today={JAN} />);
     await goToSwaps(user);
     expect(await screen.findByText(/non c'è ancora nessuno scambio/i)).toBeInTheDocument();
   });
@@ -564,6 +585,7 @@ describe('summary view', () => {
     const user = userEvent.setup();
     render(
       <App
+        initialView="calendar"
         today={JAN}
         api={
           fakeApi([
@@ -604,12 +626,13 @@ describe('while the data is still loading', () => {
       roster: never,
       saveRoster: never,
       readPhoto: never,
+      readRoster: never,
     };
   }
 
   it('says it is loading instead of showing a confident zero', async () => {
     const user = userEvent.setup();
-    render(<App api={apiThatHangs()} today={JAN} />);
+    render(<App initialView="calendar" api={apiThatHangs()} today={JAN} />);
 
     expect(screen.getByText(/Carico i turni/)).toBeInTheDocument();
 
@@ -640,6 +663,7 @@ describe('summary charts', () => {
     const user = userEvent.setup();
     render(
       <App
+        initialView="calendar"
         today={JAN}
         api={
           fakeApi([
@@ -668,6 +692,7 @@ describe('summary charts', () => {
     const user = userEvent.setup();
     render(
       <App
+        initialView="calendar"
         today={JAN}
         api={fakeApi([{ date: '2026-01-05', code: 'P1', hoursOverride: 2 }]).api}
       />,
@@ -680,7 +705,7 @@ describe('summary charts', () => {
 
   it('says there is nothing to draw on an empty year', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi().api} today={JAN} />);
     await goToSummary(user);
     expect(screen.getByText(/Nessuna ora registrata/)).toBeInTheDocument();
     expect(screen.getByText(/Nessun giorno registrato/)).toBeInTheDocument();
@@ -693,7 +718,7 @@ describe('pay view', () => {
 
   it('with no hourly rate it shows no figures, not even in the total', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi([{ date: '2026-01-05', code: 'M1' }]).api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi([{ date: '2026-01-05', code: 'M1' }]).api} today={JAN} />);
     await goToPay(user);
 
     const total = screen.getByRole('row', { name: /Totale/ });
@@ -704,7 +729,7 @@ describe('pay view', () => {
   it('with the hourly rate filled in it computes the base and saves', async () => {
     const user = userEvent.setup();
     const { api, settings } = fakeApi([{ date: '2026-01-05', code: 'M1' }]);
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
     await goToPay(user);
 
     await user.type(screen.getByLabelText(/Tariffa oraria/), '10');
@@ -718,7 +743,7 @@ describe('pay view', () => {
   it('clearing a field returns it to empty, not to zero', async () => {
     const user = userEvent.setup();
     const { api, settings } = fakeApi([], { ...EMPTY_PAY_SETTINGS, hourlyRate: 10 });
-    render(<App api={api} today={JAN} />);
+    render(<App initialView="calendar" api={api} today={JAN} />);
     await goToPay(user);
 
     await user.clear(screen.getByLabelText(/Tariffa oraria/));
@@ -731,7 +756,7 @@ describe('profilo', () => {
     // The bottom bar stays at five: on 375px a sixth tab drops each one to
     // 62px, and the labels do not fit. The profile is opened twice a year.
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi().api} today={JAN} />);
     await user.click(await screen.findByRole('button', { name: 'Profilo' }));
     expect(await screen.findByRole('heading', { name: 'Profilo' })).toBeInTheDocument();
 
@@ -739,17 +764,18 @@ describe('profilo', () => {
     expect(screen.queryByRole('heading', { name: 'Profilo' })).not.toBeInTheDocument();
   });
 
-  it('leaves the bottom bar at five sections', async () => {
+  // Profilo opens from the header, not as a tab: six sections, Oggi included.
+  it('leaves the bottom bar at six sections', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi().api} today={JAN} />);
     await user.click(await screen.findByRole('button', { name: 'Profilo' }));
     const bar = screen.getByRole('navigation', { name: 'Sezioni' });
-    expect(bar.querySelectorAll('button')).toHaveLength(5);
+    expect(bar.querySelectorAll('button')).toHaveLength(6);
   });
 
   it('tapping a tab while the profile is open closes it and switches the view', async () => {
     const user = userEvent.setup();
-    render(<App api={fakeApi().api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi().api} today={JAN} />);
     await user.click(await screen.findByRole('button', { name: 'Profilo' }));
     expect(await screen.findByRole('heading', { name: 'Profilo' })).toBeInTheDocument();
 
@@ -771,14 +797,14 @@ describe('profilo', () => {
 describe('esportazione nel calendario', () => {
   it('offers the export on a month with shifts in it', async () => {
     const f = fakeApi([{ date: '2026-01-05', code: 'M' }]);
-    render(<App api={f.api} today={JAN} />);
+    render(<App initialView="calendar" api={f.api} today={JAN} />);
     expect(await screen.findByRole('button', { name: 'Esporta nel calendario' })).toBeEnabled();
   });
 
   it('disables it on a month with nothing to export', async () => {
     // An empty file imports with no error and no effect, which looks exactly
     // like a broken export. Better to say there is nothing to send.
-    render(<App api={fakeApi().api} today={JAN} />);
+    render(<App initialView="calendar" api={fakeApi().api} today={JAN} />);
     expect(await screen.findByRole('button', { name: 'Esporta nel calendario' })).toBeDisabled();
   });
 
@@ -786,7 +812,7 @@ describe('esportazione nel calendario', () => {
     // `L` has no hours, so it produces no event: a month of Libero and an
     // empty month are the same case.
     const f = fakeApi([{ date: '2026-01-05', code: 'L' }]);
-    render(<App api={f.api} today={JAN} />);
+    render(<App initialView="calendar" api={f.api} today={JAN} />);
     expect(await screen.findByRole('button', { name: 'Esporta nel calendario' })).toBeDisabled();
   });
 
@@ -817,7 +843,7 @@ describe('esportazione nel calendario', () => {
     });
 
     const f = fakeApi([{ date: '2026-02-10', code: 'M' }]);
-    render(<App api={f.api} today={JAN} />);
+    render(<App initialView="calendar" api={f.api} today={JAN} />);
     await user.click(await screen.findByRole('button', { name: 'Mese successivo' }));
     await user.click(await screen.findByRole('button', { name: 'Esporta nel calendario' }));
 
@@ -965,14 +991,14 @@ describe('the day sheet lists who is in', () => {
 describe('App and the roster', () => {
   it('asks for the roster of the month it is showing, one month at a time', async () => {
     const { api, rosterAsked } = fakeApi();
-    render(<App api={api} initialMonth={9} today="2026-09-01" />);
+    render(<App initialView="calendar" api={api} initialMonth={9} today="2026-09-01" />);
     await screen.findByRole('button', { name: /^1 Settembre/ });
     expect(rosterAsked).toEqual([9]);
   });
 
   it('asks again when the month changes', async () => {
     const { api, rosterAsked } = fakeApi();
-    render(<App api={api} initialMonth={9} today="2026-09-01" />);
+    render(<App initialView="calendar" api={api} initialMonth={9} today="2026-09-01" />);
     await screen.findByRole('button', { name: /^1 Settembre/ });
     await userEvent.click(screen.getByRole('button', { name: 'Mese successivo' }));
     await waitFor(() => expect(rosterAsked).toEqual([9, 10]));
@@ -986,7 +1012,7 @@ describe('App and the roster', () => {
         throw new Error('giù');
       },
     });
-    render(<App api={api} initialMonth={9} today="2026-09-01" />);
+    render(<App initialView="calendar" api={api} initialMonth={9} today="2026-09-01" />);
     expect(await screen.findByRole('button', { name: /^1 Settembre/ })).toBeInTheDocument();
   });
 
@@ -1006,7 +1032,7 @@ describe('App and the roster', () => {
           }),
       },
     );
-    render(<App api={api} initialMonth={9} today="2026-09-01" />);
+    render(<App initialView="calendar" api={api} initialMonth={9} today="2026-09-01" />);
     await screen.findByRole('button', { name: /^1 Settembre/ });
 
     await userEvent.click(screen.getByRole('button', { name: 'Mese successivo' }));
@@ -1083,10 +1109,14 @@ describe('saving a roster from a different month than the one on screen', () => 
       saveRoster: async (r) => {
         savedRosters.push(r);
       },
-      readPhoto: async () => ({ reading: septemberReading, roster: septemberRoster }),
+      readPhoto: async () => ({
+        reading: septemberReading,
+        roster: { year: 2026, month: 9, people: [] },
+      }),
+      readRoster: async () => secondOf(septemberReading, septemberRoster),
     };
 
-    render(<App api={api} initialMonth={10} today="2026-10-01" />);
+    render(<App initialView="calendar" api={api} initialMonth={10} today="2026-10-01" />);
 
     // October's own roster is already on screen: Giulia's P overlaps her P.
     expect(await screen.findByRole('button', { name: /^1 Ottobre/ })).toHaveAccessibleName(
@@ -1099,6 +1129,8 @@ describe('saving a roster from a different month than the one on screen', () => 
       screen.getByLabelText(/Leggi da una foto/i),
       new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
     );
+    // The roster arrives with the second reading, a moment after her row.
+    await screen.findByText(/lette 1 persone/i);
     await user.click(await screen.findByRole('button', { name: /^Salva \d+ giorni$/ }));
     await waitFor(() => expect(savedRosters).toEqual([septemberRoster]));
 
@@ -1153,10 +1185,14 @@ describe('saving a roster from a different month than the one on screen', () => 
       saveRoster: async (r) => {
         savedRosters.push(r);
       },
-      readPhoto: async () => ({ reading: septemberReading, roster: septemberRoster }),
+      readPhoto: async () => ({
+        reading: septemberReading,
+        roster: { year: 2026, month: 9, people: [] },
+      }),
+      readRoster: async () => secondOf(septemberReading, septemberRoster),
     };
 
-    render(<App api={api} initialMonth={9} today="2026-09-01" />);
+    render(<App initialView="calendar" api={api} initialMonth={9} today="2026-09-01" />);
 
     // Nothing loaded yet: no badge.
     expect(await screen.findByRole('button', { name: /^1 Settembre/ })).not.toHaveAccessibleName(
@@ -1169,6 +1205,8 @@ describe('saving a roster from a different month than the one on screen', () => 
       screen.getByLabelText(/Leggi da una foto/i),
       new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
     );
+    // The roster arrives with the second reading, a moment after her row.
+    await screen.findByText(/lette 1 persone/i);
     await user.click(await screen.findByRole('button', { name: /^Salva \d+ giorni$/ }));
     await waitFor(() => expect(savedRosters).toEqual([septemberRoster]));
 
@@ -1176,5 +1214,17 @@ describe('saving a roster from a different month than the one on screen', () => 
     expect(await screen.findByRole('button', { name: /^1 Settembre/ })).toHaveAccessibleName(
       /collega con te/,
     );
+  });
+});
+
+describe('the first screen', () => {
+  it('opens on Oggi, with the five days, and Oggi first in the tab bar', async () => {
+    const { api } = fakeApi([{ date: '2026-01-15', code: 'M' }]);
+    render(<App api={api} today={JAN} />);
+    expect(await screen.findByRole('heading', { name: 'Ciao Vanessa' })).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'Oggi, giovedì 15 gennaio' })).toBeInTheDocument();
+    const tabs = within(screen.getByRole('navigation', { name: 'Sezioni' })).getAllByRole('button');
+    expect(tabs[0]).toHaveTextContent('Oggi');
+    expect(tabs[0]).toHaveAttribute('aria-current', 'true');
   });
 });

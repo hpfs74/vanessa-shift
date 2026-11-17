@@ -10,7 +10,7 @@
 
 import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
 
-import { ROW_NAME, READING_SCHEMA, SHIFTS } from '@vanessa/core';
+import { ROW_NAME, READING_SCHEMA, SECOND_READ_SCHEMA, SHIFTS } from '@vanessa/core';
 
 /** Sonnet 4.6 through the `eu.` cross-region profile, in our own region.
  *
@@ -130,22 +130,85 @@ export function createVision(client?: MessagesClient): Vision {
       ],
     });
 
-    // Classifiers can refuse: that's a 200 with empty content, not an HTTP
-    // error. Reading content[0] here would give an undefined that travels on.
-    if (response.stop_reason === 'refusal') {
-      throw new VisionFailed('the model refused the request', 'refusal');
-    }
-    if (response.stop_reason === 'max_tokens') {
-      throw new VisionFailed('response was truncated', 'truncated');
-    }
-
-    const text = response.content.find((b) => b.type === 'text')?.text;
-    if (!text) throw new VisionFailed('no text block in the response', 'no-text');
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new VisionFailed('the response is not JSON', 'not-json');
-    }
+    return parsed(response);
   };
+}
+
+/** What both readings do with an answer: the same four ways to be unusable. */
+function parsed(response: MessagesResponse): unknown {
+  // Classifiers can refuse: that's a 200 with empty content, not an HTTP
+  // error. Reading content[0] here would give an undefined that travels on.
+  if (response.stop_reason === 'refusal') {
+    throw new VisionFailed('the model refused the request', 'refusal');
+  }
+  if (response.stop_reason === 'max_tokens') {
+    throw new VisionFailed('response was truncated', 'truncated');
+  }
+
+  const text = response.content.find((b) => b.type === 'text')?.text;
+  if (!text) throw new VisionFailed('no text block in the response', 'no-text');
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new VisionFailed('the response is not JSON', 'not-json');
+  }
+}
+
+/** The second reading: every row, for the colleagues' roster.
+ *
+ *  The grid paragraph is the first reading's, verbatim: it is what fixed a
+ *  row read one column early, and it matters more with fifteen rows, not less.
+ *  This is the prompt measured on 2026-11-16 (spec, *La misura*). */
+const ROSTER_PROMPT = `Questa foto e' il foglio dei turni mensile di una struttura sanitaria.
+
+E' una griglia: ogni riga e' una persona, ogni colonna e' un giorno del mese.
+Sopra le colonne c'e' una riga con i numeri dei giorni, da 1 fino alla fine del
+mese: usala per allineare le colonne, non contarle a occhio. In alto c'e' il
+titolo con il mese e l'anno.
+
+Leggi TUTTE le righe della griglia, una per persona.
+I nomi stanno a sinistra, su due righe (cognome sopra, nome sotto): la riga dei
+turni e' quella del nome.
+
+Per ogni persona riporta il nome cosi' come sta scritto sul foglio e un elenco
+codes lungo quanto il mese, un elemento per ogni giorno dal primo all'ultimo.
+Copia la sigla che sta nella cella cosi' come e', senza tradurla e senza
+scartarla, anche quando non la conosci (F, R, C, N1 e altre).
+Per una cella vuota, con una x, o illeggibile, metti la stringa vuota.`;
+
+/** The measured answer is about 1170 tokens, at roughly 150 a second. Four
+ *  thousand caps the call near 27 seconds — inside CloudFront's 60 — and
+ *  still covers a sheet three times as large. Past it, the answer is
+ *  truncated and becomes the colleagues' failure line, never a 504. */
+export const ROSTER_MAX_TOKENS = 4000;
+
+/** No `thinking`, no `effort`: the only configuration measured inside the
+ *  sixty seconds. With reasoning on, medium effort spent the whole budget
+ *  thinking and answered nothing; low effort answered in 29 to 45 seconds and
+ *  was no more accurate. */
+export function createRosterVision(client?: MessagesClient): Vision {
+  const c: MessagesClient =
+    client ?? (new AnthropicBedrock({ awsRegion: REGION }) as unknown as MessagesClient);
+
+  return async (imageBase64: string) =>
+    parsed(
+      await c.messages.create({
+        model: MODEL,
+        max_tokens: ROSTER_MAX_TOKENS,
+        output_config: { format: { type: 'json_schema', schema: SECOND_READ_SCHEMA } },
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 },
+              },
+              { type: 'text', text: ROSTER_PROMPT },
+            ],
+          },
+        ],
+      }),
+    );
 }

@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { MonthRoster, PhotoReading, IsoDate, ShiftCode } from '@vanessa/core';
+import type { MonthRoster, PhotoReading, IsoDate, RosterPerson, SecondRead, ShiftCode } from '@vanessa/core';
 import { SHORT_DAY_NAMES } from '@vanessa/core';
 
 import { PhotoImport } from '../src/PhotoImport.js';
@@ -38,11 +38,25 @@ vi.mock('../src/image.js', () => ({
   resize: () => Promise.resolve('AAAA'),
 }));
 
-/** Extra behaviour beyond the reading itself: a roster to hand back from
- *  `onRead`, and custom `onSave`/`onSaveRoster` implementations for tests
- *  that need to observe order or failure rather than just success. */
+/** What the second reading would answer for `reading`: her row exactly as
+ *  call 1 read it (so the checksum passes), plus `people`. */
+function secondFor(reading: PhotoReading, people: readonly RosterPerson[] = []): SecondRead {
+  return {
+    month: reading.month,
+    year: reading.year,
+    rows: [
+      { name: reading.foundName, row: reading.foundRow, codes: reading.days.map((d) => d.code ?? '') },
+      ...people.map((p) => ({ name: p.name, row: p.row, codes: [...p.codes] })),
+    ],
+  };
+}
+
+/** Extra behaviour beyond the reading itself: what the second reading
+ *  answers (a value, an error, or a promise the test settles itself), and
+ *  custom `onSave`/`onSaveRoster` implementations for tests that need to
+ *  observe order or failure rather than just success. */
 interface RenderOverrides {
-  roster?: MonthRoster;
+  second?: SecondRead | Error | Promise<SecondRead>;
   onSave?: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
   onSaveRoster?: (r: MonthRoster) => Promise<void>;
 }
@@ -54,15 +68,23 @@ async function renderWith(
 ) {
   const onSave = vi.fn(overrides.onSave ?? (async () => {}));
   const onSaveRoster = vi.fn(overrides.onSaveRoster ?? (async () => {}));
-  // Empty by default: most tests here only exercise her own row, and an
-  // empty roster is exactly what a handler unaware of rosters would send.
-  const roster = overrides.roster ?? { year: reading.year, month: reading.month, people: [] };
-  const onRead = vi.fn().mockResolvedValue({ reading, roster });
+  // Call 1's roster is always empty now: the other rows have a call of their own.
+  const onRead = vi.fn().mockResolvedValue({
+    reading,
+    roster: { year: reading.year, month: reading.month, people: [] },
+  });
+  // By default the second reading agrees with her row and finds nobody else:
+  // most tests here only exercise her own row.
+  const second = overrides.second ?? secondFor(reading);
+  const onReadRoster = vi.fn(() =>
+    second instanceof Error ? Promise.reject(second) : Promise.resolve(second),
+  );
   const { container } = render(
     <PhotoImport
       year={2026}
       existing={existing}
       onRead={onRead}
+      onReadRoster={onReadRoster}
       onSave={onSave}
       onSaveRoster={onSaveRoster}
     />,
@@ -72,7 +94,7 @@ async function renderWith(
     screen.getByLabelText(/Leggi da una foto/i),
     new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' }),
   );
-  return { onSave, onSaveRoster, onRead, container };
+  return { onSave, onSaveRoster, onRead, onReadRoster, container };
 }
 
 /** Presses whichever save button `SavePlan` is currently showing — its label
@@ -241,13 +263,13 @@ const ROSTER: MonthRoster = {
 
 describe('PhotoImport and the other rows', () => {
   it('says how many people it read, without listing them unasked', async () => {
-    await renderWith(julyReading(), undefined, { roster: ROSTER });
+    await renderWith(julyReading(), undefined, { second: secondFor(julyReading(), ROSTER.people) });
     expect(await screen.findByText(/lette 2 persone/i)).toBeInTheDocument();
     expect(screen.queryByText('Giulia')).not.toBeInTheDocument();
   });
 
   it('opens on request, so a row shifted or a name misread can be seen', async () => {
-    await renderWith(julyReading(), undefined, { roster: ROSTER });
+    await renderWith(julyReading(), undefined, { second: secondFor(julyReading(), ROSTER.people) });
     await userEvent.click(await screen.findByRole('button', { name: /lette 2 persone/i }));
     expect(screen.getByText('Giulia')).toBeInTheDocument();
     expect(screen.getByText('Marta')).toBeInTheDocument();
@@ -256,7 +278,7 @@ describe('PhotoImport and the other rows', () => {
   it('saves her shifts before the roster', async () => {
     const order: string[] = [];
     await renderWith(julyReading(), undefined, {
-      roster: ROSTER,
+      second: secondFor(julyReading(), ROSTER.people),
       onSave: async () => {
         order.push('shifts');
       },
@@ -277,7 +299,7 @@ describe('PhotoImport and the other rows', () => {
   // that is already stored.
   it('reports a roster that failed without claiming the import failed', async () => {
     await renderWith(julyReading(), undefined, {
-      roster: ROSTER,
+      second: secondFor(julyReading(), ROSTER.people),
       onSaveRoster: async () => {
         throw new Error('rete giù');
       },
@@ -290,7 +312,7 @@ describe('PhotoImport and the other rows', () => {
   it('reshapes the roster when she corrects the month, so both are stored under one month', async () => {
     const saved: MonthRoster[] = [];
     await renderWith(julyReading(), undefined, {
-      roster: ROSTER,
+      second: secondFor(julyReading(), ROSTER.people),
       onSaveRoster: async (r) => {
         saved.push(r);
       },
@@ -321,5 +343,121 @@ describe('PhotoImport and the other rows', () => {
     // before trusting that the absence held rather than just being early.
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(called).toBe(0);
+  });
+});
+
+describe('PhotoImport and the second reading', () => {
+  const FAIL = 'Le colleghe non si sono lette questa volta. I tuoi turni non cambiano.';
+  /** A promise the test settles when it wants: the second reading in flight. */
+  function inFlight() {
+    let settle!: (v: SecondRead) => void;
+    const promise = new Promise<SecondRead>((r) => (settle = r));
+    return { promise, settle };
+  }
+
+  it('starts by itself once her row is back, with the same image, and says so meanwhile', async () => {
+    const pending = inFlight();
+    const { onReadRoster } = await renderWith(julyReading(), undefined, { second: pending.promise });
+    expect(await screen.findByText('Leggo anche le colleghe…')).toBeInTheDocument();
+    expect(onReadRoster).toHaveBeenCalledTimes(1);
+    expect(onReadRoster).toHaveBeenCalledWith('AAAA');
+  });
+
+  it('fills the roster block when it agrees with her row', async () => {
+    await renderWith(julyReading(), undefined, { second: secondFor(julyReading(), ROSTER.people) });
+    expect(await screen.findByText(/lette 2 persone/i)).toBeInTheDocument();
+    expect(screen.queryByText('Leggo anche le colleghe…')).not.toBeInTheDocument();
+  });
+
+  it('shows the one failure line when her row was read one column off', async () => {
+    const good = secondFor(julyReading(), ROSTER.people);
+    const shifted: SecondRead = {
+      ...good,
+      rows: [{ ...good.rows[0]!, codes: ['', ...good.rows[0]!.codes.slice(0, 30)] }, ...good.rows.slice(1)],
+    };
+    await renderWith(julyReading(), undefined, { second: shifted });
+    expect(await screen.findByText(FAIL)).toBeInTheDocument();
+    expect(screen.queryByText(/lette 2 persone/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the same line when the second reading fails outright', async () => {
+    await renderWith(julyReading(), undefined, { second: new Error('Il servizio non risponde.') });
+    expect(await screen.findByText(FAIL)).toBeInTheDocument();
+  });
+
+  it('lets her save while it is still reading, and saves no roster then', async () => {
+    const pending = inFlight();
+    const { onSave, onSaveRoster } = await renderWith(julyReading(), undefined, { second: pending.promise });
+    await salva();
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSaveRoster).not.toHaveBeenCalled();
+  });
+
+  // She saved while it was still reading and has no reason to come back: a
+  // roster that arrives afterwards is saved by itself, or it never is.
+  it('saves by itself a roster that arrives after her shifts were saved', async () => {
+    const pending = inFlight();
+    const { onSave, onSaveRoster } = await renderWith(julyReading(), undefined, { second: pending.promise });
+    await salva();
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    pending.settle(secondFor(julyReading(), ROSTER.people));
+    await waitFor(() => expect(onSaveRoster).toHaveBeenCalledTimes(1));
+    expect(onSaveRoster.mock.calls[0]![0].people).toHaveLength(2);
+  });
+
+  it('does not save a late roster by itself once she has changed the grid since saving', async () => {
+    const pending = inFlight();
+    const { onSave, onSaveRoster } = await renderWith(julyReading(), undefined, { second: pending.promise });
+    await salva();
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '6');
+    pending.settle(secondFor(julyReading(), ROSTER.people));
+    expect(await screen.findByText(/lette 2 persone/i)).toBeInTheDocument();
+    expect(onSaveRoster).not.toHaveBeenCalled();
+  });
+
+  it('stores a late roster under the month she picked meanwhile', async () => {
+    const pending = inFlight();
+    const { onSaveRoster } = await renderWith(julyReading(), undefined, { second: pending.promise });
+    await userEvent.selectOptions(screen.getByLabelText(/Mese/i), '6');
+    pending.settle(secondFor(julyReading(), ROSTER.people));
+    expect(await screen.findByText(/lette 2 persone/i)).toBeInTheDocument();
+    await salva();
+    await waitFor(() => expect(onSaveRoster).toHaveBeenCalledTimes(1));
+    expect(onSaveRoster.mock.calls[0]![0].month).toBe(6);
+    expect(onSaveRoster.mock.calls[0]![0].people[0]!.codes).toHaveLength(30);
+  });
+
+  // The race that matters: photo A's second reading lands after photo B's
+  // first reading is already on screen. Without the guard A's roster — read
+  // from another sheet — would attach to B's grid.
+  it("does not attach an old photo's late roster to the new photo", async () => {
+    const a = inFlight();
+    const b = inFlight();
+    const onReadRoster = vi.fn().mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
+    render(
+      <PhotoImport
+        year={2026}
+        existing={new Map()}
+        onRead={vi.fn().mockResolvedValue({
+          reading: julyReading(),
+          roster: { year: 2026, month: 7, people: [] },
+        })}
+        onReadRoster={onReadRoster}
+        onSave={async () => {}}
+        onSaveRoster={async () => {}}
+      />,
+    );
+    const foto = () => new File(['finta'], 'foglio.jpeg', { type: 'image/jpeg' });
+    await userEvent.upload(screen.getByLabelText(/Leggi da una foto/i), foto());
+    await userEvent.click(await screen.findByRole('button', { name: /ripeti con un altra foto/i }));
+    await userEvent.upload(screen.getByLabelText(/Leggi da una foto/i), foto());
+    await waitFor(() => expect(onReadRoster).toHaveBeenCalledTimes(2));
+
+    a.settle(secondFor(julyReading(), ROSTER.people));
+    // Give the late answer every chance to land before asserting it did not.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText(/lette 2 persone/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Leggo anche le colleghe…')).toBeInTheDocument();
   });
 });

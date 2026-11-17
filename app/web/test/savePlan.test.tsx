@@ -22,6 +22,7 @@ function Harness() {
       existing={existing}
       onSave={async () => {}}
       onReadPhoto={() => Promise.reject(new Error('not used in this test'))}
+      onReadRoster={() => Promise.reject(new Error('not used in this test'))}
       onSaveRoster={async () => {}}
     />
   );
@@ -49,6 +50,7 @@ describe('BulkEntry save confirmation', () => {
         existing={existing}
         onSave={onSave}
         onReadPhoto={() => Promise.reject(new Error('not used in this test'))}
+        onReadRoster={() => Promise.reject(new Error('not used in this test'))}
         onSaveRoster={async () => {}}
       />,
     );

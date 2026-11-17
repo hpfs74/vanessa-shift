@@ -10,6 +10,7 @@ import {
   romeToday,
   validateReading,
   validateRoster,
+  validateSecondRead,
 } from '@vanessa/core';
 import type { IsoDate, PaySettings, Profile } from '@vanessa/core';
 
@@ -37,7 +38,7 @@ import {
   requireYearMonth,
 } from './http.js';
 import type { Vision } from './vision.js';
-import { VisionFailed, createVision } from './vision.js';
+import { VisionFailed, createRosterVision, createVision } from './vision.js';
 
 function repoFromEnvironment(): Repo {
   const table = process.env.TABLE_NAME;
@@ -243,6 +244,61 @@ export function readPhotoWith(
     });
 }
 
+/** The one line every failure of the second reading ends in. None of them
+ *  leads to a different gesture — try again, or do without — so the
+ *  distinctions stay in the logs, where they are diagnosis, not noise. */
+const ROSTER_UNREADABLE = 'Le colleghe non si sono lette questa volta. I tuoi turni non cambiano.';
+
+/** The second reading: every row of the sheet, for the colleagues' roster.
+ *
+ *  Same order of defenses as `readPhotoWith`, and the same counter: it counts
+ *  calls, not photos, so the expensive half is not the free one. It answers
+ *  the rows as read and does not judge them — the checksum against her row
+ *  runs in the browser, which holds both halves (`rosterFromSecondRead`). It
+ *  writes nothing but the counter. */
+export function readRosterWith(
+  repo: Repo,
+  vision: Vision,
+  today: () => IsoDate = romeToday,
+  signedIn: (h: Record<string, string | undefined> | undefined) => Promise<void> = requireSignedIn,
+) {
+  return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
+    handle(async () => {
+      await signedIn(event.headers);
+
+      const image = requireImage(parseJson(event.body).image);
+
+      if (!(await repo.consumePhotoQuota(today(), MAX_READINGS_PER_DAY))) {
+        return failure(
+          429,
+          `Hai gia' usato le ${MAX_READINGS_PER_DAY} letture di oggi. Riprova domani, oppure scrivi i codici a mano.`,
+        );
+      }
+
+      let raw: unknown;
+      try {
+        raw = await vision(image);
+      } catch (e) {
+        if (e instanceof VisionFailed) {
+          console.error('roster reading failed', e.reason, e.message);
+          return failure(422, ROSTER_UNREADABLE);
+        }
+        console.error('the roster model call failed', e);
+        return failure(502, 'Il servizio non risponde. Riprova fra un minuto.');
+      }
+
+      try {
+        return ok(validateSecondRead(raw));
+      } catch (e) {
+        if (e instanceof InvalidReading) {
+          console.error('invalid roster reading', e.message);
+          return failure(422, ROSTER_UNREADABLE);
+        }
+        throw e;
+      }
+    });
+}
+
 export function getRosterWith(repo: Repo) {
   return (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> =>
     handle(async () => {
@@ -274,5 +330,7 @@ export const getConfig = (e: APIGatewayProxyEventV2) => getConfigWith(repoFromEn
 export const putConfig = (e: APIGatewayProxyEventV2) => putConfigWith(repoFromEnvironment())(e);
 export const readPhoto = (e: APIGatewayProxyEventV2) =>
   readPhotoWith(repoFromEnvironment(), createVision())(e);
+export const readRoster = (e: APIGatewayProxyEventV2) =>
+  readRosterWith(repoFromEnvironment(), createRosterVision())(e);
 export const getRoster = (e: APIGatewayProxyEventV2) => getRosterWith(repoFromEnvironment())(e);
 export const putRoster = (e: APIGatewayProxyEventV2) => putRosterWith(repoFromEnvironment())(e);

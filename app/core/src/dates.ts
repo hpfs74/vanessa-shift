@@ -106,3 +106,20 @@ export const MONTH_NAMES = [
 ] as const;
 
 export const SHORT_DAY_NAMES = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'] as const;
+
+/** Full weekday names, lower case as Italian writes them mid-sentence, in
+ *  the order `weekday()` counts: Monday first. */
+export const DAY_NAMES = [
+  'lunedì',
+  'martedì',
+  'mercoledì',
+  'giovedì',
+  'venerdì',
+  'sabato',
+  'domenica',
+] as const;
+
+/** `n` consecutive days starting with `from`, across month and year ends. */
+export function nextDays(from: IsoDate, n: number): IsoDate[] {
+  return Array.from({ length: n }, (_, i) => addDays(from, i));
+}

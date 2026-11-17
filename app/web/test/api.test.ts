@@ -320,3 +320,39 @@ describe('the 401 circuit breaker', () => {
     expect(sessionStorage.getItem('riprovaSessione')).toBeNull();
   });
 });
+
+describe('readRoster', () => {
+  const SECOND = { month: 8, year: 2026, rows: [{ name: 'Anna', row: 9, codes: ['M'] }] };
+
+  it('sends the image to /colleghe/leggi, with the token', async () => {
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'IL-TOKEN-ID', scade: 9e12 }));
+    const fetchMock = vi.fn().mockResolvedValue(response(SECOND));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await api.readRoster('AAAA')).toEqual(SECOND);
+    expect(fetchMock.mock.calls[0][0]).toBe('/colleghe/leggi');
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ image: 'AAAA' });
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer IL-TOKEN-ID');
+  });
+
+  it('rejects on an error answer', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ errore: 'no' }, { status: 422 })));
+    await expect(api.readRoster('AAAA')).rejects.toThrow();
+  });
+
+  // A 401 here is the same expired session as anywhere else: the breaker
+  // must hear about it, or the second reading fails quietly forever.
+  it('a 401 goes through the breaker like the photo reading', async () => {
+    vi.stubGlobal('location', { reload: vi.fn() });
+    localStorage.setItem('sessione', JSON.stringify({ idToken: 'vecchio', scade: 9e12 }));
+    localStorage.setItem('refresh', 'un-refresh-token');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
+    // A fresh page: the breaker allows one reload per document, and an
+    // earlier test in this file has already spent this module's.
+    vi.resetModules();
+    const { api: pagina } = await import('../src/api.js');
+    await expect(pagina.readRoster('AAAA')).rejects.toThrow();
+    expect(sessionStorage.getItem('riprovaSessione')).not.toBeNull();
+  });
+});

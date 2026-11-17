@@ -375,3 +375,23 @@ tfoot th, tfoot td { background: var(--grey); font-weight: 700; }
   .donuts { grid-template-columns: 1fr 1fr; }
   .tabbar button { font-size: 0.68rem; }
 }
+
+/* --- Oggi --- */
+.oggi-data { margin: -0.25rem 0 0.75rem; color: var(--muted); }
+.oggi-giorno {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.6rem 0.75rem; margin-bottom: 0.5rem;
+}
+.oggi-giorno h3 { font-size: 0.95rem; margin: 0 0 0.35rem; color: var(--navy); }
+.oggi-giorno p { margin: 0.2rem 0; }
+.oggi-turno { display: flex; align-items: center; gap: 0.5rem; }
+.oggi-codice {
+  display: inline-block; min-width: 2.2rem; text-align: center; font-weight: 600;
+  padding: 0.15rem 0.4rem; border-radius: 6px; border: 1px solid var(--border);
+}
+.oggi-codice.t-M { background: var(--M); }
+.oggi-codice.t-M1 { background: var(--M1); }
+.oggi-codice.t-P { background: var(--P); }
+.oggi-codice.t-P1 { background: var(--P1); }
+.oggi-codice.t-L { background: var(--L); }
+.oggi-con-te { font-weight: 600; }

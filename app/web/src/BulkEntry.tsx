@@ -7,7 +7,7 @@
 
 import { useMemo, useState } from 'react';
 
-import type { IsoDate, MonthRoster, ShiftCode } from '@vanessa/core';
+import type { IsoDate, MonthRoster, SecondRead, ShiftCode } from '@vanessa/core';
 import { MONTH_NAMES, parseSequence } from '@vanessa/core';
 
 import type { PhotoRead } from './api.js';
@@ -21,6 +21,7 @@ export interface BulkEntryProps {
   existing: ReadonlyMap<IsoDate, ShiftCode>;
   onSave: (entries: readonly { date: IsoDate; code: ShiftCode }[]) => Promise<void>;
   onReadPhoto: (image: string) => Promise<PhotoRead>;
+  onReadRoster: (image: string) => Promise<SecondRead>;
   onSaveRoster: (r: MonthRoster) => Promise<void>;
 }
 
@@ -31,6 +32,7 @@ export function BulkEntry({
   existing,
   onSave,
   onReadPhoto,
+  onReadRoster,
   onSaveRoster,
 }: BulkEntryProps) {
   const [text, setText] = useState('');
@@ -47,6 +49,7 @@ export function BulkEntry({
         year={year}
         existing={existing}
         onRead={onReadPhoto}
+        onReadRoster={onReadRoster}
         onSave={onSave}
         onSaveRoster={onSaveRoster}
       />

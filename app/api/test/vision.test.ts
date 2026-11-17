@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { READING_SCHEMA, ROW_NAME } from '@vanessa/core';
+import { READING_SCHEMA, ROW_NAME, SECOND_READ_SCHEMA } from '@vanessa/core';
 
-import { MAX_TOKENS, MODEL, VisionFailed, createVision } from '../src/vision.js';
+import {
+  MAX_TOKENS,
+  MODEL,
+  ROSTER_MAX_TOKENS,
+  VisionFailed,
+  createRosterVision,
+  createVision,
+} from '../src/vision.js';
 
 function clientReturning(response: unknown) {
   const sent: any[] = [];
@@ -149,7 +156,48 @@ describe('the prompt and the token budget', () => {
   it('does not ask the model to fill a field the schema no longer requires', () => {
     const required = (READING_SCHEMA.required ?? []) as string[];
     expect(required).not.toContain('others');
-    // The property itself stays, so re-widening the prompt needs no schema work.
-    expect((READING_SCHEMA.properties as Record<string, unknown>).others).toBeDefined();
+    // Nor does it offer the property at all: the other rows have a call of
+    // their own now, and a field the prompt never names invites filling.
+    expect((READING_SCHEMA.properties as Record<string, unknown>).others).toBeUndefined();
+  });
+});
+
+describe('createRosterVision', () => {
+  const ROSTER_RESPONSE = {
+    stop_reason: 'end_turn',
+    content: [{ type: 'text', text: '{"month":8,"year":2026,"rows":[]}' }],
+  };
+
+  // The only configuration measured inside the 60s wall: no reasoning at all.
+  it('asks without reasoning, with its own schema and a smaller budget', async () => {
+    const { client, sent } = clientReturning(ROSTER_RESPONSE);
+    await createRosterVision(client)('AAAA');
+    expect(sent[0].model).toBe(MODEL);
+    expect(sent[0].max_tokens).toBe(ROSTER_MAX_TOKENS);
+    expect(ROSTER_MAX_TOKENS).toBe(4000);
+    expect(sent[0]).not.toHaveProperty('thinking');
+    expect(sent[0].output_config).toEqual({
+      format: { type: 'json_schema', schema: SECOND_READ_SCHEMA },
+    });
+  });
+
+  it('asks for every row, keeping the alignment paragraph of the first reading', async () => {
+    const { client, sent } = clientReturning(ROSTER_RESPONSE);
+    await createRosterVision(client)('AAAA');
+    const text: string = sent[0].messages[0].content.find((c: any) => c.type === 'text').text;
+    expect(text).toContain('TUTTE le righe');
+    expect(text).toContain('usala per allineare le colonne');
+  });
+
+  it('returns the parsed answer', async () => {
+    const { client } = clientReturning(ROSTER_RESPONSE);
+    expect(await createRosterVision(client)('AAAA')).toEqual({ month: 8, year: 2026, rows: [] });
+  });
+
+  it('a truncated answer is a VisionFailed, as in the first reading', async () => {
+    const { client } = clientReturning({ stop_reason: 'max_tokens', content: [] });
+    const e = await createRosterVision(client)('AAAA').catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(VisionFailed);
+    expect((e as VisionFailed).reason).toBe('truncated');
   });
 });

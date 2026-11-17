@@ -360,6 +360,27 @@ describe('rosterFromSecondRead', () => {
     expect(r!.people.map((p) => p.name)).toEqual(['Anna', 'Sara']);
   });
 
+  // November 2026 in production: call 1 answered foundName «Vanessa», call 2
+  // wrote the whole row label «Vanessa Berni». Her 30 days agreed, and the
+  // roster was thrown away all the same because the names were not equal.
+  it('finds her row when call 2 writes her full name and call 1 only the first', () => {
+    const r = rosterFromSecondRead(readingWith('Vanessa'), second(undefined, 'Vanessa Berni'));
+    expect(r).not.toBeNull();
+    expect(r!.people.map((p) => p.name)).toEqual(['Anna', 'Sara']);
+  });
+
+  it('matches whole words only, not a name that merely starts the same', () => {
+    expect(rosterFromSecondRead(readingWith('Vanessa'), second(undefined, 'Vanessandra Berni'))).toBeNull();
+  });
+
+  // Two rows that both carry her name: which one is hers is a guess, and an
+  // unmeasured roster is not kept.
+  it('is null when more than one row carries her name and none is exact', () => {
+    const s = second(undefined, 'Vanessa Berni');
+    const twin = { name: 'Vanessa Rossi', row: 14, codes: herCodes() };
+    expect(rosterFromSecondRead(readingWith('Vanessa'), { ...s, rows: [...s.rows, twin] })).toBeNull();
+  });
+
   // Call 1 can only say L, M, M1, P, P1 or null: an F for her holidays comes
   // back as null there and as F here. Both readings are right.
   it('does not throw the roster away over a code call 1 cannot express', () => {

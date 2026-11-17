@@ -282,11 +282,27 @@ export function rosterFromSecondRead(reading: PhotoReading, second: SecondRead):
   // only compared. Two sources disagreeing is exactly what we want to know.
   if (second.month !== reading.month || second.year !== reading.year) return null;
 
-  const keys = [nameKey(reading.foundName), nameKey(ROW_NAME)];
+  const keys = [nameKey(reading.foundName), nameKey(ROW_NAME)].filter((k) => k !== '');
   let herIndex = -1;
   for (const key of keys) {
     herIndex = second.rows.findIndex((r) => nameKey(r.name) === key);
     if (herIndex !== -1) break;
+  }
+  // The two readings need not spell her the same: call 1 answered «Vanessa»
+  // and call 2 wrote the row label «Vanessa Berni». Failing an exact match,
+  // her row is the one whose name holds every word of a key, as whole words,
+  // provided exactly one row does. Two candidates is a guess, and the
+  // day-by-day comparison below is what decides whether the row is hers.
+  for (const key of herIndex === -1 ? keys : []) {
+    const wanted = key.split(' ');
+    const hits = second.rows.flatMap((r, i) => {
+      const words = new Set(nameKey(r.name).split(' '));
+      return wanted.every((w) => words.has(w)) ? [i] : [];
+    });
+    if (hits.length === 1) {
+      herIndex = hits[0]!;
+      break;
+    }
   }
   // Without her row there is nothing to measure against, and an unmeasured
   // roster is not kept.
